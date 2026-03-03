@@ -1,20 +1,20 @@
 /**
- * API Route — Télécharger le CSV prospects
+ * API Route — Télécharger le CSV prospects depuis Vercel Blob
  */
 
 import { NextResponse } from "next/server";
-import fs from "fs";
-import path from "path";
-
-const CSV_PATH = path.join(process.cwd(), "data", "prospects.csv");
+import { list } from "@vercel/blob";
 
 export async function GET() {
   try {
-    if (!fs.existsSync(CSV_PATH)) {
+    const { blobs } = await list({ prefix: "prospects.csv" });
+    const blob = blobs.find((b) => b.pathname === "prospects.csv");
+    if (!blob) {
       return NextResponse.json({ error: "Aucun fichier CSV. Lancez d'abord la synchronisation." }, { status: 404 });
     }
 
-    const content = fs.readFileSync(CSV_PATH);
+    const res = await fetch(blob.url, { cache: "no-store" });
+    const content = await res.arrayBuffer();
 
     return new NextResponse(content, {
       headers: {

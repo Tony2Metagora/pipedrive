@@ -14,8 +14,7 @@ import {
   getPersonActivities,
 } from "@/lib/pipedrive";
 import { getPipelineName } from "@/lib/config";
-import fs from "fs";
-import path from "path";
+import { put } from "@vercel/blob";
 
 export const maxDuration = 60;
 
@@ -131,7 +130,12 @@ export async function POST() {
       rows.push(...results);
     }
 
-    // 3. Save CSV
+    // 3. Save to Vercel Blob (JSON for API + CSV for download)
+    await put("prospects.json", JSON.stringify(rows), {
+      access: "public",
+      addRandomSuffix: false,
+    });
+
     const headers = ["id", "nom", "prenom", "email", "telephone", "poste", "entreprise", "statut", "pipelines", "notes"];
     const csvLines = [
       headers.join(","),
@@ -139,14 +143,13 @@ export async function POST() {
         headers.map((h) => escapeCsv(String(r[h as keyof ProspectRow] || ""))).join(",")
       ),
     ];
-    const csvContent = csvLines.join("\n");
+    const csvContent = "\uFEFF" + csvLines.join("\n");
 
-    const dataDir = path.join(process.cwd(), "data");
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
-    const csvPath = path.join(dataDir, "prospects.csv");
-    fs.writeFileSync(csvPath, "\uFEFF" + csvContent, "utf-8"); // BOM for Excel
+    await put("prospects.csv", csvContent, {
+      access: "public",
+      addRandomSuffix: false,
+      contentType: "text/csv; charset=utf-8",
+    });
 
     return NextResponse.json({
       success: true,
