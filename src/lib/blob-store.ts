@@ -11,7 +11,7 @@
  * - prospects.json   : tableau de Prospect (déjà existant)
  */
 
-import { put, list, getDownloadUrl } from "@vercel/blob";
+import { put, get } from "@vercel/blob";
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -75,24 +75,27 @@ export interface Note {
 
 async function readBlob<T>(filename: string): Promise<T[]> {
   try {
-    const { blobs } = await list({ prefix: filename });
-    const blob = blobs.find((b) => b.pathname === filename);
-    if (!blob) {
-      console.log(`[Blob] ${filename}: not found in blob store`);
+    const result = await get(filename, { access: "private" });
+    if (!result || result.statusCode !== 200 || !result.stream) {
       return [];
     }
-    console.log(`[Blob] ${filename}: found, size=${blob.size}, url=${blob.url.substring(0, 60)}...`);
-    const downloadUrl = await getDownloadUrl(blob.url);
-    const res = await fetch(downloadUrl, { cache: "no-store" });
-    if (!res.ok) {
-      console.error(`[Blob] ${filename}: fetch failed ${res.status} ${res.statusText}`);
-      return [];
+    const chunks: Uint8Array[] = [];
+    const reader = result.stream.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
     }
-    const data = await res.json();
-    console.log(`[Blob] ${filename}: parsed ${Array.isArray(data) ? data.length : 'non-array'} items`);
-    return data;
-  } catch (err) {
-    console.error(`[Blob] ${filename}: error`, err);
+    const text = new TextDecoder().decode(
+      chunks.reduce((acc, chunk) => {
+        const merged = new Uint8Array(acc.length + chunk.length);
+        merged.set(acc);
+        merged.set(chunk, acc.length);
+        return merged;
+      }, new Uint8Array())
+    );
+    return JSON.parse(text);
+  } catch {
     return [];
   }
 }

@@ -3,7 +3,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { list, getDownloadUrl } from "@vercel/blob";
+import { get } from "@vercel/blob";
 
 function escapeCsv(val: string): string {
   if (val.includes(",") || val.includes('"') || val.includes("\n")) {
@@ -14,15 +14,27 @@ function escapeCsv(val: string): string {
 
 export async function GET() {
   try {
-    const { blobs } = await list({ prefix: "prospects.json" });
-    const blob = blobs.find((b) => b.pathname === "prospects.json");
-    if (!blob) {
+    const result = await get("prospects.json", { access: "private" });
+    if (!result || result.statusCode !== 200 || !result.stream) {
       return NextResponse.json({ error: "Aucun fichier. Importez d'abord un CSV/Excel." }, { status: 404 });
     }
 
-    const downloadUrl = await getDownloadUrl(blob.url);
-    const res = await fetch(downloadUrl, { cache: "no-store" });
-    const rows: Record<string, string>[] = await res.json();
+    const chunks: Uint8Array[] = [];
+    const reader = result.stream.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+    const text = new TextDecoder().decode(
+      chunks.reduce((acc, chunk) => {
+        const merged = new Uint8Array(acc.length + chunk.length);
+        merged.set(acc);
+        merged.set(chunk, acc.length);
+        return merged;
+      }, new Uint8Array())
+    );
+    const rows: Record<string, string>[] = JSON.parse(text);
 
     const headers = ["id", "nom", "prenom", "email", "telephone", "poste", "entreprise", "statut", "pipelines", "notes"];
     const csvLines = [
