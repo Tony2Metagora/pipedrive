@@ -1,11 +1,16 @@
 /**
- * API Route — Import Excel/CSV
- * POST : parse un fichier Excel/CSV et crée les deals dans Pipedrive
+ * API Route — Import Excel/CSV (Blob Storage)
+ * POST : parse un fichier Excel/CSV et crée les deals dans Blob
  */
 
 import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
-import { createOrganization, createPerson, createDeal, createNote } from "@/lib/pipedrive";
+import {
+  createOrganization,
+  createPerson,
+  createDeal,
+  createNote,
+} from "@/lib/blob-store";
 
 interface ImportRow {
   nom?: string;
@@ -28,14 +33,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Fichier manquant" }, { status: 400 });
     }
 
-    // Lire le fichier Excel/CSV
     const buffer = await file.arrayBuffer();
     const workbook = XLSX.read(buffer, { type: "array" });
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
     const rawData = XLSX.utils.sheet_to_json<Record<string, string>>(sheet);
 
-    // Mapper les colonnes (flexible)
     const rows: ImportRow[] = rawData.map((row) => {
       const keys = Object.keys(row);
       const find = (patterns: string[]) =>
@@ -52,48 +55,50 @@ export async function POST(request: Request) {
       };
     });
 
-    // Mode preview (dry run)
     const preview = formData.get("preview");
     if (preview === "true") {
       return NextResponse.json({ data: { rows, count: rows.length } });
     }
 
-    // Créer les deals dans Pipedrive
     const results = [];
     for (const row of rows) {
       try {
         const fullName = [row.prenom, row.nom].filter(Boolean).join(" ") || row.entreprise || "Contact inconnu";
 
-        // 1. Créer l'organisation
         let orgId: number | undefined;
         if (row.entreprise) {
           const org = await createOrganization(row.entreprise);
           orgId = org.id;
         }
 
-        // 2. Créer la personne
         const person = await createPerson({
           name: fullName,
-          email: row.email || undefined,
-          phone: row.telephone || undefined,
-          org_id: orgId,
+          email: row.email ? [{ value: row.email, primary: true }] : [],
+          phone: row.telephone ? [{ value: row.telephone, primary: true }] : [],
+          org_id: orgId || null,
           job_title: row.poste || undefined,
         });
 
-        // 3. Créer le deal
         const deal = await createDeal({
           title: `Metagora – ${row.entreprise || fullName}`,
           person_id: person.id,
-          org_id: orgId,
+          org_id: orgId || null,
           pipeline_id: pipelineId,
           stage_id: stageId,
+          value: 0,
+          currency: "EUR",
+          status: "open",
+          person_name: fullName,
+          org_name: row.entreprise || undefined,
+          participants: [person.id],
         });
 
-        // 4. Ajouter une note si présente
         if (row.notes) {
           await createNote({
             content: row.notes,
             deal_id: deal.id,
+            person_id: person.id,
+            org_id: orgId || null,
           });
         }
 

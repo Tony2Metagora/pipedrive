@@ -1,32 +1,31 @@
 /**
- * API Route — Activité Pipedrive par ID
+ * API Route — Activité par ID (Blob Storage)
  * PUT : marquer comme fait, archiver (deal → lost), ou mettre à jour
+ * DELETE : supprimer une activité
  */
 
 import { NextResponse } from "next/server";
-import { markActivityDone, updateActivity, updateDeal, deleteActivity } from "@/lib/pipedrive";
+import { updateActivity, updateDeal, deleteActivity } from "@/lib/blob-store";
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
     const body = await request.json();
-
-    let activity;
+    const activityId = Number(id);
 
     if (body.archive) {
-      // Archiver : marquer activité done + passer le deal en "lost" si deal existe
-      activity = await markActivityDone(Number(id));
+      const activity = await updateActivity(activityId, { done: true });
       if (body.deal_id) {
         await updateDeal(body.deal_id, { status: "lost", lost_reason: body.lost_reason || "Archivé – pas de potentiel" });
       }
       return NextResponse.json({ data: activity, archived: true });
     } else if (body.done === 1) {
-      activity = await markActivityDone(Number(id));
+      const activity = await updateActivity(activityId, { done: true });
+      return NextResponse.json({ data: activity });
     } else {
-      activity = await updateActivity(Number(id), body);
+      const activity = await updateActivity(activityId, body);
+      return NextResponse.json({ data: activity });
     }
-
-    return NextResponse.json({ data: activity });
   } catch (error) {
     console.error("PUT /api/activities/[id] error:", error);
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });

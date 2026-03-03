@@ -120,9 +120,9 @@ export default function MessageGenerator({ type, dealId, contact, onClose }: Pro
     }
   };
 
-  const openInPipedrive = () => {
+  const openDealPage = () => {
     handleCopy();
-    window.open(`https://metagora.pipedrive.com/deal/${dealId}`, "_blank");
+    window.open(`/deal/${dealId}`, "_blank");
   };
 
   const isEmail = type === "email";
@@ -234,14 +234,14 @@ export default function MessageGenerator({ type, dealId, contact, onClose }: Pro
                 {copied ? "Copié !" : "Copier"}
               </button>
 
-              {/* Copier + ouvrir Pipedrive */}
+              {/* Copier + ouvrir fiche */}
               {isEmail && (
                 <button
-                  onClick={openInPipedrive}
+                  onClick={openDealPage}
                   className="flex items-center gap-2 px-4 py-2 text-sm text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 cursor-pointer"
                 >
                   <ExternalLink className="w-4 h-4" />
-                  Copier & ouvrir Pipedrive
+                  Copier & ouvrir fiche
                 </button>
               )}
 

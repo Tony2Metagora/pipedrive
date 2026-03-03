@@ -1,10 +1,10 @@
 /**
- * API Route — Mise à jour d'un contact Pipedrive
+ * API Route — Mise à jour d'un contact (Blob Storage)
  * PUT : mettre à jour email, téléphone, poste, nom
  */
 
 import { NextResponse } from "next/server";
-import { updatePerson } from "@/lib/pipedrive";
+import { updatePerson } from "@/lib/blob-store";
 
 export async function PUT(
   request: Request,
@@ -15,6 +15,9 @@ export async function PUT(
     const body = await request.json();
 
     const person = await updatePerson(Number(id), body);
+    if (!person) {
+      return NextResponse.json({ error: "Contact non trouvé" }, { status: 404 });
+    }
     return NextResponse.json({ data: person });
   } catch (error) {
     console.error("PUT /api/persons/[id] error:", error);

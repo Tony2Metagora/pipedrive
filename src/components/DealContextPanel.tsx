@@ -372,7 +372,7 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
           <SummaryCard text={summary} />
         ) : (
           <p className="text-[10px] text-purple-400">
-            Cliquer sur Générer pour un résumé IA complet (Pipedrive + Gmail).
+            Cliquer sur Générer pour un résumé IA complet.
           </p>
         )}
       </div>

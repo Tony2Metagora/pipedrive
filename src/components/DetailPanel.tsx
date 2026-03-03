@@ -272,7 +272,7 @@ export default function DetailPanel({ personId, allParticipants, dealId, orgId, 
 
   const primaryEmail = context?.person.email?.[0]?.value;
   const primaryPhone = context?.person.phone?.[0]?.value;
-  const pipedrivePersonLink = `https://metagora.pipedrive.com/person/${personId}`;
+  const personLink = `/deal/${dealId || ""}`;  // Internal link
 
   const enrichViaDropcontact = async () => {
     if (!context) return;
@@ -377,15 +377,15 @@ export default function DetailPanel({ personId, allParticipants, dealId, orgId, 
           <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
             <User className="w-3.5 h-3.5" />
             Contact
-            <a
-              href={pipedrivePersonLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="ml-auto text-gray-400 hover:text-indigo-500"
-              title="Voir dans Pipedrive"
-            >
-              <ExternalLink className="w-3 h-3" />
-            </a>
+            {dealId && (
+              <a
+                href={personLink}
+                className="ml-auto text-gray-400 hover:text-indigo-500"
+                title="Voir la fiche"
+              >
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
           </h4>
           <div className="space-y-1 text-xs text-gray-600">
             <div className="flex items-center gap-1.5">

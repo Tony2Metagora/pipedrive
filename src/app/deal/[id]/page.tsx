@@ -192,13 +192,11 @@ export default function DealPage() {
           )}
         </div>
         <a
-          href={`https://metagora.pipedrive.com/deal/${dealId}`}
-          target="_blank"
-          rel="noopener noreferrer"
+          href="/dashboard"
           className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
         >
           <ExternalLink className="w-4 h-4" />
-          Pipedrive
+          Retour
         </a>
       </div>
 

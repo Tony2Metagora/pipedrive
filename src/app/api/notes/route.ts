@@ -1,15 +1,20 @@
 /**
- * API Route — Notes Pipedrive
+ * API Route — Notes (Blob Storage)
  * POST : créer une note
  */
 
 import { NextResponse } from "next/server";
-import { createNote } from "@/lib/pipedrive";
+import { createNote } from "@/lib/blob-store";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const note = await createNote(body);
+    const note = await createNote({
+      content: body.content || "",
+      deal_id: body.deal_id || null,
+      person_id: body.person_id || null,
+      org_id: body.org_id || null,
+    });
     return NextResponse.json({ data: note });
   } catch (error) {
     console.error("POST /api/notes error:", error);

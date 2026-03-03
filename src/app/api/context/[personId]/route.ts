@@ -1,5 +1,5 @@
 /**
- * API Route — Contexte complet d'un contact Pipedrive
+ * API Route — Contexte complet d'un contact (Blob Storage)
  * GET : récupère personne, organisation, deals, notes, historique activités
  */
 
@@ -7,11 +7,11 @@ import { NextResponse } from "next/server";
 import {
   getPerson,
   getOrganization,
-  getPersonDeals,
-  getPersonActivities,
-  getPersonNotes,
+  getDeals,
+  getActivitiesForPerson,
+  getNotesForPerson,
   getNotesForDeal,
-} from "@/lib/pipedrive";
+} from "@/lib/blob-store";
 
 export async function GET(
   _request: Request,
@@ -25,34 +25,33 @@ export async function GET(
       return NextResponse.json({ error: "personId invalide" }, { status: 400 });
     }
 
-    // Récupérer le contact
     const person = await getPerson(pid);
     if (!person) {
       return NextResponse.json({ error: "Contact non trouvé" }, { status: 404 });
     }
 
-    // Récupérer org, deals, activités, notes en parallèle
-    const [org, deals, activities, personNotes] = await Promise.all([
-      person.org_id ? getOrganization(person.org_id) : null,
-      getPersonDeals(pid),
-      getPersonActivities(pid),
-      getPersonNotes(pid),
+    // Fetch org
+    const org = person.org_id ? await getOrganization(person.org_id) : null;
+
+    // Fetch deals for this person
+    const allDeals = await getDeals();
+    const deals = allDeals.filter(
+      (d) => d.person_id === pid || (d.participants && d.participants.includes(pid))
+    );
+
+    // Fetch activities and notes for this person
+    const [activities, personNotes] = await Promise.all([
+      getActivitiesForPerson(pid),
+      getNotesForPerson(pid),
     ]);
 
-    // Récupérer les notes de chaque deal aussi
+    // Get notes for each deal
     const dealNotes: Record<number, { id: number; content: string }[]> = {};
-    if (deals.length > 0) {
-      const notePromises = deals.slice(0, 10).map(async (deal) => {
-        const notes = await getNotesForDeal(deal.id);
-        return { dealId: deal.id, notes };
-      });
-      const results = await Promise.all(notePromises);
-      for (const r of results) {
-        dealNotes[r.dealId] = r.notes;
-      }
+    for (const deal of deals.slice(0, 10)) {
+      const notes = await getNotesForDeal(deal.id);
+      dealNotes[deal.id] = notes;
     }
 
-    // Séparer activités faites / non faites
     const doneActivities = activities.filter((a) => a.done);
     const pendingActivities = activities.filter((a) => !a.done);
 

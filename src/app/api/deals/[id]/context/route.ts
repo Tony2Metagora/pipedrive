@@ -1,10 +1,10 @@
 /**
- * API Route — Contexte d'une affaire (deal)
+ * API Route — Contexte d'une affaire (deal) (Blob Storage)
  * GET : récupère activités (pending/done) + notes du deal
  */
 
 import { NextResponse } from "next/server";
-import { getActivitiesForDeal, getNotesForDeal } from "@/lib/pipedrive";
+import { getActivitiesForDeal, getNotesForDeal } from "@/lib/blob-store";
 
 export async function GET(
   _request: Request,

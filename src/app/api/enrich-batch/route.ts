@@ -1,13 +1,13 @@
 /**
- * API Route — Enrichissement batch de plusieurs contacts via Dropcontact
+ * API Route — Enrichissement batch de plusieurs contacts via Dropcontact (Blob Storage)
  * POST { personIds: number[] }
- * Récupère chaque personne de Pipedrive, envoie à Dropcontact, met à jour Pipedrive
+ * Récupère chaque personne du Blob, envoie à Dropcontact, met à jour le Blob
  * Retourne les résultats par personId
  */
 
 import { NextResponse } from "next/server";
 import { enrichContact } from "@/lib/dropcontact";
-import { getPerson, getOrganization, updatePerson } from "@/lib/pipedrive";
+import { getPerson, getOrganization, updatePerson } from "@/lib/blob-store";
 
 interface EnrichResult {
   personId: number;
@@ -32,36 +32,25 @@ export async function POST(request: Request) {
 
     const results: EnrichResult[] = [];
 
-    // Process sequentially to avoid Dropcontact rate limits
     for (const personId of personIds) {
       try {
-        // 1. Fetch person from Pipedrive
         const person = await getPerson(personId);
         if (!person) {
           results.push({ personId, personName: "Inconnu", status: "no_person" });
           continue;
         }
 
-        // 2. Get company name from organization
         let company = "";
         if (person.org_id) {
-          const orgId = typeof person.org_id === "object"
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            ? (person.org_id as any).value
-            : person.org_id;
-          if (orgId) {
-            const org = await getOrganization(orgId);
-            company = org?.name || "";
-          }
+          const org = await getOrganization(person.org_id);
+          company = org?.name || "";
         }
 
-        // 3. Parse name
         const nameParts = person.name.split(" ");
         const firstName = nameParts[0] || "";
         const lastName = nameParts.slice(1).join(" ") || "";
         const email = person.email?.[0]?.value || undefined;
 
-        // 4. Enrich via Dropcontact
         console.log(`[Batch Enrich] Processing ${person.name} (${personId})...`);
         const dcResult = await enrichContact({
           first_name: firstName,
@@ -76,25 +65,24 @@ export async function POST(request: Request) {
           continue;
         }
 
-        // 5. Build update payload
-        const pipedriveUpdate: Record<string, string> = {};
+        const blobUpdate: Record<string, unknown> = {};
         const enrichedFields: Record<string, string | undefined> = {};
 
         const bestEmail = dcResult.email?.find((e) => e.qualification === "professional")?.email
           || dcResult.email?.[0]?.email;
         if (bestEmail) {
-          pipedriveUpdate.email = bestEmail;
+          blobUpdate.email = [{ value: bestEmail, primary: true }];
           enrichedFields.email = bestEmail;
         }
 
         const phone = dcResult.mobile_phone || dcResult.phone;
         if (phone) {
-          pipedriveUpdate.phone = phone;
+          blobUpdate.phone = [{ value: phone, primary: true }];
           enrichedFields.phone = phone;
         }
 
         if (dcResult.job) {
-          pipedriveUpdate.job_title = dcResult.job;
+          blobUpdate.job_title = dcResult.job;
           enrichedFields.job_title = dcResult.job;
         }
 
@@ -102,9 +90,8 @@ export async function POST(request: Request) {
           enrichedFields.linkedin = dcResult.linkedin;
         }
 
-        // 6. Update Pipedrive
-        if (Object.keys(pipedriveUpdate).length > 0) {
-          await updatePerson(personId, pipedriveUpdate);
+        if (Object.keys(blobUpdate).length > 0) {
+          await updatePerson(personId, blobUpdate);
         }
 
         results.push({

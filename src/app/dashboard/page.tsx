@@ -594,9 +594,7 @@ function ActivityRow({
     }
   };
 
-  const pipedriveLink = activity.deal_id
-    ? `https://metagora.pipedrive.com/deal/${activity.deal_id}`
-    : `https://metagora.pipedrive.com/activities`;
+  const dealLink = activity.deal_id ? `/deal/${activity.deal_id}` : null;
 
   return (
     <div
@@ -678,9 +676,9 @@ function ActivityRow({
           )}
           Archiver
         </button>
-        {activity.deal_id && (
+        {dealLink && (
           <Link
-            href={`/deal/${activity.deal_id}`}
+            href={dealLink}
             title="Ouvrir la fiche"
             onClick={(e) => e.stopPropagation()}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 hover:border-indigo-300 transition-colors"
@@ -689,17 +687,6 @@ function ActivityRow({
             Fiche
           </Link>
         )}
-        <a
-          href={pipedriveLink}
-          target="_blank"
-          rel="noopener noreferrer"
-          title="Ouvrir dans Pipedrive"
-          onClick={(e) => e.stopPropagation()}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 bg-white hover:bg-gray-50 hover:border-gray-300 transition-colors"
-        >
-          <ExternalLink className="w-3.5 h-3.5" />
-          Pipedrive
-        </a>
       </div>
     </div>
   );
@@ -743,7 +730,7 @@ function DealRow({
   const [loadingParticipants, setLoadingParticipants] = useState(false);
   const [participantsFetched, setParticipantsFetched] = useState(false);
 
-  const pipedriveLink = `https://metagora.pipedrive.com/deal/${deal.id}`;
+  const dealLink = `/deal/${deal.id}`;
 
   const savePipelineStage = async () => {
     setSavingPipeline(true);
@@ -1007,15 +994,13 @@ function DealRow({
             <Archive className="w-3.5 h-3.5" />
             Archiver
           </button>
-          <a
-            href={pipedriveLink}
-            target="_blank"
-            rel="noopener noreferrer"
+          <Link
+            href={dealLink}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 bg-white hover:bg-gray-50 hover:border-gray-300 transition-colors"
           >
             <ExternalLink className="w-3.5 h-3.5" />
-            Pipedrive
-          </a>
+            Fiche
+          </Link>
         </div>
 
         <div className="flex-shrink-0 text-gray-400">

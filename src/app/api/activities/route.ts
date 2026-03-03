@@ -1,18 +1,19 @@
 /**
- * API Route — Activités Pipedrive
+ * API Route — Activités (Blob Storage)
  * GET : liste des activités non faites
  * POST : créer une activité
  */
 
 import { NextResponse } from "next/server";
-import { getActivities, createActivity } from "@/lib/pipedrive";
+import { getActivities, createActivity, type Activity } from "@/lib/blob-store";
 
 export async function GET() {
   try {
-    // Récupère les activités non faites, triées par date d'échéance
-    // Filtre : uniquement celles liées à un deal (affaire)
-    const all = await getActivities({ done: "0", limit: "500", sort: "due_date ASC" });
-    const activities = all.filter((a: { deal_id?: number | null }) => a.deal_id);
+    const all = await getActivities();
+    // Filtre : non faites + liées à un deal, triées par date
+    const activities = all
+      .filter((a) => !a.done && a.deal_id)
+      .sort((a, b) => (a.due_date || "").localeCompare(b.due_date || ""));
     return NextResponse.json({ data: activities });
   } catch (error) {
     console.error("GET /api/activities error:", error);
@@ -23,7 +24,12 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const activity = await createActivity(body);
+    const activity = await createActivity({
+      ...body,
+      type: body.type || "task",
+      done: false,
+      due_time: body.due_time || "",
+    } as Omit<Activity, "id">);
     return NextResponse.json({ data: activity });
   } catch (error) {
     console.error("POST /api/activities error:", error);

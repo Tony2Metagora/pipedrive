@@ -1,10 +1,10 @@
 /**
- * API Route — Participants d'un deal Pipedrive
+ * API Route — Participants d'un deal (Blob Storage)
  * GET : retourne tous les contacts liés à un deal
  */
 
 import { NextResponse } from "next/server";
-import { getDealPersons } from "@/lib/pipedrive";
+import { getDeal, getDealParticipants } from "@/lib/blob-store";
 
 export async function GET(
   _request: Request,
@@ -17,24 +17,22 @@ export async function GET(
       return NextResponse.json({ error: "ID invalide" }, { status: 400 });
     }
 
-    const participants = await getDealPersons(dealId);
+    const deal = await getDeal(dealId);
+    if (!deal) {
+      return NextResponse.json({ error: "Deal non trouvé" }, { status: 404 });
+    }
 
-    // Normalize participants data (Pipedrive may wrap person data differently)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const normalized = participants.map((p: any) => {
-      // Pipedrive participants API returns { person: {...}, active_flag: true, primary_flag: true/false }
-      const person = p.person || p;
-      const personId = person.id || p.id;
-      return {
-        id: personId,
-        name: person.name || p.name || "",
-        email: person.email || p.email || [],
-        phone: person.phone || p.phone || [],
-        org_id: person.org_id || p.org_id || null,
-        job_title: person.job_title || p.job_title || "",
-        primary: p.primary_flag ?? (p.primary !== undefined ? p.primary : true),
-      };
-    });
+    const participants = await getDealParticipants(dealId);
+
+    const normalized = participants.map((p) => ({
+      id: p.id,
+      name: p.name || "",
+      email: p.email || [],
+      phone: p.phone || [],
+      org_id: p.org_id || null,
+      job_title: p.job_title || "",
+      primary: p.id === deal.person_id,
+    }));
 
     return NextResponse.json({ data: normalized });
   } catch (error) {
