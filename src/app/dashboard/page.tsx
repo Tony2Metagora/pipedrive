@@ -103,7 +103,7 @@ export default function DashboardPage() {
         const res = await fetch("/api/migrate/notes", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ offset, limit }),
+          body: JSON.stringify({ offset, limit, force: true }),
         });
         const json = await res.json();
         if (!json.success) {

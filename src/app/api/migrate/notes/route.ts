@@ -8,9 +8,29 @@
 import { NextResponse } from "next/server";
 import {
   getAllDeals as getAllPipedriveDeals,
-  getActivitiesForDeal as getPipedriveActivitiesForDeal,
   getNotesForDeal as getPipedriveNotesForDeal,
 } from "@/lib/pipedrive";
+
+const PD_TOKEN = process.env.PIPEDRIVE_API_TOKEN!;
+const PD_BASE = "https://api.pipedrive.com/v1";
+
+// Get ALL activities for a deal (done + undone) from Pipedrive
+async function getAllActivitiesForDeal(dealId: number) {
+  const results = [];
+  // Fetch undone
+  try {
+    const res1 = await fetch(`${PD_BASE}/deals/${dealId}/activities?api_token=${PD_TOKEN}&done=0&limit=100`, { cache: "no-store" });
+    const json1 = await res1.json();
+    if (json1.data) results.push(...json1.data);
+  } catch { /* skip */ }
+  // Fetch done
+  try {
+    const res2 = await fetch(`${PD_BASE}/deals/${dealId}/activities?api_token=${PD_TOKEN}&done=1&limit=100`, { cache: "no-store" });
+    const json2 = await res2.json();
+    if (json2.data) results.push(...json2.data);
+  } catch { /* skip */ }
+  return results;
+}
 import {
   getDeals,
   getActivities,
@@ -28,6 +48,7 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}));
     const offset = Number(body.offset) || 0;
     const limit = Number(body.limit) || 10;
+    const force = !!body.force; // force re-import even if already has data
 
     // 1. Get all blob deals
     const blobDeals = await getDeals();
@@ -48,8 +69,15 @@ export async function POST(request: Request) {
     }
 
     // 3. Load existing blob data
-    const existingActivities = await getActivities();
-    const existingNotes = await getNotes();
+    let existingActivities = await getActivities();
+    let existingNotes = await getNotes();
+
+    // If force mode, remove existing data for deals in this batch to avoid duplicates
+    if (force) {
+      const batchDealIds = new Set(batch.map((d) => d.id));
+      existingActivities = existingActivities.filter((a) => !batchDealIds.has(a.deal_id!));
+      existingNotes = existingNotes.filter((n) => !batchDealIds.has(n.deal_id!));
+    }
 
     let maxActivityId = existingActivities.reduce((max, a) => Math.max(max, a.id), 0);
     let maxNoteId = existingNotes.reduce((max, n) => Math.max(max, n.id), 0);
@@ -69,14 +97,14 @@ export async function POST(request: Request) {
       matched++;
 
       // Check if we already imported notes/activities for this blob deal
-      const alreadyHasNotes = existingNotes.some((n) => n.deal_id === blobDeal.id);
-      const alreadyHasActivities = existingActivities.some((a) => a.deal_id === blobDeal.id);
+      const alreadyHasNotes = !force && existingNotes.some((n) => n.deal_id === blobDeal.id);
+      const alreadyHasActivities = !force && existingActivities.some((a) => a.deal_id === blobDeal.id);
       if (alreadyHasNotes && alreadyHasActivities) continue;
 
       try {
         // Fetch activities from Pipedrive
         if (!alreadyHasActivities) {
-          const pdActivities = await getPipedriveActivitiesForDeal(pdDealId);
+          const pdActivities = await getAllActivitiesForDeal(pdDealId);
           for (const a of pdActivities) {
             newActivities.push({
               id: ++maxActivityId,
