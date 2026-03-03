@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import {
-  RefreshCw,
   Search,
   Users,
   Download,
@@ -11,6 +10,7 @@ import {
   Check,
   X,
   Filter,
+  Upload,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -30,13 +30,14 @@ interface Prospect {
 export default function ProspectsPage() {
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [loading, setLoading] = useState(true);
-  const [extracting, setExtracting] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "en cours" | "perdu">("all");
   const [pipelineFilter, setPipelineFilter] = useState<string>("all");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editData, setEditData] = useState<Partial<Prospect>>({});
   const [saving, setSaving] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchProspects = useCallback(async () => {
     setLoading(true);
@@ -55,21 +56,26 @@ export default function ProspectsPage() {
     fetchProspects();
   }, [fetchProspects]);
 
-  const extractFromPipedrive = async () => {
-    setExtracting(true);
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
     try {
-      const res = await fetch("/api/prospects/extract", { method: "POST" });
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/prospects/upload", { method: "POST", body: formData });
       const json = await res.json();
       if (json.data) {
         setProspects(json.data);
       } else {
-        alert("Erreur lors de l'extraction : " + (json.error || "inconnue"));
+        alert("Erreur lors de l'import : " + (json.error || "inconnue"));
       }
     } catch (err) {
-      console.error("Erreur extraction:", err);
-      alert("Erreur lors de l'extraction");
+      console.error("Erreur upload:", err);
+      alert("Erreur lors de l'import du fichier");
     } finally {
-      setExtracting(false);
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -176,17 +182,24 @@ export default function ProspectsPage() {
             <Download className="w-4 h-4" />
             Télécharger CSV
           </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv"
+            onChange={handleUpload}
+            className="hidden"
+          />
           <button
-            onClick={extractFromPipedrive}
-            disabled={extracting}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 cursor-pointer shadow-sm"
           >
-            {extracting ? (
+            {uploading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
-              <RefreshCw className="w-4 h-4" />
+              <Upload className="w-4 h-4" />
             )}
-            {extracting ? "Extraction..." : "Synchroniser Pipedrive"}
+            {uploading ? "Import en cours..." : "Importer un CSV"}
           </button>
         </div>
       </div>
@@ -236,7 +249,7 @@ export default function ProspectsPage() {
         <div className="text-center py-20 bg-white rounded-lg border border-gray-200">
           <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
           <p className="text-lg font-medium text-gray-600">Aucun prospect</p>
-          <p className="text-sm text-gray-400 mt-1">Cliquez sur &quot;Synchroniser Pipedrive&quot; pour importer vos contacts.</p>
+          <p className="text-sm text-gray-400 mt-1">Cliquez sur &quot;Importer un CSV&quot; pour charger vos contacts.</p>
         </div>
       ) : (
         <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
