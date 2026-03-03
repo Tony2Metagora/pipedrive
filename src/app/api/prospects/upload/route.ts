@@ -243,7 +243,7 @@ export async function POST(request: Request) {
 
     // Store in Vercel Blob
     await put("prospects.json", JSON.stringify(rows), {
-      access: "public",
+      access: "private",
       addRandomSuffix: false,
     });
 

@@ -5,7 +5,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { put, list } from "@vercel/blob";
+import { put, list, getDownloadUrl } from "@vercel/blob";
 
 interface ProspectRow {
   id: string;
@@ -25,7 +25,8 @@ async function readProspects(): Promise<ProspectRow[]> {
     const { blobs } = await list({ prefix: "prospects.json" });
     const blob = blobs.find((b) => b.pathname === "prospects.json");
     if (!blob) return [];
-    const res = await fetch(blob.url, { cache: "no-store" });
+    const downloadUrl = await getDownloadUrl(blob.url);
+    const res = await fetch(downloadUrl, { cache: "no-store" });
     return await res.json();
   } catch {
     return [];
@@ -34,7 +35,7 @@ async function readProspects(): Promise<ProspectRow[]> {
 
 async function writeProspects(rows: ProspectRow[]) {
   await put("prospects.json", JSON.stringify(rows), {
-    access: "public",
+    access: "private",
     addRandomSuffix: false,
   });
 }
