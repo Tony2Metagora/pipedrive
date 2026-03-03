@@ -10,13 +10,56 @@ import {
   getAllPersons,
   getAllDeals,
   getAllOrganizations,
-  getPersonNotes,
-  getPersonActivities,
 } from "@/lib/pipedrive";
 import { getPipelineName } from "@/lib/config";
 import { put } from "@vercel/blob";
 
 export const maxDuration = 60;
+
+const API_TOKEN = process.env.PIPEDRIVE_API_TOKEN!;
+const BASE_URL = "https://api.pipedrive.com/v1";
+
+async function getAllActivities() {
+  const all: { id: number; subject: string; type: string; due_date: string; done: boolean; person_id: number | null }[] = [];
+  let start = 0;
+  const limit = 500;
+  while (true) {
+    const url = new URL(`${BASE_URL}/activities`);
+    url.searchParams.set("api_token", API_TOKEN);
+    url.searchParams.set("start", String(start));
+    url.searchParams.set("limit", String(limit));
+    const res = await fetch(url.toString(), { cache: "no-store" });
+    if (!res.ok) break;
+    const json = await res.json();
+    const data = json.data;
+    if (!data || !Array.isArray(data) || data.length === 0) break;
+    all.push(...data);
+    if (!json.additional_data?.pagination?.more_items_in_collection) break;
+    start += limit;
+  }
+  return all;
+}
+
+async function getAllNotes() {
+  const all: { id: number; content: string; person_id: number | null; add_time: string }[] = [];
+  let start = 0;
+  const limit = 500;
+  while (true) {
+    const url = new URL(`${BASE_URL}/notes`);
+    url.searchParams.set("api_token", API_TOKEN);
+    url.searchParams.set("start", String(start));
+    url.searchParams.set("limit", String(limit));
+    const res = await fetch(url.toString(), { cache: "no-store" });
+    if (!res.ok) break;
+    const json = await res.json();
+    const data = json.data;
+    if (!data || !Array.isArray(data) || data.length === 0) break;
+    all.push(...data);
+    if (!json.additional_data?.pagination?.more_items_in_collection) break;
+    start += limit;
+  }
+  return all;
+}
 
 interface ProspectRow {
   id: number;
@@ -75,60 +118,70 @@ export async function POST() {
       }
     }
 
-    // 2. For each person, fetch notes + activities (batched with concurrency limit)
-    const rows: ProspectRow[] = [];
-    const batchSize = 10;
+    // 2. Fetch ALL notes and activities in bulk (avoid N*2 API calls per person)
+    const [allActivities, allNotes] = await Promise.all([
+      getAllActivities(),
+      getAllNotes(),
+    ]);
 
-    for (let i = 0; i < persons.length; i += batchSize) {
-      const batch = persons.slice(i, i + batchSize);
-      const results = await Promise.all(
-        batch.map(async (person) => {
-          const [notes, activities] = await Promise.all([
-            getPersonNotes(person.id),
-            getPersonActivities(person.id),
-          ]);
-
-          // Statut: au moins 1 deal open → en cours, sinon → perdu
-          const personDeals = dealsByPerson.get(person.id) || [];
-          const hasOpenDeal = personDeals.some((d) => d.status === "open");
-          const statut = hasOpenDeal ? "en cours" : "perdu";
-
-          // Pipelines associés
-          const pipelineIds = [...new Set(personDeals.map((d) => d.pipeline_id))];
-          const pipelinesStr = pipelineIds.map((pid) => getPipelineName(pid)).join(", ");
-
-          // Notes column: dernière note + 3 dernières tâches validées
-          const lastNote = notes.length > 0 ? cleanHtml(notes[0].content) : "";
-          const doneActivities = activities
-            .filter((a) => a.done)
-            .sort((a, b) => (b.due_date || "").localeCompare(a.due_date || ""))
-            .slice(0, 3)
-            .map((a) => `[${a.due_date}] ${a.subject}`)
-            .join(" | ");
-
-          const noteColumn = [lastNote, doneActivities].filter(Boolean).join(" /// ");
-
-          const { nom, prenom } = splitName(person.name);
-          const primaryEmail = person.email?.find((e) => e.primary)?.value || person.email?.[0]?.value || "";
-          const primaryPhone = person.phone?.find((p) => p.primary)?.value || person.phone?.[0]?.value || "";
-          const orgName = person.org_id ? (orgMap.get(person.org_id) || "") : "";
-
-          return {
-            id: person.id,
-            nom,
-            prenom,
-            email: primaryEmail,
-            telephone: primaryPhone,
-            poste: person.job_title || "",
-            entreprise: orgName,
-            statut,
-            pipelines: pipelinesStr,
-            notes: noteColumn,
-          };
-        })
-      );
-      rows.push(...results);
+    // Index by person_id
+    const notesByPerson = new Map<number, typeof allNotes>();
+    for (const note of allNotes) {
+      if (note.person_id) {
+        const arr = notesByPerson.get(note.person_id) || [];
+        arr.push(note);
+        notesByPerson.set(note.person_id, arr);
+      }
     }
+    const activitiesByPerson = new Map<number, typeof allActivities>();
+    for (const act of allActivities) {
+      if (act.person_id) {
+        const arr = activitiesByPerson.get(act.person_id) || [];
+        arr.push(act);
+        activitiesByPerson.set(act.person_id, arr);
+      }
+    }
+
+    // 3. Build rows
+    const rows: ProspectRow[] = persons.map((person) => {
+      const notes = notesByPerson.get(person.id) || [];
+      const activities = activitiesByPerson.get(person.id) || [];
+
+      const personDeals = dealsByPerson.get(person.id) || [];
+      const hasOpenDeal = personDeals.some((d) => d.status === "open");
+      const statut = hasOpenDeal ? "en cours" : "perdu";
+
+      const pipelineIds = [...new Set(personDeals.map((d) => d.pipeline_id))];
+      const pipelinesStr = pipelineIds.map((pid) => getPipelineName(pid)).join(", ");
+
+      const lastNote = notes.length > 0 ? cleanHtml(notes[0].content) : "";
+      const doneActivities = activities
+        .filter((a) => a.done)
+        .sort((a, b) => (b.due_date || "").localeCompare(a.due_date || ""))
+        .slice(0, 3)
+        .map((a) => `[${a.due_date}] ${a.subject}`)
+        .join(" | ");
+
+      const noteColumn = [lastNote, doneActivities].filter(Boolean).join(" /// ");
+
+      const { nom, prenom } = splitName(person.name);
+      const primaryEmail = person.email?.find((e) => e.primary)?.value || person.email?.[0]?.value || "";
+      const primaryPhone = person.phone?.find((p) => p.primary)?.value || person.phone?.[0]?.value || "";
+      const orgName = person.org_id ? (orgMap.get(person.org_id) || "") : "";
+
+      return {
+        id: person.id,
+        nom,
+        prenom,
+        email: primaryEmail,
+        telephone: primaryPhone,
+        poste: person.job_title || "",
+        entreprise: orgName,
+        statut,
+        pipelines: pipelinesStr,
+        notes: noteColumn,
+      };
+    });
 
     // 3. Save to Vercel Blob (JSON for API + CSV for download)
     await put("prospects.json", JSON.stringify(rows), {
@@ -156,8 +209,9 @@ export async function POST() {
       count: rows.length,
       data: rows,
     });
-  } catch (error) {
-    console.error("POST /api/prospects/extract error:", error);
-    return NextResponse.json({ error: "Erreur extraction" }, { status: 500 });
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error("POST /api/prospects/extract error:", msg);
+    return NextResponse.json({ error: `Erreur extraction: ${msg}` }, { status: 500 });
   }
 }
