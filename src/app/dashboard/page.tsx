@@ -744,14 +744,20 @@ function DealRow({
     const newValue = Number(valueInput) || 0;
     setSavingValue(true);
     try {
-      await fetch(`/api/deals/${deal.id}`, {
+      const res = await fetch(`/api/deals/${deal.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value: newValue }),
+        body: JSON.stringify({ value: String(newValue) }),
       });
-      deal.value = newValue;
-      setEditingValue(false);
-      onDealUpdated?.();
+      const json = await res.json();
+      if (!res.ok) {
+        console.error("Erreur API mise à jour valeur:", json);
+      } else {
+        deal.value = newValue;
+        deal.currency = deal.currency || "EUR";
+        setEditingValue(false);
+        onDealUpdated?.();
+      }
     } catch (err) {
       console.error("Erreur mise à jour valeur:", err);
     } finally {

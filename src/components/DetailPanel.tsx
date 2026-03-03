@@ -143,9 +143,6 @@ export default function DetailPanel({ personId, allParticipants, dealId, orgId, 
   const [editingLinkedin, setEditingLinkedin] = useState(false);
   const [newLinkedin, setNewLinkedin] = useState("");
   const [showMessagePanel, setShowMessagePanel] = useState(false);
-  const [editingValue, setEditingValue] = useState<number | null>(null);
-  const [editValueInput, setEditValueInput] = useState("");
-  const [savingValue, setSavingValue] = useState(false);
 
   useEffect(() => {
     const fetchContext = async () => {
@@ -350,26 +347,6 @@ export default function DetailPanel({ personId, allParticipants, dealId, orgId, 
       console.error(`Erreur mise à jour ${field}:`, err);
     } finally {
       setSaving(false);
-    }
-  };
-
-  const saveDealValue = async (dId: number, newValue: number) => {
-    setSavingValue(true);
-    try {
-      await fetch(`/api/deals/${dId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value: newValue }),
-      });
-      if (context) {
-        const updated = { ...context, deals: context.deals.map((d) => d.id === dId ? { ...d, value: newValue } : d) };
-        setContext(updated);
-      }
-      setEditingValue(null);
-    } catch (err) {
-      console.error("Erreur mise à jour valeur:", err);
-    } finally {
-      setSavingValue(false);
     }
   };
 
@@ -621,83 +598,8 @@ export default function DetailPanel({ personId, allParticipants, dealId, orgId, 
         />
       )}
 
-      {/* Ligne 2 : Deals + Notes + Historique en colonnes compactes */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        {/* Deals */}
-        <div className="bg-white rounded-lg border border-gray-200 p-3">
-          <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
-            <TrendingUp className="w-3.5 h-3.5" />
-            Deals ({context.deals.length})
-          </h4>
-          {context.deals.length > 0 ? (
-            <div className="space-y-1.5">
-              {context.deals.map((deal) => (
-                <div
-                  key={deal.id}
-                  className="p-2 rounded border border-gray-100 hover:border-indigo-200 hover:bg-indigo-50/50 transition-colors"
-                >
-                  <a href={`/deal/${deal.id}`} className="block">
-                    <p className="text-xs font-medium text-gray-900 truncate">{deal.title}</p>
-                    <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-gray-500">
-                      <span>{getStageName(deal.stage_id)}</span>
-                      <span className={cn(
-                        "px-1 py-0.5 rounded font-medium",
-                        deal.status === "open" ? "bg-green-100 text-green-700" :
-                        deal.status === "won" ? "bg-blue-100 text-blue-700" :
-                        deal.status === "lost" ? "bg-red-100 text-red-700" :
-                        "bg-gray-100 text-gray-600"
-                      )}>
-                        {deal.status}
-                      </span>
-                    </div>
-                  </a>
-                  <div className="flex items-center gap-1.5 mt-1">
-                    <DollarSign className="w-3 h-3 text-gray-400" />
-                    {editingValue === deal.id ? (
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="number"
-                          min={0}
-                          step={100}
-                          value={editValueInput}
-                          onChange={(e) => setEditValueInput(e.target.value)}
-                          className="w-20 px-1.5 py-0.5 border border-gray-300 rounded text-[10px] focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
-                          autoFocus
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") saveDealValue(deal.id, Number(editValueInput) || 0);
-                            if (e.key === "Escape") setEditingValue(null);
-                          }}
-                        />
-                        <span className="text-[10px] text-gray-400">€</span>
-                        <button
-                          onClick={() => saveDealValue(deal.id, Number(editValueInput) || 0)}
-                          disabled={savingValue}
-                          className="p-0.5 text-green-600 hover:text-green-700 disabled:opacity-40 cursor-pointer"
-                        >
-                          {savingValue ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-                        </button>
-                        <button onClick={() => setEditingValue(null)} className="p-0.5 text-gray-400 hover:text-gray-600 cursor-pointer">
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={(e) => { e.preventDefault(); setEditingValue(deal.id); setEditValueInput(String(deal.value || 0)); }}
-                        className="text-[10px] text-emerald-600 font-medium hover:text-emerald-800 cursor-pointer"
-                        title="Modifier la valeur"
-                      >
-                        {deal.value > 0 ? `${deal.value.toLocaleString("fr-FR")} €` : "Ajouter valeur"}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-[10px] text-gray-400">Aucun deal</p>
-          )}
-        </div>
-
+      {/* Ligne 2 : Notes + Historique en colonnes compactes */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {/* Notes */}
         <div className="bg-white rounded-lg border border-gray-200 p-3">
           <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
