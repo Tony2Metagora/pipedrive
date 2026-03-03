@@ -29,6 +29,7 @@ import { PIPELINES, getPipelineName, getStageName, getStagesForPipeline } from "
 import NewActivityModal from "@/components/NewActivityModal";
 import ArchiveModal from "@/components/ArchiveModal";
 import DetailPanel from "@/components/DetailPanel";
+import DealContextPanel from "@/components/DealContextPanel";
 
 interface Activity {
   id: number;
@@ -1071,7 +1072,7 @@ function DealRow({
             </div>
           )}
 
-          {/* Participants */}
+          {/* Contacts */}
           {loadingParticipants && (
             <div className="px-4 py-3 flex items-center gap-2 text-xs text-gray-400">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -1086,25 +1087,47 @@ function DealRow({
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {participants.map((p) => (
-                  <span
+                  <button
                     key={p.id}
+                    onClick={async () => {
+                      if (p.primary) return;
+                      try {
+                        await fetch(`/api/deals/${deal.id}`, {
+                          method: "PUT",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ person_id: p.id }),
+                        });
+                        setParticipants((prev) =>
+                          prev.map((pp) => ({ ...pp, primary: pp.id === p.id }))
+                        );
+                        deal.person_id = p.id;
+                        deal.person_name = p.name;
+                        onDealUpdated?.();
+                      } catch (err) {
+                        console.error("Erreur changement contact principal:", err);
+                      }
+                    }}
                     className={cn(
-                      "inline-flex items-center gap-1 px-2 py-0.5 text-[10px] rounded-full border",
+                      "inline-flex items-center gap-1 px-2 py-0.5 text-[10px] rounded-full border cursor-pointer transition-colors",
                       p.primary
                         ? "bg-indigo-100 border-indigo-300 text-indigo-800 font-semibold"
-                        : "bg-white border-gray-200 text-gray-600"
+                        : "bg-white border-gray-200 text-gray-600 hover:bg-indigo-50 hover:border-indigo-200"
                     )}
+                    title={p.primary ? "Contact principal" : "Cliquer pour définir comme contact principal"}
                   >
-                    {p.primary && <span className="text-[8px]">★</span>}
+                    {p.primary ? <span className="text-[8px]">★</span> : <span className="text-[8px]">☆</span>}
                     {p.name}
                     {p.job_title && <span className="text-gray-400 font-normal">({p.job_title})</span>}
-                  </span>
+                    <span className={cn("text-[8px] ml-0.5", p.primary ? "text-indigo-500" : "text-gray-400")}>
+                      {p.primary ? "principal" : "secondaire"}
+                    </span>
+                  </button>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Contact detail panel — show primary contact first, then others */}
+          {/* Contact detail panels — contact info only */}
           {participantsFetched && participants.length > 0 ? (
             <>
               {participants
@@ -1138,6 +1161,16 @@ function DealRow({
               Aucun contact associé à cette affaire
             </div>
           ) : null}
+
+          {/* Notes / Tâches / Historique — au niveau de l'affaire */}
+          <DealContextPanel
+            dealId={deal.id}
+            personId={deal.person_id ?? undefined}
+            orgId={deal.org_id}
+            personName={deal.person_name}
+            orgName={deal.org_name}
+            onActivityChanged={onTaskCreated}
+          />
         </div>
       )}
     </div>

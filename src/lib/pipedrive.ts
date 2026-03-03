@@ -299,7 +299,7 @@ export async function markActivityDone(id: number): Promise<PipedriveActivity> {
 
 export async function updateActivity(
   id: number,
-  data: Partial<{ subject: string; due_date: string; due_time: string; done: number; note: string }>
+  data: Partial<{ subject: string; type: string; due_date: string; due_time: string; done: number; note: string }>
 ): Promise<PipedriveActivity> {
   return apiPut<PipedriveActivity>(`activities/${id}`, data);
 }
