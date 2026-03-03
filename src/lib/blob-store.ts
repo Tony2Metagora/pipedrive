@@ -77,11 +77,22 @@ async function readBlob<T>(filename: string): Promise<T[]> {
   try {
     const { blobs } = await list({ prefix: filename });
     const blob = blobs.find((b) => b.pathname === filename);
-    if (!blob) return [];
+    if (!blob) {
+      console.log(`[Blob] ${filename}: not found in blob store`);
+      return [];
+    }
+    console.log(`[Blob] ${filename}: found, size=${blob.size}, url=${blob.url.substring(0, 60)}...`);
     const downloadUrl = await getDownloadUrl(blob.url);
     const res = await fetch(downloadUrl, { cache: "no-store" });
-    return await res.json();
-  } catch {
+    if (!res.ok) {
+      console.error(`[Blob] ${filename}: fetch failed ${res.status} ${res.statusText}`);
+      return [];
+    }
+    const data = await res.json();
+    console.log(`[Blob] ${filename}: parsed ${Array.isArray(data) ? data.length : 'non-array'} items`);
+    return data;
+  } catch (err) {
+    console.error(`[Blob] ${filename}: error`, err);
     return [];
   }
 }

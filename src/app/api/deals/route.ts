@@ -14,9 +14,11 @@ export async function GET(request: Request) {
     const status = searchParams.get("status");
 
     let deals = await getDeals();
+    console.log(`[GET /api/deals] ${deals.length} deals loaded from Blob, status filter: ${status}`);
 
     if (status) {
       deals = deals.filter((d) => d.status === status);
+      console.log(`[GET /api/deals] ${deals.length} deals after status filter`);
     }
 
     if (search) {
