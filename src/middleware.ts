@@ -1,13 +1,15 @@
 /**
- * Middleware NextAuth v5 — protège toutes les routes sauf /login et /api/auth.
+ * Middleware — protège toutes les routes sauf /login et /api/auth.
+ * Vérifie la présence du cookie de session NextAuth.
  */
 
-import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
-export default auth((req) => {
+export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
+  // Routes publiques
   if (
     pathname.startsWith("/login") ||
     pathname.startsWith("/api/auth") ||
@@ -17,13 +19,20 @@ export default auth((req) => {
     return NextResponse.next();
   }
 
-  if (!req.auth) {
+  // Vérifier le cookie de session NextAuth
+  const sessionToken =
+    req.cookies.get("__Secure-authjs.session-token") ||
+    req.cookies.get("authjs.session-token") ||
+    req.cookies.get("__Secure-next-auth.session-token") ||
+    req.cookies.get("next-auth.session-token");
+
+  if (!sessionToken) {
     const loginUrl = new URL("/login", req.url);
     return NextResponse.redirect(loginUrl);
   }
 
   return NextResponse.next();
-});
+}
 
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
