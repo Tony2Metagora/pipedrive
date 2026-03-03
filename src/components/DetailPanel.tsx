@@ -21,6 +21,9 @@ import {
   MessageSquare,
   DollarSign,
   X,
+  Calendar,
+  Trash2,
+  CheckCircle,
 } from "lucide-react";
 import { cn, formatDate } from "@/lib/utils";
 import { getPipelineName, getStageName } from "@/lib/config";
@@ -527,15 +530,12 @@ export default function DetailPanel({ personId, allParticipants, dealId, orgId, 
           </div>
         </div>
 
-        {/* Résumé IA unifié */}
+        {/* Notes (ex Résumé IA) — dernières notes + Générer IA */}
         <div className="bg-purple-50 rounded-lg border border-purple-200 p-3">
           <div className="flex items-center justify-between mb-2">
             <h4 className="text-xs font-semibold text-purple-700 uppercase tracking-wide flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5" />
-              Résumé IA
-              {emailCount > 0 && (
-                <span className="text-[9px] font-normal text-purple-400">({emailCount} emails Gmail inclus)</span>
-              )}
+              <StickyNote className="w-3.5 h-3.5" />
+              Notes
             </h4>
             <div className="flex items-center gap-1.5">
               {summary && (
@@ -572,6 +572,25 @@ export default function DetailPanel({ personId, allParticipants, dealId, orgId, 
               </button>
             </div>
           </div>
+          {/* Dernières notes */}
+          {(() => {
+            const allNotes = [...context.notes, ...Object.values(context.dealNotes).flat()];
+            if (allNotes.length > 0) {
+              return (
+                <div className="space-y-1.5 mb-2">
+                  {allNotes.slice(0, 2).map((note) => (
+                    <div
+                      key={note.id}
+                      className="p-2 bg-yellow-50 border border-yellow-100 rounded text-[10px] text-gray-700 leading-relaxed line-clamp-3"
+                      dangerouslySetInnerHTML={{ __html: note.content }}
+                    />
+                  ))}
+                </div>
+              );
+            }
+            return null;
+          })()}
+          {/* Résumé IA généré */}
           {summary ? (
             <SummaryCard text={summary} color="purple" />
           ) : (
@@ -598,53 +617,95 @@ export default function DetailPanel({ personId, allParticipants, dealId, orgId, 
         />
       )}
 
-      {/* Ligne 2 : Notes + Historique en colonnes compactes */}
+      {/* Ligne 2 : Tâches + Historique */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {/* Notes */}
+        {/* Tâches à faire */}
         <div className="bg-white rounded-lg border border-gray-200 p-3">
           <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
-            <StickyNote className="w-3.5 h-3.5" />
-            Notes
+            <CheckCircle className="w-3.5 h-3.5" />
+            Tâches ({context.activities.pending.length})
           </h4>
-          {(() => {
-            const allNotes = [...context.notes, ...Object.values(context.dealNotes).flat()];
-            if (allNotes.length === 0) return <p className="text-[10px] text-gray-400">Aucune note</p>;
-            return (
-              <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                {allNotes.slice(0, 5).map((note) => (
-                  <div
-                    key={note.id}
-                    className="p-2 bg-yellow-50 border border-yellow-100 rounded text-[10px] text-gray-700 leading-relaxed line-clamp-3"
-                    dangerouslySetInnerHTML={{ __html: note.content }}
-                  />
-                ))}
-              </div>
-            );
-          })()}
+          <div className="space-y-1.5 max-h-40 overflow-y-auto">
+            {context.activities.pending.length === 0 && (
+              <p className="text-[10px] text-gray-400">Aucune tâche en attente</p>
+            )}
+            {context.activities.pending.map((a) => {
+              const TypeIcon = ({ call: Phone, email: Mail, sms: MessageSquare, meeting: Calendar, task: CheckCircle } as Record<string, typeof Phone>)[a.type] || CheckCircle;
+              return (
+                <div key={a.id} className="flex items-center gap-1.5 text-[10px] p-2 rounded-lg bg-amber-50 border border-amber-100 group">
+                  <TypeIcon className="w-3 h-3 text-amber-600 flex-shrink-0" />
+                  <span className="flex-1 truncate font-medium text-gray-700">{a.subject}</span>
+                  <span className="text-gray-400 flex-shrink-0 text-[9px]">{formatDate(a.due_date)}</span>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await fetch(`/api/activities/${a.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ done: 1 }) });
+                        setContext((prev) => {
+                          if (!prev) return prev;
+                          const task = prev.activities.pending.find((t) => t.id === a.id);
+                          return {
+                            ...prev,
+                            activities: {
+                              pending: prev.activities.pending.filter((t) => t.id !== a.id),
+                              done: task ? [{ ...task, done: true }, ...prev.activities.done] : prev.activities.done,
+                            },
+                          };
+                        });
+                        onActivityCreated?.();
+                      } catch (err) { console.error("Erreur marquer done:", err); }
+                    }}
+                    className="p-0.5 text-green-500 hover:text-green-700 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                    title="Marquer comme effectué"
+                  >
+                    <CheckCheck className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!confirm("Supprimer cette tâche ?")) return;
+                      try {
+                        await fetch(`/api/activities/${a.id}`, { method: "DELETE" });
+                        setContext((prev) => {
+                          if (!prev) return prev;
+                          return {
+                            ...prev,
+                            activities: {
+                              ...prev.activities,
+                              pending: prev.activities.pending.filter((t) => t.id !== a.id),
+                            },
+                          };
+                        });
+                        onActivityCreated?.();
+                      } catch (err) { console.error("Erreur suppression:", err); }
+                    }}
+                    className="p-0.5 text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                    title="Supprimer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
-        {/* Historique */}
+        {/* Historique — 3 derniers */}
         <div className="bg-white rounded-lg border border-gray-200 p-3">
           <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
             <Clock className="w-3.5 h-3.5" />
-            Historique ({context.activities.pending.length + context.activities.done.length})
+            Historique ({context.activities.done.length})
           </h4>
           <div className="space-y-1 max-h-32 overflow-y-auto">
-            {context.activities.pending.map((a) => (
-              <div key={a.id} className="flex items-center gap-1.5 text-[10px] p-1.5 rounded bg-amber-50 border border-amber-100">
-                <Clock className="w-2.5 h-2.5 text-amber-500 flex-shrink-0" />
-                <span className="flex-1 truncate">{a.subject}</span>
-                <span className="text-gray-400 flex-shrink-0">{formatDate(a.due_date)}</span>
-              </div>
-            ))}
-            {context.activities.done.slice(0, 8).map((a) => (
-              <div key={a.id} className="flex items-center gap-1.5 text-[10px] p-1.5 rounded bg-gray-50 border border-gray-100 text-gray-400">
-                <CheckCheck className="w-2.5 h-2.5 text-green-400 flex-shrink-0" />
-                <span className="flex-1 truncate">{a.subject}</span>
-                <span className="flex-shrink-0">{formatDate(a.due_date)}</span>
-              </div>
-            ))}
-            {context.activities.pending.length === 0 && context.activities.done.length === 0 && (
+            {context.activities.done.slice(0, 3).map((a) => {
+              const TypeIcon = ({ call: Phone, email: Mail, sms: MessageSquare, meeting: Calendar, task: CheckCircle } as Record<string, typeof Phone>)[a.type] || CheckCheck;
+              return (
+                <div key={a.id} className="flex items-center gap-1.5 text-[10px] p-1.5 rounded bg-gray-50 border border-gray-100 text-gray-500">
+                  <TypeIcon className="w-2.5 h-2.5 text-green-400 flex-shrink-0" />
+                  <span className="flex-1 truncate">{a.subject}</span>
+                  <span className="flex-shrink-0 text-gray-400">{formatDate(a.due_date)}</span>
+                </div>
+              );
+            })}
+            {context.activities.done.length === 0 && (
               <p className="text-[10px] text-gray-400">Aucune activité</p>
             )}
           </div>

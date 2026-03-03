@@ -304,6 +304,10 @@ export async function updateActivity(
   return apiPut<PipedriveActivity>(`activities/${id}`, data);
 }
 
+export async function deleteActivity(id: number): Promise<void> {
+  return apiDelete(`activities/${id}`);
+}
+
 // ─── Notes ───────────────────────────────────────────────
 
 export async function createNote(data: {

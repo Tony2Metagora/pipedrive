@@ -4,7 +4,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { markActivityDone, updateActivity, updateDeal } from "@/lib/pipedrive";
+import { markActivityDone, updateActivity, updateDeal, deleteActivity } from "@/lib/pipedrive";
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -29,6 +29,17 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     return NextResponse.json({ data: activity });
   } catch (error) {
     console.error("PUT /api/activities/[id] error:", error);
+    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  }
+}
+
+export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { id } = await params;
+    await deleteActivity(Number(id));
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("DELETE /api/activities/[id] error:", error);
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
   }
 }
