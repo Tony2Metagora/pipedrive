@@ -86,7 +86,47 @@ export default function DashboardPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<string | null>(null);
+  const [migratingNotes, setMigratingNotes] = useState(false);
+  const [migrateProgress, setMigrateProgress] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const migrateNotesFromPipedrive = async () => {
+    setMigratingNotes(true);
+    setMigrateProgress("Démarrage...");
+    let offset = 0;
+    const limit = 10;
+    let totalActivities = 0;
+    let totalNotes = 0;
+    try {
+      while (true) {
+        setMigrateProgress(`Traitement des affaires ${offset + 1} à ${offset + limit}...`);
+        const res = await fetch("/api/migrate/notes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ offset, limit }),
+        });
+        const json = await res.json();
+        if (!json.success) {
+          setMigrateProgress(`Erreur : ${json.error}`);
+          break;
+        }
+        totalActivities += json.imported?.activities || 0;
+        totalNotes += json.imported?.notes || 0;
+        if (json.done) {
+          setMigrateProgress(`Terminé ! ${totalActivities} activités + ${totalNotes} notes importées`);
+          fetchActivities();
+          fetchDeals();
+          break;
+        }
+        offset = json.nextOffset;
+      }
+    } catch (err) {
+      console.error("Erreur migration notes:", err);
+      setMigrateProgress("Erreur lors de la migration");
+    } finally {
+      setMigratingNotes(false);
+    }
+  };
 
   const handleUploadDeals = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -328,6 +368,18 @@ export default function DashboardPage() {
             {uploading ? "Import..." : "Importer affaires"}
           </button>
           <button
+            onClick={migrateNotesFromPipedrive}
+            disabled={migratingNotes}
+            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50 cursor-pointer shadow-sm"
+          >
+            {migratingNotes ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4" />
+            )}
+            {migratingNotes ? "Migration..." : "Importer notes/tâches"}
+          </button>
+          <button
             onClick={() => { fetchActivities(); fetchDeals(); }}
             disabled={loading || loadingDeals}
             className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors cursor-pointer disabled:opacity-50"
@@ -335,12 +387,12 @@ export default function DashboardPage() {
             <RefreshCw className={cn("w-4 h-4", (loading || loadingDeals) && "animate-spin")} />
             Rafraîchir
           </button>
-          {uploadResult && (
+          {(uploadResult || migrateProgress) && (
             <span className={cn(
               "text-xs font-medium px-2 py-1 rounded",
-              uploadResult.includes("Erreur") ? "text-red-600 bg-red-50" : "text-green-600 bg-green-50"
+              (uploadResult || migrateProgress || "").includes("Erreur") ? "text-red-600 bg-red-50" : "text-green-600 bg-green-50"
             )}>
-              {uploadResult}
+              {migrateProgress || uploadResult}
             </span>
           )}
         </div>
