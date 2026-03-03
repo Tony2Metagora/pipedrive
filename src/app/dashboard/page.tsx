@@ -747,7 +747,7 @@ function DealRow({
       const res = await fetch(`/api/deals/${deal.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value: String(newValue) }),
+        body: JSON.stringify({ value: newValue }),
       });
       const json = await res.json();
       if (!res.ok) {
