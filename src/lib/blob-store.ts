@@ -90,6 +90,7 @@ async function writeBlob<T>(filename: string, data: T[]): Promise<void> {
   await put(filename, JSON.stringify(data), {
     access: "private",
     addRandomSuffix: false,
+    allowOverwrite: true,
   });
 }
 

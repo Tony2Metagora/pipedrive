@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import {
   Phone,
@@ -22,6 +22,7 @@ import {
   Search,
   Users,
   X,
+  Upload,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDate, isOverdue, isWithinDays, detectActivityType } from "@/lib/utils";
@@ -83,6 +84,35 @@ export default function DashboardPage() {
   const [batchResults, setBatchResults] = useState<{ personId: number; personName: string; status: string; enriched?: Record<string, string | undefined> }[] | null>(null);
   const [batchProgress, setBatchProgress] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadResult, setUploadResult] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleUploadDeals = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadResult(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/migrate", { method: "POST", body: fd });
+      const json = await res.json();
+      if (json.success) {
+        setUploadResult(`${json.counts.deals} affaires importées`);
+        fetchActivities();
+        fetchDeals();
+      } else {
+        setUploadResult(`Erreur : ${json.error}`);
+      }
+    } catch (err) {
+      console.error("Erreur upload:", err);
+      setUploadResult("Erreur lors de l'import");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
 
   const fetchActivities = useCallback(async () => {
     setLoading(true);
@@ -278,6 +308,25 @@ export default function DashboardPage() {
               </button>
             )}
           </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            onChange={handleUploadDeals}
+            className="hidden"
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 cursor-pointer shadow-sm"
+          >
+            {uploading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Upload className="w-4 h-4" />
+            )}
+            {uploading ? "Import..." : "Importer affaires"}
+          </button>
           <button
             onClick={() => { fetchActivities(); fetchDeals(); }}
             disabled={loading || loadingDeals}
@@ -286,6 +335,14 @@ export default function DashboardPage() {
             <RefreshCw className={cn("w-4 h-4", (loading || loadingDeals) && "animate-spin")} />
             Rafraîchir
           </button>
+          {uploadResult && (
+            <span className={cn(
+              "text-xs font-medium px-2 py-1 rounded",
+              uploadResult.includes("Erreur") ? "text-red-600 bg-red-50" : "text-green-600 bg-green-50"
+            )}>
+              {uploadResult}
+            </span>
+          )}
         </div>
       </div>
 

@@ -245,6 +245,7 @@ export async function POST(request: Request) {
     await put("prospects.json", JSON.stringify(rows), {
       access: "private",
       addRandomSuffix: false,
+      allowOverwrite: true,
     });
 
     return NextResponse.json({

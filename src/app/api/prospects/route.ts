@@ -37,6 +37,7 @@ async function writeProspects(rows: ProspectRow[]) {
   await put("prospects.json", JSON.stringify(rows), {
     access: "private",
     addRandomSuffix: false,
+    allowOverwrite: true,
   });
 }
 
