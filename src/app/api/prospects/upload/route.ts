@@ -1,11 +1,12 @@
 /**
- * API Route — Upload CSV prospects
- * POST : reçoit un fichier CSV, le parse, et le stocke dans Vercel Blob
- * Mapping flexible des colonnes CSV vers le format Prospect
+ * API Route — Upload CSV/Excel prospects
+ * POST : reçoit un fichier CSV ou Excel (.xlsx/.xls), le parse, et le stocke dans Vercel Blob
+ * Mapping flexible des colonnes vers le format Prospect
  */
 
 import { NextResponse } from "next/server";
 import { put } from "@vercel/blob";
+import * as XLSX from "xlsx";
 
 interface ProspectRow {
   id: string;
@@ -131,6 +132,32 @@ function parseLine(line: string, sep: string): string[] {
   return line.split(sep).map((f) => f.replace(/^"|"$/g, "").replace(/""/g, '"'));
 }
 
+function parseFileToHeadersAndRows(file: File, buffer: ArrayBuffer): { rawHeaders: string[]; dataRows: string[][] } {
+  const name = file.name.toLowerCase();
+  const isExcel = name.endsWith(".xlsx") || name.endsWith(".xls");
+
+  if (isExcel) {
+    const workbook = XLSX.read(buffer, { type: "array" });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const json: string[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+    if (json.length < 2) throw new Error("Le fichier Excel est vide ou n'a pas d'en-têtes");
+    const rawHeaders = json[0].map((h) => String(h));
+    const dataRows = json.slice(1).map((row) => row.map((cell) => String(cell ?? "")));
+    return { rawHeaders, dataRows };
+  }
+
+  // CSV
+  let content = new TextDecoder("utf-8").decode(buffer);
+  if (content.charCodeAt(0) === 0xfeff) content = content.slice(1);
+  const lines = content.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) throw new Error("Le fichier CSV est vide ou n'a pas d'en-têtes");
+  const sep = detectSeparator(lines[0]);
+  const rawHeaders = parseLine(lines[0], sep);
+  const dataRows = lines.slice(1).map((line) => parseLine(line, sep));
+  return { rawHeaders, dataRows };
+}
+
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
@@ -139,26 +166,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Fichier requis" }, { status: 400 });
     }
 
-    let content = await file.text();
-    // Remove BOM
-    if (content.charCodeAt(0) === 0xfeff) content = content.slice(1);
+    const buffer = await file.arrayBuffer();
+    const { rawHeaders, dataRows } = parseFileToHeadersAndRows(file, buffer);
 
-    const lines = content.split(/\r?\n/).filter((l) => l.trim());
-    if (lines.length < 2) {
-      return NextResponse.json({ error: "Le fichier CSV est vide ou n'a pas d'en-têtes" }, { status: 400 });
-    }
-
-    // Detect separator
-    const sep = detectSeparator(lines[0]);
-
-    // Parse headers and map to prospect fields
-    const rawHeaders = parseLine(lines[0], sep);
+    // Map headers to prospect fields
     const headerMapping: (keyof ProspectRow | null)[] = rawHeaders.map((h) => {
-      const clean = h.trim().toLowerCase().replace(/[""]/g, "");
+      const clean = h.trim().toLowerCase().replace(/[\u201c\u201d]/g, "");
       return COLUMN_MAP[clean] || null;
     });
 
-    // Check we have at least nom or prenom
     const hasMapped = headerMapping.some((m) => m !== null);
     if (!hasMapped) {
       const detected = rawHeaders.slice(0, 5).join(", ");
@@ -167,16 +183,14 @@ export async function POST(request: Request) {
       }, { status: 400 });
     }
 
-    // Parse rows
-    // Handle name splitting: if we have "nom" mapped but not "prenom", try to split full name
     const hasPrenom = headerMapping.includes("prenom");
     const hasNom = headerMapping.includes("nom");
 
     const rows: ProspectRow[] = [];
-    for (let i = 1; i < lines.length; i++) {
-      const values = parseLine(lines[i], sep);
+    for (let i = 0; i < dataRows.length; i++) {
+      const values = dataRows[i];
       const row: ProspectRow = {
-        id: String(i),
+        id: String(i + 1),
         nom: "",
         prenom: "",
         email: "",
@@ -191,11 +205,10 @@ export async function POST(request: Request) {
       for (let j = 0; j < headerMapping.length; j++) {
         const field = headerMapping[j];
         if (field && values[j]) {
-          row[field] = values[j].trim();
+          row[field] = String(values[j]).trim();
         }
       }
 
-      // If we have nom but not prenom, split the full name
       if (hasNom && !hasPrenom && row.nom) {
         const parts = row.nom.trim().split(/\s+/);
         if (parts.length > 1) {
@@ -204,7 +217,6 @@ export async function POST(request: Request) {
         }
       }
 
-      // Skip empty rows
       if (!row.nom && !row.prenom && !row.email) continue;
 
       rows.push(row);

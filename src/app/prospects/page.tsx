@@ -185,7 +185,7 @@ export default function ProspectsPage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv"
+            accept=".csv,.xlsx,.xls"
             onChange={handleUpload}
             className="hidden"
           />
