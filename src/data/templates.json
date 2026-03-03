@@ -1,0 +1,83 @@
+[
+  {
+    "id": 1,
+    "poste": "Directeur education retail",
+    "entreprise": "Fred (LVMH Group)",
+    "niveau_lead": "Chaud",
+    "type": "mail",
+    "etape": "Followup démo",
+    "message": "Bonjour {{prénom}}, \n\nJe reviens vers toi suite au Drink Métier et notre échange de cette semaine, tu me disais que tu avais besoin d'éléments pour avancer et présenter en interne à votre DRH. \n\nPour avancer, j'aimerais avoir les infos qui te semblent pertinentes : \nSimulation Metagora dédiée à {{entreprise}} : \nquels produits ?\nquelles personas ? \nquelles langues ?  \nCombien d'accès ? Nous allons générer une version avec des identifiants pour te permettre d'avoir également un dashboard sur les sessions test réalisées \nvoici 1 exemple de dashboard metagora exhaustif https://tony2metagora.github.io/metagora-rewards/#/dashboard\nen mars nous lançons aussi le coach de manager en chat qui est lié aux résultats d'utilisation  : https://tony2metagora.github.io/metagora-rewards/#/videos/coach\nil me semble que ce coach pourrait remplacer une vidéo feedback équipe, très curieux de ton retour et de ton pragmatisme comme toujours\nDocuments complémentaires : \n- présentation Metagora \n- vois tu d'autres éléments ?\n \nMerci encore {{prénom}}, \n\nTrès bonne journée,"
+  },
+  {
+    "id": 2,
+    "poste": "Directrice formation internationale",
+    "entreprise": "Hermes",
+    "niveau_lead": "chaud",
+    "type": "mail",
+    "etape": "pré démo",
+    "message": "Bonjour {{prénom}},\n\nJ'ai été ravi de te rencontrer, et ton résumé learning tech m'a beaucoup parlé, notamment sur le multimodal et le blended learning avec des KPI vraiment opérationnels.\n\nComme proposé, je serai ravi de venir vous voir autour d'un café ou d'un déjeuner prochainement, à la date qui vous conviendra le mieux. Je vous laisse puiser dans mon mail les éléments qui vous intriguent pour un futur échange. \n\n1. Simulations de clients virtuels pour les conseillers\nDepuis 6 mois, nous construisons un outil qui génère des clients virtuels pour entraîner les sales advisors en boutique, en autonomie, sur des scénarios très proches du réel.\nL'objectif est de travailler la posture conseil, l'écoute active et de faciliter le feedback manager sans dépendre uniquement du présentiel.\n\nQuelques exemples concrets :\n\nSimulation {{entreprise}} avec un persona déjà client, cadre dirigeant dans la cosmétique et connaissant bien la maison :\nhttps://metaverse.ww.fo/avatarworld/?scenario=scenario-1770136366695&lang=fr\n(langue modifiable : zh, ar, eng… plus de 90 langues disponibles).\n\nGénération instantanée d'un client virtuel, vue sur notre outil :\nhttps://www.youtube.com/watch?v=rq-julCOC5A\n\nSimulation complète avec feedback détaillé en fin de scénario et questionnaire d'écoute active généré à la volée (feedback et QCM en fin de vidéo):\nhttps://www.youtube.com/watch?v=kZiPX1XVn3E\n\nCaractéristiques clés :\n\nFormat hybride audio / texte, utilisable directement sur le floor pour éviter de \"sortir\" les équipes en arrière-boutique et simplifier l'entraînement sur le floor.\n\nDurée courte (3 à 6 minutes) pour un entraînement continu en micro-learning.\n\nDisponible sur tablette, téléphone et ordinateur, avec avatars 3D personnalisables jusqu'au photoréalisme.\n\n2. Coach virtuel pour managers\nNous avons aussi développé un chatbot coach de manager qui analyse les résultats des simulations de son équipe et lui propose des recommandations personnalisées.\n\nDémo vidéo : https://www.youtube.com/watch?v=HrwISMqdfSo\n\nJe serais ravi d'en discuter avec vous autour d'un café.\n\nTrès belle journée,\n\nTony"
+  },
+  {
+    "id": 3,
+    "poste": "Multi profils : directeur formation, directrice retail",
+    "entreprise": "VandB",
+    "niveau_lead": "chaud",
+    "type": "mail",
+    "etape": "followup démo2",
+    "message": "Bonsoir {{prénom}}, \n\nJe me permets de vous faire une petite relance pour planifier un rendez-vous prochainement ensemble sur la solution Metagora.\n\nQuand seriez-vous disponible ? \n\nEgalement, nous aimerions vous proposer de simplifier la facturation de sorte qu'on parte sur un setup fee sans facturations intermédiaires qui nous désalignent sur le but principal de ROI. \n\nJe crois à la vision de \"série netflix\" où on attend le prochain chapitre et le but est d'avoir un maximum de chapitres pour l'engouement et donc les revenus. \n\nA votre dispo pour avancer.\n\nJe vous laisse trouver 2 3 créneaux en commun de votre côté ? "
+  },
+  {
+    "id": 4,
+    "poste": "Multi profils : directeur formation, directrice retail",
+    "entreprise": "VandB",
+    "niveau_lead": "chaud",
+    "type": "mail",
+    "etape": "Récap devis",
+    "message": "Bonjour {{prénom}},\n\nJe reviens vers vous pour savoir si on pouvait trouver une date qui peut vous correspondre. Aurais-tu une dispo prochainement ?\nNous pouvons réduire le rdv à 30min pour faciliter le meeting en commun.\n\nPour rappel, nous avions proposé : \n- 10 000€ de Setup et 2500€ par scénario\n- 60€/magasin hors Opco\n\nPour simplifier l'échange et accélérer je vous propose de simplifier l'offre : \n- 10 000€ de Setup, sans limite de scénarii / de produits \n- 60€/magasin sur 6 mois \n\nNotre priorité est de lancer une expérimentation à fort ROI avec {{entreprise}} et du coup à votre disposition pour revoir le cadrage du POC si ca vous permet de faire sauter certains freins au lancement. \n\nJe vous partage aussi notre nouvel outil de coaching vendeur qui va entrer en test pour donner du feedback au vendeur sur ses simulations hebdo, au manager sur ses équipes : \nhttps://www.youtube.com/watch?v=HrwISMqdfSo\n\ntrès bonne journée à vous, "
+  },
+  {
+    "id": 5,
+    "poste": "Directrice formation internationale",
+    "entreprise": "Vallee Village",
+    "niveau_lead": "moyen",
+    "type": "sms",
+    "etape": "whatsapp pour démo",
+    "message": "Hello {{prénom}}, c'est Tony de Metagora. Je t'écrivais pour organiser prochainement une démo de ce que nous faisons sur la formation des conseillers de vente. \n\nJ'ai pas mal de choses récentes à te montrer aussi et je trouverais intéressant de penser une offre certifiante pour vos collaborateurs sur des verticales produits.\n\nAurais tu une disponibilité dans les 2 prochaines semaines ? très bonne journée à toi "
+  },
+  {
+    "id": 6,
+    "poste": "Directrice formation internationale",
+    "entreprise": "Hermes",
+    "niveau_lead": "chaud",
+    "type": "sms",
+    "etape": "whatsapp pour démo",
+    "message": "Bonjour {{prénom}},\nJe suis Tony de Metagora. Je serais ravi de vous partager ce que nous faisons sur le client virtuel et plus récemment le coach virtuel pour le retail.\n\nEn visio ou autour d'un café / petit déjeuner si votre temps le permet.\n\nTrès belle journée à vous \n\nTony"
+  },
+  {
+    "id": 7,
+    "poste": "Directrice Excellence client",
+    "entreprise": "OhMyCream",
+    "niveau_lead": "chaud",
+    "type": "sms",
+    "etape": "whatsapp pour démo",
+    "message": "Hello {{prénom}}, \n\nJe suis Tony de Metagora, très heureux de pouvoir échanger prochainement si tu as 30 ou 45 min semaine prochaine ou dans 2 semaines ? \n\nEn dernière nouveauté on peut s'intègrer à Yoobic maintenant simplement si jamais vous avez ce service chez {{entreprise}}. \n\nJe peux me déplacer de visu, je préfère si ca te va :) \n\nTrès bonne journée à toi"
+  },
+  {
+    "id": 8,
+    "poste": "Directeur retail formation",
+    "entreprise": "Polène",
+    "niveau_lead": "chaud",
+    "type": "sms",
+    "etape": "whatsapp pour démo",
+    "message": "Hello {{prénom}}, c'est Tony de Metagora. Je te contacte parce qu'on peut s'intégrer maintenant directement à Yoobic, et je sais que tu avais des sujets de fond d'intégration d'outils et de Data aussi chez {{entreprise}}.\n\nGros pavé pour au final te proposer un café prochainement de visu idéalement pour parler de tous ces sujets 🙂 \n\nTrès bonne journée. \n\nTony"
+  },
+  {
+    "id": 9,
+    "poste": "Directeur retail formation",
+    "entreprise": "Polène",
+    "niveau_lead": "chaud",
+    "type": "mail",
+    "etape": "followup démo2",
+    "message": "Hello {{prénom}},\n\nC'est Tony de Metagora. Je reviens vers toi pour planifier un meeting pour échanger sur Metagora et l'ecosystème d'excellence opérationnelle magasin. \n\nVu que tu es sur ces sujets d'intégration de business information, d'application opérationnelle type Yoobic et sur les enjeux de formation je serai ravi d'échanger avec toi.\n\nAurais tu une dispo prochainement ? \n\nTrès bonne journée"
+  }
+]
