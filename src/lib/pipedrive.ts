@@ -183,6 +183,69 @@ export async function createPerson(data: {
   return apiPost<PipedrivePerson>("persons", body);
 }
 
+export async function getAllPersons(): Promise<PipedrivePerson[]> {
+  const all: PipedrivePerson[] = [];
+  let start = 0;
+  const limit = 500;
+  while (true) {
+    const url = new URL(`${BASE_URL}/persons`);
+    url.searchParams.set("api_token", API_TOKEN);
+    url.searchParams.set("start", String(start));
+    url.searchParams.set("limit", String(limit));
+    const res = await fetch(url.toString(), { cache: "no-store" });
+    if (!res.ok) break;
+    const json = await res.json();
+    const data = json.data;
+    if (!data || !Array.isArray(data) || data.length === 0) break;
+    all.push(...data);
+    if (!json.additional_data?.pagination?.more_items_in_collection) break;
+    start += limit;
+  }
+  return all;
+}
+
+export async function getAllOrganizations(): Promise<PipedriveOrganization[]> {
+  const all: PipedriveOrganization[] = [];
+  let start = 0;
+  const limit = 500;
+  while (true) {
+    const url = new URL(`${BASE_URL}/organizations`);
+    url.searchParams.set("api_token", API_TOKEN);
+    url.searchParams.set("start", String(start));
+    url.searchParams.set("limit", String(limit));
+    const res = await fetch(url.toString(), { cache: "no-store" });
+    if (!res.ok) break;
+    const json = await res.json();
+    const data = json.data;
+    if (!data || !Array.isArray(data) || data.length === 0) break;
+    all.push(...data);
+    if (!json.additional_data?.pagination?.more_items_in_collection) break;
+    start += limit;
+  }
+  return all;
+}
+
+export async function getAllDeals(): Promise<PipedriveDeal[]> {
+  const all: PipedriveDeal[] = [];
+  let start = 0;
+  const limit = 500;
+  while (true) {
+    const url = new URL(`${BASE_URL}/deals`);
+    url.searchParams.set("api_token", API_TOKEN);
+    url.searchParams.set("start", String(start));
+    url.searchParams.set("limit", String(limit));
+    const res = await fetch(url.toString(), { cache: "no-store" });
+    if (!res.ok) break;
+    const json = await res.json();
+    const data = json.data;
+    if (!data || !Array.isArray(data) || data.length === 0) break;
+    all.push(...data);
+    if (!json.additional_data?.pagination?.more_items_in_collection) break;
+    start += limit;
+  }
+  return all;
+}
+
 export async function getPerson(id: number): Promise<PipedrivePerson | null> {
   try {
     return await apiGet<PipedrivePerson>(`persons/${id}`);
