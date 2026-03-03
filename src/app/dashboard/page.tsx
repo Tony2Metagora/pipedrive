@@ -712,15 +712,20 @@ function DealRow({
   onArchive,
   selected,
   onToggleSelect,
+  onDealUpdated,
 }: {
   deal: Deal;
   onTaskCreated: () => void;
   onArchive: (activityId: number, dealId: number | null, contactName: string) => void;
   selected: boolean;
   onToggleSelect: (dealId: number) => void;
+  onDealUpdated?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [showAddTask, setShowAddTask] = useState(false);
+  const [editingValue, setEditingValue] = useState(false);
+  const [valueInput, setValueInput] = useState(String(deal.value || 0));
+  const [savingValue, setSavingValue] = useState(false);
   const [taskSubject, setTaskSubject] = useState("");
   const [taskType, setTaskType] = useState("call");
   const [taskDate, setTaskDate] = useState(() => {
@@ -734,6 +739,25 @@ function DealRow({
   const [participantsFetched, setParticipantsFetched] = useState(false);
 
   const pipedriveLink = `https://metagora.pipedrive.com/deal/${deal.id}`;
+
+  const saveValue = async () => {
+    const newValue = Number(valueInput) || 0;
+    setSavingValue(true);
+    try {
+      await fetch(`/api/deals/${deal.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: newValue }),
+      });
+      deal.value = newValue;
+      setEditingValue(false);
+      onDealUpdated?.();
+    } catch (err) {
+      console.error("Erreur mise à jour valeur:", err);
+    } finally {
+      setSavingValue(false);
+    }
+  };
 
   // Fetch participants when expanded for the first time
   useEffect(() => {
@@ -833,12 +857,45 @@ function DealRow({
           </div>
         </div>
 
-        {/* Valeur */}
-        {deal.value > 0 && (
-          <div className="flex-shrink-0 text-sm font-semibold text-gray-700">
-            {deal.value.toLocaleString("fr-FR")} {deal.currency}
-          </div>
-        )}
+        {/* Valeur – éditable */}
+        <div className="flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+          {editingValue ? (
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                min={0}
+                step={100}
+                value={valueInput}
+                onChange={(e) => setValueInput(e.target.value)}
+                className="w-24 px-2 py-1 text-sm border border-indigo-300 rounded-lg focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveValue();
+                  if (e.key === "Escape") { setEditingValue(false); setValueInput(String(deal.value || 0)); }
+                }}
+              />
+              <span className="text-xs text-gray-400">€</span>
+              <button
+                onClick={saveValue}
+                disabled={savingValue}
+                className="p-1 text-green-600 hover:text-green-700 disabled:opacity-40 cursor-pointer"
+              >
+                {savingValue ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+              </button>
+              <button onClick={() => { setEditingValue(false); setValueInput(String(deal.value || 0)); }} className="p-1 text-gray-400 hover:text-gray-600 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => { setEditingValue(true); setValueInput(String(deal.value || 0)); }}
+              className="text-sm font-semibold text-emerald-600 hover:text-emerald-800 cursor-pointer hover:underline"
+              title="Modifier la valeur"
+            >
+              {deal.value > 0 ? `${deal.value.toLocaleString("fr-FR")} €` : "+ Valeur"}
+            </button>
+          )}
+        </div>
 
         {/* Prochaine activité */}
         <div className="flex-shrink-0 text-xs text-gray-400">
