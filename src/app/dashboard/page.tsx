@@ -1117,7 +1117,7 @@ function DealRow({
                           "text-[10px] font-semibold uppercase tracking-wide",
                           p.primary ? "text-indigo-600" : "text-gray-400"
                         )}>
-                          {p.primary ? "★ Contact principal" : "Autre contact"} — {p.name}
+                          {p.primary ? "★ Contact principal" : "Contact secondaire"} — {p.name}
                         </span>
                       </div>
                     )}
