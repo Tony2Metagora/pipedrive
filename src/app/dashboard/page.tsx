@@ -133,9 +133,12 @@ export default function DashboardPage() {
       const res = await fetch("/api/migrate/activities", { method: "POST" });
       const json = await res.json();
       if (json.success) {
-        setMigrateProgress(`Terminé ! ${json.counts.undone} tâches à faire + ${json.counts.done} dans l'historique`);
-        fetchActivities();
-        fetchDeals();
+        const dbg = json.debug || {};
+        setMigrateProgress(
+          `Terminé ! ${json.counts.undone} tâches + ${json.counts.done} historique (${dbg.totalPdActivities || 0} activités PD, ${dbg.totalPdDeals || 0} deals PD, ${dbg.totalBlobDeals || 0} deals Blob)`
+        );
+        if (json.counts.total > 0) { fetchActivities(); fetchDeals(); }
+        console.log("Migration debug:", json.debug);
       } else {
         setMigrateProgress(`Erreur : ${json.error}`);
       }

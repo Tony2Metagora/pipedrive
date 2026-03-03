@@ -107,8 +107,20 @@ export async function POST() {
 
     console.log(`[MigrateActivities] ${matched} matched, ${skipped} skipped`);
 
+    // Debug: show sample data to understand the matching
+    const samplePdTitles = Array.from(pdDealIdToTitle.entries()).slice(0, 5).map(([id, title]) => ({ id, title }));
+    const sampleBlobTitles = blobDeals.slice(0, 5).map((d) => ({ id: d.id, title: d.title }));
+    const sampleActivities = allPdActivities.slice(0, 5).map((a) => ({
+      subject: a.subject,
+      deal_id: a.deal_id,
+      deal_title: a.deal_title,
+      done: a.done,
+    }));
+
     // 5. Replace all activities in blob (full overwrite)
-    await bulkWriteActivities(newActivities);
+    if (newActivities.length > 0) {
+      await bulkWriteActivities(newActivities);
+    }
 
     const doneCount = newActivities.filter((a) => a.done).length;
     const undoneCount = newActivities.filter((a) => !a.done).length;
@@ -120,6 +132,14 @@ export async function POST() {
         done: doneCount,
         undone: undoneCount,
         skipped,
+      },
+      debug: {
+        totalPdActivities: allPdActivities.length,
+        totalPdDeals: pipedriveDeals.length,
+        totalBlobDeals: blobDeals.length,
+        pdDealTitlesSample: samplePdTitles,
+        blobDealTitlesSample: sampleBlobTitles,
+        pdActivitiesSample: sampleActivities,
       },
     });
   } catch (error: unknown) {
