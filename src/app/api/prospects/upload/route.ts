@@ -75,7 +75,7 @@ const COLUMN_MAP: Record<string, keyof ProspectRow> = {
   note: "notes",
   commentaire: "notes",
   commentaires: "notes",
-  // Pipedrive export specifics
+  // Pipedrive export EN
   "person - name": "nom",
   "person - first name": "prenom",
   "person - last name": "nom",
@@ -83,10 +83,29 @@ const COLUMN_MAP: Record<string, keyof ProspectRow> = {
   "person - phone": "telephone",
   "person - organization": "entreprise",
   "person - job title": "poste",
+  // Pipedrive export FR
+  "personne - nom": "nom",
+  "personne - prénom": "prenom",
+  "personne - organisation": "entreprise",
+  "personne - e-mail": "email",
+  "personne - e-mail - travail": "email",
+  "personne - e-mail - domicile": "email",
+  "personne - e-mail - autre": "email",
+  "personne - téléphone": "telephone",
+  "personne - téléphone - travail": "telephone",
+  "personne - téléphone - domicile": "telephone",
+  "personne - téléphone - mobile": "telephone",
+  "personne - téléphone - autre": "telephone",
+  "personne - poste": "poste",
+  "personne - titre du poste": "poste",
+  "personne - étiquettes": "pipelines",
+  "personne - note": "notes",
+  "personne - notes": "notes",
   // ID
   id: "id",
   "person id": "id",
   "person_id": "id",
+  "personne - id": "id",
 };
 
 function parseCsvLine(line: string): string[] {
