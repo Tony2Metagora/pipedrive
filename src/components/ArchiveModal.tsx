@@ -14,7 +14,7 @@ const MOTIFS_PREDÉFINIS = [
 ];
 
 interface Props {
-  activityId: number;
+  activityId?: number | null;
   dealId: number | null;
   contactName: string;
   onClose: () => void;
@@ -40,15 +40,26 @@ export default function ArchiveModal({
 
     setSaving(true);
     try {
-      await fetch(`/api/activities/${activityId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          archive: true,
-          deal_id: dealId,
-          lost_reason: finalReason.trim(),
-        }),
-      });
+      if (activityId) {
+        await fetch(`/api/activities/${activityId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            archive: true,
+            deal_id: dealId,
+            lost_reason: finalReason.trim(),
+          }),
+        });
+      } else if (dealId) {
+        await fetch(`/api/deals/${dealId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            status: "lost",
+            lost_reason: finalReason.trim(),
+          }),
+        });
+      }
       onArchived();
     } catch (err) {
       console.error("Erreur archivage:", err);

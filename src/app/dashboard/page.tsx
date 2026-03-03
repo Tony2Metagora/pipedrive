@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDate, isOverdue, isWithinDays, detectActivityType } from "@/lib/utils";
-import { getPipelineName, getStageName } from "@/lib/config";
+import { PIPELINES, getPipelineName, getStageName, getStagesForPipeline } from "@/lib/config";
 import NewActivityModal from "@/components/NewActivityModal";
 import ArchiveModal from "@/components/ArchiveModal";
 import DetailPanel from "@/components/DetailPanel";
@@ -75,7 +75,7 @@ export default function DashboardPage() {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingDeals, setLoadingDeals] = useState(true);
-  const [archiveTarget, setArchiveTarget] = useState<{ activityId: number; dealId: number | null; contactName: string } | null>(null);
+  const [archiveTarget, setArchiveTarget] = useState<{ activityId?: number | null; dealId: number | null; contactName: string } | null>(null);
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
   const [selectedDeals, setSelectedDeals] = useState<Set<number>>(new Set());
   const [batchEnriching, setBatchEnriching] = useState(false);
@@ -128,7 +128,7 @@ export default function DashboardPage() {
     }
   };
 
-  const openArchiveModal = (activityId: number, dealId: number | null, contactName: string) => {
+  const openArchiveModal = (activityId: number | null, dealId: number | null, contactName: string) => {
     setArchiveTarget({ activityId, dealId, contactName });
   };
 
@@ -716,7 +716,7 @@ function DealRow({
 }: {
   deal: Deal;
   onTaskCreated: () => void;
-  onArchive: (activityId: number, dealId: number | null, contactName: string) => void;
+  onArchive: (activityId: number | null, dealId: number | null, contactName: string) => void;
   selected: boolean;
   onToggleSelect: (dealId: number) => void;
   onDealUpdated?: () => void;
@@ -726,6 +726,10 @@ function DealRow({
   const [editingValue, setEditingValue] = useState(false);
   const [valueInput, setValueInput] = useState(String(deal.value || 0));
   const [savingValue, setSavingValue] = useState(false);
+  const [editingPipeline, setEditingPipeline] = useState(false);
+  const [selectedPipelineId, setSelectedPipelineId] = useState(deal.pipeline_id);
+  const [selectedStageId, setSelectedStageId] = useState(deal.stage_id);
+  const [savingPipeline, setSavingPipeline] = useState(false);
   const [taskSubject, setTaskSubject] = useState("");
   const [taskType, setTaskType] = useState("call");
   const [taskDate, setTaskDate] = useState(() => {
@@ -739,6 +743,31 @@ function DealRow({
   const [participantsFetched, setParticipantsFetched] = useState(false);
 
   const pipedriveLink = `https://metagora.pipedrive.com/deal/${deal.id}`;
+
+  const savePipelineStage = async () => {
+    setSavingPipeline(true);
+    try {
+      const payload: Record<string, unknown> = {};
+      if (selectedPipelineId !== deal.pipeline_id) payload.pipeline_id = selectedPipelineId;
+      if (selectedStageId !== deal.stage_id) payload.stage_id = selectedStageId;
+      if (Object.keys(payload).length === 0) { setEditingPipeline(false); setSavingPipeline(false); return; }
+      const res = await fetch(`/api/deals/${deal.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        deal.pipeline_id = selectedPipelineId;
+        deal.stage_id = selectedStageId;
+        setEditingPipeline(false);
+        onDealUpdated?.();
+      }
+    } catch (err) {
+      console.error("Erreur mise à jour pipeline/stage:", err);
+    } finally {
+      setSavingPipeline(false);
+    }
+  };
 
   const saveValue = async () => {
     const newValue = Number(valueInput) || 0;
@@ -844,10 +873,55 @@ function DealRow({
 
         <div className="flex-1 min-w-0">
           <p className="font-medium text-gray-900 truncate">{deal.title}</p>
-          <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
-            <span className="font-medium text-indigo-500">{getPipelineName(deal.pipeline_id)}</span>
-            <span className="text-gray-300">→</span>
-            <span className="font-medium">{getStageName(deal.stage_id)}</span>
+          <div className="flex items-center gap-3 mt-1 text-xs text-gray-500" onClick={(e) => e.stopPropagation()}>
+            {editingPipeline ? (
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={selectedPipelineId}
+                  onChange={(e) => {
+                    const pid = Number(e.target.value);
+                    setSelectedPipelineId(pid);
+                    const stages = getStagesForPipeline(pid);
+                    if (stages.length > 0) setSelectedStageId(stages[0]!.id);
+                  }}
+                  className="px-1.5 py-0.5 text-xs border border-indigo-300 rounded bg-white focus:ring-1 focus:ring-indigo-400 outline-none"
+                >
+                  {PIPELINES.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+                <span className="text-gray-300">→</span>
+                <select
+                  value={selectedStageId}
+                  onChange={(e) => setSelectedStageId(Number(e.target.value))}
+                  className="px-1.5 py-0.5 text-xs border border-indigo-300 rounded bg-white focus:ring-1 focus:ring-indigo-400 outline-none"
+                >
+                  {getStagesForPipeline(selectedPipelineId).map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={savePipelineStage}
+                  disabled={savingPipeline}
+                  className="p-0.5 text-green-600 hover:text-green-700 disabled:opacity-40 cursor-pointer"
+                >
+                  {savingPipeline ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                </button>
+                <button onClick={() => { setEditingPipeline(false); setSelectedPipelineId(deal.pipeline_id); setSelectedStageId(deal.stage_id); }} className="p-0.5 text-gray-400 hover:text-gray-600 cursor-pointer">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setEditingPipeline(true)}
+                className="flex items-center gap-1.5 hover:underline cursor-pointer"
+                title="Modifier pipeline / étape"
+              >
+                <span className="font-medium text-indigo-500">{getPipelineName(deal.pipeline_id)}</span>
+                <span className="text-gray-300">→</span>
+                <span className="font-medium">{getStageName(deal.stage_id)}</span>
+              </button>
+            )}
             {deal.person_name && (
               <>
                 <span className="text-gray-300">•</span>
@@ -925,13 +999,13 @@ function DealRow({
             <Plus className="w-3.5 h-3.5" />
             Tâche
           </button>
-          <Link
-            href={`/deal/${deal.id}`}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 hover:border-indigo-300 transition-colors"
+          <button
+            onClick={() => onArchive(null, deal.id, deal.title)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-orange-200 text-orange-700 bg-orange-50 hover:bg-orange-100 hover:border-orange-300 transition-colors cursor-pointer"
           >
-            <ExternalLink className="w-3.5 h-3.5" />
-            Fiche
-          </Link>
+            <Archive className="w-3.5 h-3.5" />
+            Archiver
+          </button>
           <a
             href={pipedriveLink}
             target="_blank"
