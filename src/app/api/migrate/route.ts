@@ -1,219 +1,150 @@
 /**
- * API Route — Migration one-shot Pipedrive → Blob Storage
- * POST : exporte tous les deals ouverts + activités + notes + participants + orgs depuis Pipedrive
- *        et les stocke dans Vercel Blob. À n'utiliser qu'une seule fois.
+ * API Route — Migration deals depuis un fichier Excel → Blob Storage
+ * POST : reçoit un fichier Excel exporté de Pipedrive, parse et stocke dans Blob
  */
 
 import { NextResponse } from "next/server";
-import {
-  getDeals as getPipedriveDeals,
-  getActivities as getPipedriveActivities,
-  getDealPersons,
-  getNotesForDeal,
-  getPerson,
-  getOrganization,
-} from "@/lib/pipedrive";
+import * as XLSX from "xlsx";
 import {
   bulkWriteDeals,
   bulkWritePersons,
   bulkWriteOrganizations,
-  bulkWriteActivities,
-  bulkWriteNotes,
+  getDeals,
+  getPersons,
+  getOrganizations,
   type Deal,
   type Person,
   type Organization,
-  type Activity,
-  type Note,
 } from "@/lib/blob-store";
 
-export const maxDuration = 60;
-
-export async function POST() {
+export async function POST(request: Request) {
   try {
-    // 1. Fetch all open deals from Pipedrive
-    const rawDeals = await getPipedriveDeals({ status: "open" });
-    console.log(`[Migration] ${rawDeals.length} deals ouverts trouvés`);
-
-    // 2. Fetch all undone activities from Pipedrive
-    const rawActivities = await getPipedriveActivities({ done: "0", limit: "500", sort: "due_date ASC" });
-    // Also fetch done activities (recent ones)
-    const rawDoneActivities = await getPipedriveActivities({ done: "1", limit: "500", sort: "due_date DESC" });
-    console.log(`[Migration] ${rawActivities.length} activités en cours, ${rawDoneActivities.length} terminées`);
-
-    // 3. Collect all unique person IDs and org IDs
-    const personIds = new Set<number>();
-    const orgIds = new Set<number>();
-    const dealIds = new Set<number>();
-
-    for (const d of rawDeals) {
-      dealIds.add(d.id);
-      const pid = typeof d.person_id === "object" && d.person_id !== null
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ? (d.person_id as any).value
-        : d.person_id;
-      const oid = typeof d.org_id === "object" && d.org_id !== null
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ? (d.org_id as any).value
-        : d.org_id;
-      if (pid) personIds.add(pid);
-      if (oid) orgIds.add(oid);
+    const formData = await request.formData();
+    const file = formData.get("file") as File | null;
+    if (!file) {
+      return NextResponse.json({ error: "Fichier requis" }, { status: 400 });
     }
 
-    // 4. Fetch participants for each deal (to get secondary contacts)
-    const dealParticipantsMap: Record<number, number[]> = {};
-    for (const d of rawDeals) {
-      try {
-        const participants = await getDealPersons(d.id);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const pids = participants.map((p: any) => {
-          const person = p.person || p;
-          const id = person.id || p.id;
-          if (id) personIds.add(id);
-          return id;
-        }).filter(Boolean);
-        dealParticipantsMap[d.id] = pids;
-      } catch {
-        const pid = typeof d.person_id === "object" && d.person_id !== null
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          ? (d.person_id as any).value
-          : d.person_id;
-        dealParticipantsMap[d.id] = pid ? [pid] : [];
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: "array" });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rawData = XLSX.utils.sheet_to_json<Record<string, string>>(sheet);
+
+    if (rawData.length === 0) {
+      return NextResponse.json({ error: "Fichier vide" }, { status: 400 });
+    }
+
+    // Load existing data to avoid duplicates and compute next IDs
+    const existingDeals = await getDeals();
+    const existingPersons = await getPersons();
+    const existingOrgs = await getOrganizations();
+
+    let nextDealId = existingDeals.reduce((max, d) => Math.max(max, d.id), 0) + 1;
+    let nextPersonId = existingPersons.reduce((max, p) => Math.max(max, p.id), 0) + 1;
+    let nextOrgId = existingOrgs.reduce((max, o) => Math.max(max, o.id), 0) + 1;
+
+    // Maps to reuse orgs and persons
+    const orgMap = new Map<string, number>();
+    for (const o of existingOrgs) orgMap.set(o.name.toLowerCase(), o.id);
+    const personMap = new Map<string, number>();
+    for (const p of existingPersons) personMap.set(p.name.toLowerCase(), p.id);
+
+    const newDeals: Deal[] = [];
+    const newPersons: Person[] = [];
+    const newOrgs: Organization[] = [];
+
+    // Column mapping for Pipedrive French export
+    const colMap: Record<string, string> = {};
+    const headers = Object.keys(rawData[0]);
+    for (const h of headers) {
+      const lc = h.toLowerCase();
+      if (lc.includes("titre")) colMap.title = h;
+      else if (lc.includes("organisation")) colMap.org = h;
+      else if (lc.includes("personne")) colMap.person = h;
+      else if (lc.includes("prochaine activité") || lc.includes("next activity")) colMap.nextActivity = h;
+      else if (lc.includes("étiquette") || lc.includes("label")) colMap.label = h;
+      else if (lc.includes("propriétaire") || lc.includes("owner")) colMap.owner = h;
+      else if (lc.includes("valeur") || lc.includes("value")) colMap.value = h;
+      else if (lc.includes("pipeline")) colMap.pipeline = h;
+      else if (lc.includes("étape") || lc.includes("stage")) colMap.stage = h;
+    }
+
+    for (const row of rawData) {
+      const title = row[colMap.title] || "Deal sans titre";
+      const orgName = (row[colMap.org] || "").trim();
+      const personName = (row[colMap.person] || "").trim();
+      const nextActivityDate = (row[colMap.nextActivity] || "").trim();
+      const value = colMap.value ? Number(row[colMap.value]) || 0 : 0;
+
+      // Skip duplicates by title
+      if (existingDeals.some((d) => d.title === title) || newDeals.some((d) => d.title === title)) {
+        continue;
       }
-    }
 
-    // 5. Fetch all persons
-    const personsMap: Record<number, Person> = {};
-    for (const pid of personIds) {
-      try {
-        const p = await getPerson(pid);
-        if (p) {
-          personsMap[pid] = {
-            id: p.id,
-            name: p.name,
-            email: p.email || [],
-            phone: p.phone || [],
-            org_id: typeof p.org_id === "object" && p.org_id !== null
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              ? (p.org_id as any).value
-              : p.org_id,
-            job_title: p.job_title || undefined,
+      // Create or find org
+      let orgId: number | null = null;
+      if (orgName) {
+        const existingOrgId = orgMap.get(orgName.toLowerCase());
+        if (existingOrgId) {
+          orgId = existingOrgId;
+        } else {
+          orgId = nextOrgId++;
+          const org: Organization = { id: orgId, name: orgName };
+          newOrgs.push(org);
+          orgMap.set(orgName.toLowerCase(), orgId);
+        }
+      }
+
+      // Create or find person
+      let personId: number | null = null;
+      if (personName) {
+        const existingPersonId = personMap.get(personName.toLowerCase());
+        if (existingPersonId) {
+          personId = existingPersonId;
+        } else {
+          personId = nextPersonId++;
+          const person: Person = {
+            id: personId,
+            name: personName,
+            email: [],
+            phone: [],
+            org_id: orgId,
           };
-          if (personsMap[pid].org_id) orgIds.add(personsMap[pid].org_id as number);
+          newPersons.push(person);
+          personMap.set(personName.toLowerCase(), personId);
         }
-      } catch {
-        // skip
       }
-    }
-    console.log(`[Migration] ${Object.keys(personsMap).length} personnes récupérées`);
 
-    // 6. Fetch all orgs
-    const orgsMap: Record<number, Organization> = {};
-    for (const oid of orgIds) {
-      try {
-        const o = await getOrganization(oid);
-        if (o) {
-          orgsMap[oid] = { id: o.id, name: o.name };
-        }
-      } catch {
-        // skip
-      }
-    }
-    console.log(`[Migration] ${Object.keys(orgsMap).length} organisations récupérées`);
-
-    // 7. Fetch notes for each deal
-    const allNotes: Note[] = [];
-    let noteIdCounter = 1;
-    for (const d of rawDeals) {
-      try {
-        const dealNotes = await getNotesForDeal(d.id);
-        for (const n of dealNotes) {
-          allNotes.push({
-            id: noteIdCounter++,
-            content: n.content,
-            deal_id: d.id,
-            person_id: n.person_id || null,
-            org_id: n.org_id || null,
-          });
-        }
-      } catch {
-        // skip
-      }
-    }
-    console.log(`[Migration] ${allNotes.length} notes récupérées`);
-
-    // 8. Build deals array
-    const deals: Deal[] = rawDeals.map((d) => {
-      const pid = typeof d.person_id === "object" && d.person_id !== null
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ? (d.person_id as any).value
-        : d.person_id;
-      const oid = typeof d.org_id === "object" && d.org_id !== null
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ? (d.org_id as any).value
-        : d.org_id;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const raw = d as any;
-      const personName = raw.person_name || (typeof raw.person_id === "object" && raw.person_id?.name) || personsMap[pid]?.name || undefined;
-      const orgName = raw.org_name || (typeof raw.org_id === "object" && raw.org_id?.name) || orgsMap[oid]?.name || undefined;
-
-      return {
-        id: d.id,
-        title: d.title,
-        person_id: pid || null,
-        org_id: oid || null,
-        pipeline_id: d.pipeline_id,
-        stage_id: d.stage_id,
-        value: d.value || 0,
-        currency: d.currency || "EUR",
-        status: d.status || "open",
-        person_name: personName,
-        org_name: orgName,
-        next_activity_date: raw.next_activity_date || undefined,
-        next_activity_subject: raw.next_activity_subject || undefined,
-        participants: dealParticipantsMap[d.id] || (pid ? [pid] : []),
+      // Default pipeline/stage = Hot leads 3-6 mois / cold leads
+      const deal: Deal = {
+        id: nextDealId++,
+        title,
+        person_id: personId,
+        org_id: orgId,
+        pipeline_id: 1,
+        stage_id: 2,
+        value,
+        currency: "EUR",
+        status: "open",
+        person_name: personName || undefined,
+        org_name: orgName || undefined,
+        next_activity_date: nextActivityDate || undefined,
+        participants: personId ? [personId] : [],
       };
-    });
-
-    // 9. Build activities array — only those linked to our deals
-    const allActivities: Activity[] = [];
-    for (const a of [...rawActivities, ...rawDoneActivities]) {
-      // Only include activities linked to our deals, or to our persons
-      if (a.deal_id && dealIds.has(a.deal_id)) {
-        allActivities.push({
-          id: a.id,
-          subject: a.subject,
-          type: a.type || "task",
-          due_date: a.due_date || "",
-          due_time: a.due_time || "",
-          done: a.done,
-          deal_id: a.deal_id,
-          person_id: a.person_id || null,
-          org_id: a.org_id || null,
-          deal_title: a.deal_title || deals.find((d) => d.id === a.deal_id)?.title || undefined,
-          person_name: a.person_name || (a.person_id ? personsMap[a.person_id]?.name : undefined),
-          org_name: a.org_name || (a.org_id ? orgsMap[a.org_id]?.name : undefined),
-        });
-      }
+      newDeals.push(deal);
     }
-    // Deduplicate by id
-    const uniqueActivities = Array.from(new Map(allActivities.map((a) => [a.id, a])).values());
-    console.log(`[Migration] ${uniqueActivities.length} activités liées aux deals`);
 
-    // 10. Write everything to Blob
-    await bulkWriteDeals(deals);
-    await bulkWritePersons(Object.values(personsMap));
-    await bulkWriteOrganizations(Object.values(orgsMap));
-    await bulkWriteActivities(uniqueActivities);
-    await bulkWriteNotes(allNotes);
+    // Merge and write
+    await bulkWriteDeals([...existingDeals, ...newDeals]);
+    await bulkWritePersons([...existingPersons, ...newPersons]);
+    await bulkWriteOrganizations([...existingOrgs, ...newOrgs]);
 
     return NextResponse.json({
       success: true,
       counts: {
-        deals: deals.length,
-        persons: Object.keys(personsMap).length,
-        organizations: Object.keys(orgsMap).length,
-        activities: uniqueActivities.length,
-        notes: allNotes.length,
+        deals: newDeals.length,
+        persons: newPersons.length,
+        organizations: newOrgs.length,
       },
     });
   } catch (error: unknown) {
