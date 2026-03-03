@@ -92,14 +92,13 @@ export default function DashboardPage() {
 
   const migrateNotesFromPipedrive = async () => {
     setMigratingNotes(true);
-    setMigrateProgress("Démarrage...");
+    setMigrateProgress("Import notes...");
     let offset = 0;
     const limit = 10;
-    let totalActivities = 0;
     let totalNotes = 0;
     try {
       while (true) {
-        setMigrateProgress(`Traitement des affaires ${offset + 1} à ${offset + limit}...`);
+        setMigrateProgress(`Notes : affaires ${offset + 1} à ${offset + limit}...`);
         const res = await fetch("/api/migrate/notes", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -110,10 +109,9 @@ export default function DashboardPage() {
           setMigrateProgress(`Erreur : ${json.error}`);
           break;
         }
-        totalActivities += json.imported?.activities || 0;
         totalNotes += json.imported?.notes || 0;
         if (json.done) {
-          setMigrateProgress(`Terminé ! ${totalActivities} activités + ${totalNotes} notes importées`);
+          setMigrateProgress(`Terminé ! ${totalNotes} notes importées`);
           fetchActivities();
           fetchDeals();
           break;
@@ -122,6 +120,27 @@ export default function DashboardPage() {
       }
     } catch (err) {
       console.error("Erreur migration notes:", err);
+      setMigrateProgress("Erreur lors de la migration");
+    } finally {
+      setMigratingNotes(false);
+    }
+  };
+
+  const migrateActivitiesFromPipedrive = async () => {
+    setMigratingNotes(true);
+    setMigrateProgress("Import activités depuis Pipedrive...");
+    try {
+      const res = await fetch("/api/migrate/activities", { method: "POST" });
+      const json = await res.json();
+      if (json.success) {
+        setMigrateProgress(`Terminé ! ${json.counts.undone} tâches à faire + ${json.counts.done} dans l'historique`);
+        fetchActivities();
+        fetchDeals();
+      } else {
+        setMigrateProgress(`Erreur : ${json.error}`);
+      }
+    } catch (err) {
+      console.error("Erreur migration activités:", err);
       setMigrateProgress("Erreur lors de la migration");
     } finally {
       setMigratingNotes(false);
@@ -377,7 +396,19 @@ export default function DashboardPage() {
             ) : (
               <RefreshCw className="w-4 h-4" />
             )}
-            {migratingNotes ? "Migration..." : "Importer notes/tâches"}
+            Importer notes
+          </button>
+          <button
+            onClick={migrateActivitiesFromPipedrive}
+            disabled={migratingNotes}
+            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 cursor-pointer shadow-sm"
+          >
+            {migratingNotes ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Calendar className="w-4 h-4" />
+            )}
+            Importer activités
           </button>
           <button
             onClick={() => { fetchActivities(); fetchDeals(); }}
