@@ -118,45 +118,59 @@ export async function POST(request: Request) {
  * Apply Dropcontact results to prospect rows
  */
 function applyResults(rows: ProspectRow[], prospectIds: string[], dcResults: DropcontactResult[]) {
-  const results: { id: string; name: string; status: string; fields: string[] }[] = [];
+  const results: { id: string; name: string; status: string; fields: string[]; debug?: string }[] = [];
+
+  console.log(`[applyResults] prospectIds=${JSON.stringify(prospectIds)}, dcResults count=${dcResults.length}`);
 
   for (let i = 0; i < prospectIds.length; i++) {
     const pid = prospectIds[i];
     const dcResult = dcResults[i];
     const idx = rows.findIndex((r) => String(r.id) === String(pid));
-    if (idx === -1) continue;
+
+    console.log(`[applyResults] i=${i} pid=${pid} idx=${idx} dcResult=${JSON.stringify(dcResult).slice(0, 300)}`);
+
+    if (idx === -1) {
+      results.push({ id: pid, name: "?", status: "no_result", fields: [], debug: "prospect not found in rows" });
+      continue;
+    }
 
     const updatedFields: string[] = [];
 
     if (dcResult) {
-      // Email
+      // Email — fill if empty
       const bestEmail = dcResult.email?.find((e) => e.qualification === "professional")?.email
         || dcResult.email?.[0]?.email;
-      if (bestEmail && !rows[idx].email) {
-        rows[idx].email = bestEmail;
-        updatedFields.push("email");
+      if (bestEmail) {
+        if (!rows[idx].email) {
+          rows[idx].email = bestEmail;
+          updatedFields.push("email");
+        }
       }
 
-      // Phone
+      // Phone — fill if empty
       const phone = dcResult.mobile_phone || dcResult.phone;
-      if (phone && !rows[idx].telephone) {
-        rows[idx].telephone = phone;
-        updatedFields.push("telephone");
+      if (phone) {
+        if (!rows[idx].telephone) {
+          rows[idx].telephone = phone;
+          updatedFields.push("telephone");
+        }
       }
 
-      // Job
-      if (dcResult.job && !rows[idx].poste) {
-        rows[idx].poste = dcResult.job;
-        updatedFields.push("poste");
+      // Job — fill if empty
+      if (dcResult.job) {
+        if (!rows[idx].poste) {
+          rows[idx].poste = dcResult.job;
+          updatedFields.push("poste");
+        }
       }
 
-      // LinkedIn
+      // LinkedIn — always overwrite
       if (dcResult.linkedin) {
         rows[idx].linkedin = dcResult.linkedin;
         updatedFields.push("linkedin");
       }
 
-      // Name fill
+      // Name — fill if empty
       if (dcResult.first_name && !rows[idx].prenom) {
         rows[idx].prenom = dcResult.first_name;
         updatedFields.push("prenom");
@@ -166,24 +180,26 @@ function applyResults(rows: ProspectRow[], prospectIds: string[], dcResults: Dro
         updatedFields.push("nom");
       }
 
-      // Entreprise
+      // Entreprise — fill if empty
       if (dcResult.company && !rows[idx].entreprise) {
         rows[idx].entreprise = dcResult.company;
         updatedFields.push("entreprise");
       }
 
-      // NAF
+      // NAF — always overwrite
       if (dcResult.naf5_code) {
         const nafLabel = dcResult.naf5_des ? `${dcResult.naf5_code} — ${dcResult.naf5_des}` : dcResult.naf5_code;
         rows[idx].naf_code = nafLabel;
         updatedFields.push("naf_code");
       }
 
-      // Effectifs
+      // Effectifs — always overwrite
       if (dcResult.nb_employees) {
         rows[idx].effectifs = dcResult.nb_employees;
         updatedFields.push("effectifs");
       }
+    } else {
+      console.log(`[applyResults] No dcResult for index ${i}`);
     }
 
     results.push({
@@ -223,10 +239,15 @@ export async function GET(request: Request) {
       return NextResponse.json({ done: true, error: pollResult.error });
     }
 
+    console.log(`[GET enrich] Dropcontact returned ${pollResult.data?.length ?? 0} results`);
+    console.log(`[GET enrich] Raw DC data: ${JSON.stringify(pollResult.data).slice(0, 1500)}`);
+
     // Apply results to prospects
     const rows = await readProspects();
+    console.log(`[GET enrich] Read ${rows.length} prospects from blob`);
     const results = applyResults(rows, prospectIds, pollResult.data || []);
     await writeProspects(rows);
+    console.log(`[GET enrich] Wrote ${rows.length} prospects back to blob`);
 
     const enrichedCount = results.filter((r) => r.status === "enriched").length;
 
@@ -236,6 +257,7 @@ export async function GET(request: Request) {
       enriched: enrichedCount,
       total: results.length,
       results,
+      _debug_dc_count: pollResult.data?.length ?? 0,
     });
   } catch (error) {
     console.error("GET /api/prospects/enrich error:", error);

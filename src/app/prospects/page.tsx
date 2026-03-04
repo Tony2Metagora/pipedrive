@@ -265,11 +265,15 @@ export default function ProspectsPage() {
           if (pollJson.error) {
             setActionMsg(`Erreur Dropcontact : ${pollJson.error}`);
           } else {
-            setActionMsg(`${pollJson.enriched}/${pollJson.total} contact${pollJson.enriched > 1 ? "s" : ""} enrichi${pollJson.enriched > 1 ? "s" : ""}`);
+            const details = (pollJson.results || [])
+              .filter((r: { status: string; fields?: string[] }) => r.status === "enriched")
+              .map((r: { name: string; fields?: string[] }) => `${r.name}: ${(r.fields || []).join(", ")}`)
+              .join(" | ");
+            setActionMsg(`${pollJson.enriched}/${pollJson.total} enrichi${pollJson.enriched > 1 ? "s" : ""}${details ? ` — ${details}` : ""}`);
             setSelected(new Set());
             fetchProspects();
           }
-          setTimeout(() => setActionMsg(null), 5000);
+          setTimeout(() => setActionMsg(null), 8000);
           setEnriching(false);
           return;
         }
