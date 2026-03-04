@@ -415,9 +415,7 @@ export default function DashboardPage() {
               deals={urgentDeals}
               activitiesByDeal={activitiesByDeal}
               pipelineFilter={pipelineFilter}
-              onTaskCreated={() => { fetchActivities(); fetchDeals(); }}
-              onMarkDone={markDone}
-              onArchive={openArchiveModal}
+              onDealMoved={() => { fetchActivities(); fetchDeals(); }}
             />
           )}
         </>
@@ -598,9 +596,7 @@ export default function DashboardPage() {
               deals={okDeals}
               activitiesByDeal={activitiesByDeal}
               pipelineFilter={pipelineFilter}
-              onTaskCreated={() => { fetchActivities(); fetchDeals(); }}
-              onMarkDone={markDone}
-              onArchive={openArchiveModal}
+              onDealMoved={() => { fetchActivities(); fetchDeals(); }}
             />
           )}
         </>
@@ -630,22 +626,61 @@ function KanbanView({
   deals,
   activitiesByDeal,
   pipelineFilter,
-  onTaskCreated,
-  onMarkDone,
-  onArchive,
+  onDealMoved,
 }: {
   deals: Deal[];
   activitiesByDeal: Map<number, Activity[]>;
   pipelineFilter: number | "all";
-  onTaskCreated: () => void;
-  onMarkDone: (id: number) => void;
-  onArchive: (activityId: number | null, dealId: number | null, contactName: string) => void;
+  onDealMoved: () => void;
 }) {
+  const [dragDealId, setDragDealId] = useState<number | null>(null);
+  const [dropStageId, setDropStageId] = useState<number | null>(null);
+  const [moving, setMoving] = useState(false);
+
+  const handleDragStart = (e: React.DragEvent, dealId: number) => {
+    setDragDealId(dealId);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(dealId));
+  };
+
+  const handleDragOver = (e: React.DragEvent, stageId: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDropStageId(stageId);
+  };
+
+  const handleDragLeave = () => {
+    setDropStageId(null);
+  };
+
+  const handleDrop = async (e: React.DragEvent, stageId: number) => {
+    e.preventDefault();
+    setDropStageId(null);
+    const dealId = Number(e.dataTransfer.getData("text/plain"));
+    if (!dealId || isNaN(dealId)) return;
+    const deal = deals.find((d) => d.id === dealId);
+    if (!deal || deal.stage_id === stageId) { setDragDealId(null); return; }
+    setMoving(true);
+    try {
+      await fetch(`/api/deals/${dealId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stage_id: stageId }),
+      });
+      deal.stage_id = stageId;
+      onDealMoved();
+    } catch (err) {
+      console.error("Erreur déplacement affaire:", err);
+    } finally {
+      setMoving(false);
+      setDragDealId(null);
+    }
+  };
+
   // Group deals by pipeline, then by stage
   const pipelines = pipelineFilter !== "all"
     ? PIPELINES.filter((p) => p.id === pipelineFilter)
     : (() => {
-        // Show only pipelines that have deals
         const pipeIds = new Set(deals.map((d) => d.pipeline_id));
         return PIPELINES.filter((p) => pipeIds.has(p.id));
       })();
@@ -661,6 +696,12 @@ function KanbanView({
 
   return (
     <div className="space-y-6">
+      {moving && (
+        <div className="fixed top-4 right-4 z-50 bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium shadow-lg flex items-center gap-2">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          Déplacement...
+        </div>
+      )}
       {pipelines.map((pipeline) => {
         const pipeDeals = deals.filter((d) => d.pipeline_id === pipeline.id);
         if (pipeDeals.length === 0 && pipelineFilter === "all") return null;
@@ -677,10 +718,19 @@ function KanbanView({
               {pipeline.stages.map((stage) => {
                 const stageDeals = pipeDeals.filter((d) => d.stage_id === stage.id);
                 const totalValue = stageDeals.reduce((sum, d) => sum + (d.value || 0), 0);
+                const isDropTarget = dropStageId === stage.id && dragDealId !== null;
                 return (
                   <div
                     key={stage.id}
-                    className="flex-shrink-0 w-56 bg-gray-50 rounded-lg border border-gray-200"
+                    className={cn(
+                      "flex-shrink-0 w-56 rounded-lg border transition-colors",
+                      isDropTarget
+                        ? "bg-indigo-50 border-indigo-300 ring-2 ring-indigo-200"
+                        : "bg-gray-50 border-gray-200"
+                    )}
+                    onDragOver={(e) => handleDragOver(e, stage.id)}
+                    onDragLeave={handleDragLeave}
+                    onDrop={(e) => handleDrop(e, stage.id)}
                   >
                     {/* Column header */}
                     <div className="px-3 py-2 border-b border-gray-200 bg-white rounded-t-lg">
@@ -690,9 +740,11 @@ function KanbanView({
                       </p>
                     </div>
                     {/* Cards */}
-                    <div className="p-2 space-y-2 max-h-[60vh] overflow-y-auto">
+                    <div className="p-2 space-y-2 max-h-[60vh] overflow-y-auto min-h-[60px]">
                       {stageDeals.length === 0 ? (
-                        <p className="text-[9px] text-gray-300 text-center py-4">Aucune affaire</p>
+                        <p className="text-[9px] text-gray-300 text-center py-4">
+                          {isDropTarget ? "Déposer ici" : "Aucune affaire"}
+                        </p>
                       ) : (
                         stageDeals.map((deal) => {
                           const acts = activitiesByDeal.get(deal.id) || [];
@@ -700,43 +752,51 @@ function KanbanView({
                             ? acts.reduce((a, b) => (a.due_date < b.due_date ? a : b))
                             : null;
                           const isLate = nextAct ? isOverdue(nextAct.due_date) : false;
+                          const isDragging = dragDealId === deal.id;
                           return (
-                            <Link
+                            <div
                               key={deal.id}
-                              href={`/deal/${deal.id}`}
-                              className="block bg-white rounded-md border border-gray-200 p-2.5 hover:shadow-md transition-shadow cursor-pointer group"
+                              draggable
+                              onDragStart={(e) => handleDragStart(e, deal.id)}
+                              onDragEnd={() => { setDragDealId(null); setDropStageId(null); }}
+                              className={cn(
+                                "bg-white rounded-md border border-gray-200 p-2.5 hover:shadow-md transition-all cursor-grab active:cursor-grabbing group",
+                                isDragging && "opacity-40 scale-95"
+                              )}
                             >
-                              <p className="text-xs font-semibold text-gray-900 truncate group-hover:text-indigo-700">{deal.title}</p>
-                              {(deal.org_name || deal.person_name) && (
-                                <p className="text-[10px] text-gray-500 truncate mt-0.5">
-                                  {[deal.org_name, deal.person_name].filter(Boolean).join(", ")}
-                                </p>
-                              )}
-                              {deal.value > 0 && (
-                                <p className="text-[10px] font-medium text-gray-600 mt-1">
-                                  {deal.value.toLocaleString("fr-FR")} {deal.currency}
-                                </p>
-                              )}
-                              {nextAct && (
-                                <div className={cn(
-                                  "flex items-center gap-1 mt-1.5 text-[9px] rounded px-1.5 py-0.5 w-fit",
-                                  isLate ? "bg-red-50 text-red-600" : "bg-gray-100 text-gray-500"
-                                )}>
-                                  {isLate ? (
+                              <Link href={`/deal/${deal.id}`} className="block">
+                                <p className="text-xs font-semibold text-gray-900 truncate group-hover:text-indigo-700">{deal.title}</p>
+                                {(deal.org_name || deal.person_name) && (
+                                  <p className="text-[10px] text-gray-500 truncate mt-0.5">
+                                    {[deal.org_name, deal.person_name].filter(Boolean).join(", ")}
+                                  </p>
+                                )}
+                                {deal.value > 0 && (
+                                  <p className="text-[10px] font-medium text-gray-600 mt-1">
+                                    {deal.value.toLocaleString("fr-FR")} {deal.currency}
+                                  </p>
+                                )}
+                                {nextAct && (
+                                  <div className={cn(
+                                    "flex items-center gap-1 mt-1.5 text-[9px] rounded px-1.5 py-0.5 w-fit",
+                                    isLate ? "bg-red-50 text-red-600" : "bg-gray-100 text-gray-500"
+                                  )}>
+                                    {isLate ? (
+                                      <AlertTriangle className="w-2.5 h-2.5" />
+                                    ) : (
+                                      <Clock className="w-2.5 h-2.5" />
+                                    )}
+                                    {formatDate(nextAct.due_date)}
+                                  </div>
+                                )}
+                                {!nextAct && (
+                                  <div className="flex items-center gap-1 mt-1.5 text-[9px] rounded px-1.5 py-0.5 w-fit bg-red-50 text-red-500">
                                     <AlertTriangle className="w-2.5 h-2.5" />
-                                  ) : (
-                                    <Clock className="w-2.5 h-2.5" />
-                                  )}
-                                  {formatDate(nextAct.due_date)}
-                                </div>
-                              )}
-                              {!nextAct && (
-                                <div className="flex items-center gap-1 mt-1.5 text-[9px] rounded px-1.5 py-0.5 w-fit bg-red-50 text-red-500">
-                                  <AlertTriangle className="w-2.5 h-2.5" />
-                                  Aucune tâche
-                                </div>
-                              )}
-                            </Link>
+                                    Aucune tâche
+                                  </div>
+                                )}
+                              </Link>
+                            </div>
                           );
                         })
                       )}
@@ -1405,21 +1465,53 @@ function DealRow({
             </div>
           )}
 
-          {/* Contact detail panels — contact info only */}
+          {/* Contact detail panels — side by side when multiple */}
           {participantsFetched && participants.length > 0 ? (
-            <>
+            <div className={cn(
+              participants.length > 1 ? "grid grid-cols-2 gap-2 px-2" : ""
+            )}>
               {participants
                 .sort((a, b) => (b.primary ? 1 : 0) - (a.primary ? 1 : 0))
                 .map((p) => (
-                  <div key={p.id}>
+                  <div key={p.id} className={cn(
+                    participants.length > 1 && "border border-gray-200 rounded-lg overflow-hidden"
+                  )}>
                     {participants.length > 1 && (
-                      <div className="px-4 pt-2 pb-0">
+                      <div className={cn(
+                        "px-3 py-1.5 flex items-center justify-between",
+                        p.primary ? "bg-indigo-50 border-b border-indigo-100" : "bg-gray-50 border-b border-gray-100"
+                      )}>
                         <span className={cn(
                           "text-[10px] font-semibold uppercase tracking-wide",
                           p.primary ? "text-indigo-600" : "text-gray-400"
                         )}>
-                          {p.primary ? "★ Contact principal" : "Contact secondaire"} — {p.name}
+                          {p.primary ? "★ Principal" : "Secondaire"} — {p.name}
                         </span>
+                        {!p.primary && (
+                          <button
+                            onClick={async () => {
+                              try {
+                                await fetch(`/api/deals/${deal.id}`, {
+                                  method: "PUT",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ person_id: p.id }),
+                                });
+                                setParticipants((prev) =>
+                                  prev.map((pp) => ({ ...pp, primary: pp.id === p.id }))
+                                );
+                                deal.person_id = p.id;
+                                deal.person_name = p.name;
+                                onDealUpdated?.();
+                              } catch (err) {
+                                console.error("Erreur changement contact principal:", err);
+                              }
+                            }}
+                            className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-600 hover:bg-indigo-200 font-medium cursor-pointer transition-colors"
+                            title="Définir comme contact principal"
+                          >
+                            ★ Principal
+                          </button>
+                        )}
                       </div>
                     )}
                     <DetailPanel
@@ -1428,10 +1520,11 @@ function DealRow({
                       dealId={deal.id}
                       orgId={deal.org_id}
                       onActivityCreated={onTaskCreated}
+                      compact={participants.length > 1}
                     />
                   </div>
                 ))}
-            </>
+            </div>
           ) : participantsFetched && participants.length === 0 && deal.person_id ? (
             <DetailPanel personId={deal.person_id} dealId={deal.id} orgId={deal.org_id} onActivityCreated={onTaskCreated} />
           ) : !deal.person_id && participantsFetched ? (

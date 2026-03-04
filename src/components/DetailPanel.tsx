@@ -74,6 +74,7 @@ interface Props {
   dealId?: number;
   orgId?: number | null;
   onActivityCreated?: () => void;
+  compact?: boolean;
 }
 
 const SECTION_STYLES: { match: string; icon: string; bg: string; border: string; title: string; text: string }[] = [
@@ -129,7 +130,7 @@ function SummaryCard({ text, color }: { text: string; color: "purple" | "blue" }
   );
 }
 
-export default function DetailPanel({ personId, allParticipants, dealId, orgId, onActivityCreated }: Props) {
+export default function DetailPanel({ personId, allParticipants, dealId, orgId, onActivityCreated, compact }: Props) {
   const [context, setContext] = useState<PersonContext | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -327,9 +328,9 @@ export default function DetailPanel({ personId, allParticipants, dealId, orgId, 
   if (!context) return null;
 
   return (
-    <div className="bg-gray-50 border-t border-gray-200 px-6 py-4 space-y-4">
+    <div className={cn("bg-gray-50 border-t border-gray-200 space-y-4", compact ? "px-3 py-3" : "px-6 py-4")}>
       {/* Ligne 1 : Infos contact + Résumés IA */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className={cn(compact ? "space-y-3" : "grid grid-cols-1 lg:grid-cols-2 gap-4")}>
         {/* Contact */}
         <div className="bg-white rounded-lg border border-gray-200 p-3">
           <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
