@@ -4,46 +4,34 @@
  */
 
 import { NextResponse } from "next/server";
-import { list, get } from "@vercel/blob";
+import { getDeals, getActivities, getNotes } from "@/lib/blob-store";
 
 export async function GET() {
   try {
-    // 1. List all blobs
-    const { blobs } = await list();
-    const blobInfo = blobs.map((b) => ({
-      pathname: b.pathname,
-      size: b.size,
-      url: b.url.substring(0, 80),
-      uploadedAt: b.uploadedAt,
-    }));
+    const deals = await getDeals();
+    const activities = await getActivities();
+    const notes = await getNotes();
 
-    // 2. Try to read deals.json via get()
-    let dealsGetResult = "not attempted";
-    try {
-      const result = await get("deals.json", { access: "private" });
-      if (!result) {
-        dealsGetResult = "get() returned null";
-      } else {
-        dealsGetResult = `statusCode=${result.statusCode}, hasStream=${!!result.stream}, pathname=${result.blob?.pathname}`;
-        if (result.statusCode === 200 && result.stream) {
-          const reader = result.stream.getReader();
-          const { value } = await reader.read();
-          reader.releaseLock();
-          const preview = value ? new TextDecoder().decode(value).substring(0, 200) : "empty";
-          dealsGetResult += `, preview=${preview}`;
-        }
-      }
-    } catch (err) {
-      dealsGetResult = `error: ${err instanceof Error ? err.message : String(err)}`;
-    }
+    // Find "Macif" deal specifically
+    const macifDeal = deals.find((d) => d.title.toLowerCase().includes("macif"));
+    const macifActivities = macifDeal
+      ? activities.filter((a) => a.deal_id === macifDeal.id)
+      : [];
+
+    // Sample deal_ids from activities to see what IDs they have
+    const activityDealIds = [...new Set(activities.map((a) => a.deal_id))].slice(0, 20);
+    const dealIds = deals.map((d) => d.id).slice(0, 20);
 
     return NextResponse.json({
-      totalBlobs: blobs.length,
-      blobs: blobInfo,
-      dealsGetResult,
+      counts: { deals: deals.length, activities: activities.length, notes: notes.length },
+      macifDeal: macifDeal ? { id: macifDeal.id, title: macifDeal.title } : null,
+      macifActivitiesCount: macifActivities.length,
+      sampleActivityDealIds: activityDealIds,
+      sampleDealIds: dealIds,
+      sampleActivities: activities.slice(0, 3).map((a) => ({ id: a.id, deal_id: a.deal_id, subject: a.subject, deal_title: a.deal_title })),
+      sampleDeals: deals.slice(0, 3).map((d) => ({ id: d.id, title: d.title })),
     });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
