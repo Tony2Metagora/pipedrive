@@ -30,7 +30,6 @@ import NewActivityModal from "@/components/NewActivityModal";
 import ArchiveModal from "@/components/ArchiveModal";
 import DetailPanel from "@/components/DetailPanel";
 import DealContextPanel from "@/components/DealContextPanel";
-import MessagePanel from "@/components/MessagePanel";
 
 interface Activity {
   id: number;
@@ -713,8 +712,6 @@ function DealRow({
   const [participants, setParticipants] = useState<{ id: number; name: string; email: { value: string; primary: boolean }[]; phone: { value: string; primary: boolean }[]; job_title?: string; primary: boolean }[]>([]);
   const [loadingParticipants, setLoadingParticipants] = useState(false);
   const [participantsFetched, setParticipantsFetched] = useState(false);
-  const [followupMessage, setFollowupMessage] = useState<string | null>(null);
-  const [followupSubject, setFollowupSubject] = useState<string>("");
 
   const dealLink = `/deal/${deal.id}`;
 
@@ -1182,31 +1179,7 @@ function DealRow({
             personName={deal.person_name}
             orgName={deal.org_name}
             onActivityChanged={onTaskCreated}
-            onUseFollowup={(email, subject) => {
-              setFollowupMessage(email);
-              setFollowupSubject(subject);
-            }}
           />
-
-          {/* MessagePanel pré-rempli avec le followup */}
-          {followupMessage && deal.person_id && (
-            <div className="px-4 pb-4">
-              <MessagePanel
-                personId={deal.person_id}
-                contactName={deal.person_name || ""}
-                contactCompany={deal.org_name}
-                contactEmail={participants.find((p) => p.primary)?.email?.[0]?.value || participants[0]?.email?.[0]?.value}
-                allParticipants={participants.length > 1 ? participants : undefined}
-                dealId={deal.id}
-                orgId={deal.org_id}
-                onClose={() => setFollowupMessage(null)}
-                onActivityCreated={onTaskCreated}
-                initialMessage={followupMessage}
-                initialSubject={followupSubject}
-                initialChannel="email"
-              />
-            </div>
-          )}
         </div>
       )}
     </div>

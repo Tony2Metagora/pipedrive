@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
   StickyNote,
   Clock,
@@ -40,20 +40,17 @@ interface DealContext {
 // Section styling by keyword
 const SECTION_STYLES: { match: string; icon: string; bg: string; border: string; title: string; text: string }[] = [
   { match: "DERNIER EMAIL", icon: "📧", bg: "bg-amber-50", border: "border-amber-200", title: "text-amber-800", text: "text-amber-900" },
-  { match: "NEXT STEPS", icon: "⚡", bg: "bg-sky-50", border: "border-sky-200", title: "text-sky-800", text: "text-sky-900" },
   { match: "FOLLOWUP EMAIL", icon: "✉️", bg: "bg-green-50", border: "border-green-200", title: "text-green-800", text: "text-green-900" },
 ];
 
-function SummaryCard({ text, onUseFollowup }: { text: string; onUseFollowup?: () => void }) {
+function SummaryCard({ text, onSendFollowup }: { text: string; onSendFollowup?: () => void }) {
   const sections = useMemo(() => {
-    const parts: { title: string; content: string; styleIdx: number }[] = [];
-    // Find all section positions
+    const parts: { title: string; content: string; objet: string; styleIdx: number }[] = [];
     const positions: { idx: number; title: string; styleIdx: number; endOfTitle: number }[] = [];
     for (let si = 0; si < SECTION_STYLES.length; si++) {
       const keyword = SECTION_STYLES[si].match;
       const idx = text.indexOf(keyword);
       if (idx === -1) continue;
-      // Find the end of the title line (could have date suffix like "DERNIER EMAIL (Mon, 3 Mar...)")
       const lineEnd = text.indexOf("\n", idx);
       const endOfTitle = lineEnd > -1 ? lineEnd : text.length;
       const fullTitle = text.slice(idx, endOfTitle).trim();
@@ -63,13 +60,16 @@ function SummaryCard({ text, onUseFollowup }: { text: string; onUseFollowup?: ()
     for (let i = 0; i < positions.length; i++) {
       const start = positions[i].endOfTitle;
       const end = i + 1 < positions.length ? positions[i + 1].idx : text.length;
-      const content = text.slice(start, end).trim();
-      // For FOLLOWUP EMAIL, strip the "Objet: ..." line from content (it's extracted separately)
-      let cleanContent = content;
-      if (SECTION_STYLES[positions[i].styleIdx].match === "FOLLOWUP EMAIL") {
-        cleanContent = content.replace(/^Objet\s*:.*\n?/i, "").trim();
+      const rawContent = text.slice(start, end).trim();
+      // Extract "Objet:" line for followup
+      let objet = "";
+      let content = rawContent;
+      const objetMatch = rawContent.match(/^Objet\s*:\s*(.+)/im);
+      if (objetMatch) {
+        objet = objetMatch[1].trim();
+        content = rawContent.replace(/^Objet\s*:.+\n?/im, "").trim();
       }
-      parts.push({ title: positions[i].title, content: cleanContent, styleIdx: positions[i].styleIdx });
+      parts.push({ title: positions[i].title, content, objet, styleIdx: positions[i].styleIdx });
     }
     return parts.length > 0 ? parts : null;
   }, [text]);
@@ -79,26 +79,29 @@ function SummaryCard({ text, onUseFollowup }: { text: string; onUseFollowup?: ()
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       {sections.map((s) => {
         const cfg = SECTION_STYLES[s.styleIdx];
         const isFollowup = cfg.match === "FOLLOWUP EMAIL";
         return (
-          <div key={s.title} className={`rounded-lg ${cfg.bg} border ${cfg.border} px-3 py-2`}>
-            <div className="flex items-center justify-between mb-1">
+          <div key={s.title} className={`rounded-lg ${cfg.bg} border ${cfg.border} px-3 py-2.5`}>
+            <div className="flex items-center justify-between mb-1.5">
               <p className={`text-[10px] font-bold uppercase tracking-wide ${cfg.title}`}>
                 {cfg.icon} {s.title}
               </p>
-              {isFollowup && onUseFollowup && (
+              {isFollowup && onSendFollowup && (
                 <button
-                  onClick={onUseFollowup}
-                  className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold text-white bg-green-600 rounded-md hover:bg-green-700 cursor-pointer transition-colors"
+                  onClick={onSendFollowup}
+                  className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-semibold text-white bg-green-600 rounded-md hover:bg-green-700 cursor-pointer transition-colors"
                 >
                   <Mail className="w-3 h-3" />
-                  Utiliser ce followup
+                  Envoyer
                 </button>
               )}
             </div>
+            {isFollowup && s.objet && (
+              <p className={`text-xs font-semibold ${cfg.text} mb-2`}>Objet : {s.objet}</p>
+            )}
             <p className={`text-xs leading-relaxed ${cfg.text} whitespace-pre-line`}>{s.content}</p>
           </div>
         );
@@ -123,10 +126,9 @@ interface Props {
   orgName?: string;
   deals?: { id: number; title: string; pipeline_id: number; stage_id: number; value: number; status: string; currency: string }[];
   onActivityChanged?: () => void;
-  onUseFollowup?: (email: string, subject: string) => void;
 }
 
-export default function DealContextPanel({ dealId, personId, orgId, personName, orgName, deals, onActivityChanged, onUseFollowup }: Props) {
+export default function DealContextPanel({ dealId, personId, orgId, personName, orgName, deals, onActivityChanged }: Props) {
   const [ctx, setCtx] = useState<DealContext | null>(null);
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<string | null>(null);
@@ -367,11 +369,17 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
         </div>
         {/* Dernières notes */}
         {ctx.notes.length > 0 && (
-          <div className="space-y-1.5 mb-2">
-            {ctx.notes.slice(0, 2).map((note) => (
+          <div className="space-y-1 mb-2">
+            {/* Dernière note : affichée complètement */}
+            <div
+              className="p-2 bg-yellow-50 border border-yellow-100 rounded text-[10px] text-gray-700 leading-relaxed"
+              dangerouslySetInnerHTML={{ __html: ctx.notes[0].content }}
+            />
+            {/* Notes suivantes : aperçu 1 ligne */}
+            {ctx.notes.slice(1, 4).map((note) => (
               <div
                 key={note.id}
-                className="p-2 bg-yellow-50 border border-yellow-100 rounded text-[10px] text-gray-700 leading-relaxed line-clamp-3"
+                className="px-2 py-1 bg-yellow-50/50 border border-yellow-100/50 rounded text-[9px] text-gray-400 truncate"
                 dangerouslySetInnerHTML={{ __html: note.content }}
               />
             ))}
@@ -381,7 +389,12 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
         {summary ? (
           <SummaryCard
             text={summary}
-            onUseFollowup={followupEmail ? () => onUseFollowup?.(followupEmail, followupSubject) : undefined}
+            onSendFollowup={followupEmail && personEmail ? () => {
+              const to = encodeURIComponent(personEmail);
+              const subject = encodeURIComponent(followupSubject || "Metagora");
+              const body = encodeURIComponent(followupEmail);
+              window.open(`https://mail.google.com/mail/?view=cm&to=${to}&su=${subject}&body=${body}`, "_blank");
+            } : undefined}
           />
         ) : (
           <p className="text-[10px] text-purple-400">

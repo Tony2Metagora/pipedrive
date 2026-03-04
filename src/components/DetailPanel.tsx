@@ -78,7 +78,6 @@ interface Props {
 
 const SECTION_STYLES: { match: string; icon: string; bg: string; border: string; title: string; text: string }[] = [
   { match: "DERNIER EMAIL", icon: "📧", bg: "bg-amber-50", border: "border-amber-200", title: "text-amber-800", text: "text-amber-900" },
-  { match: "NEXT STEPS", icon: "⚡", bg: "bg-sky-50", border: "border-sky-200", title: "text-sky-800", text: "text-sky-900" },
   { match: "FOLLOWUP EMAIL", icon: "✉️", bg: "bg-green-50", border: "border-green-200", title: "text-green-800", text: "text-green-900" },
 ];
 

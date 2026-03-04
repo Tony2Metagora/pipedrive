@@ -122,6 +122,16 @@ export async function POST(request: Request) {
 
     // 2. Build prompt — emails only, no Pipedrive
     const lastEmail = validEmails[0]!;
+
+    // Format last email date as JJ/MM/AAAA
+    let formattedDate = lastEmail.date;
+    try {
+      const d = new Date(lastEmail.date);
+      if (!isNaN(d.getTime())) {
+        formattedDate = d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
+      }
+    } catch { /* keep raw date */ }
+
     const emailTexts = validEmails
       .map(
         (e, i) =>
@@ -134,15 +144,13 @@ Tu reçois les derniers emails échangés avec le contact "${contactName || "inc
 
 Réponds EXACTEMENT dans ce format. Texte brut, pas de formatage markdown, pas de *, #, -.
 
-DERNIER EMAIL (${lastEmail.date})
+DERNIER EMAIL (${formattedDate})
 [3-4 lignes : résumé de l'opportunité commerciale dans ce dernier email. Ce qui a été discuté, niveau d'intérêt, signaux d'achat, demandes concrètes.]
 
-NEXT STEPS & ACTIONS
-[3-4 lignes : prochaines étapes concrètes. Ce que le prospect attend, ce que Tony doit faire. Recommandation claire.]
-
 FOLLOWUP EMAIL
-Objet: [objet du mail de followup]
-[Rédige un email de followup professionnel mais naturel que Tony pourrait envoyer en réponse. Le mail doit être court (5-8 lignes), en français, tutoyer le contact si le dernier email tutoyait, vouvoyer sinon. Signe "Tony" à la fin. Le mail doit être la suite logique de la conversation : relancer, proposer un RDV, envoyer un document, confirmer une action, etc.]
+Objet: [objet du mail de followup, court et percutant]
+
+[Rédige un email de followup professionnel mais naturel que Tony pourrait envoyer en réponse. Le mail doit être court (5-8 lignes), en français, tutoyer le contact si le dernier email tutoyait, vouvoyer sinon. Signe "Tony" à la fin. Le mail doit être la suite logique de la conversation : relancer, proposer un RDV, envoyer un document, confirmer une action, etc. IMPORTANT : sépare bien les paragraphes par des lignes vides pour aérer le texte.]
 
 RÈGLES : Phrases courtes et factuelles. Base-toi UNIQUEMENT sur le contenu des emails.`;
 
