@@ -33,13 +33,11 @@ export interface DropcontactResult {
 }
 
 /**
- * Enrich a contact via Dropcontact (async API with polling).
- * POST /v1/enrich/all → request_id
- * GET  /v1/enrich/all/{request_id} → poll until success=true
+ * Submit a batch of contacts to Dropcontact for enrichment.
+ * Returns request_id for later polling.
  */
-export async function enrichContact(input: DropcontactInput): Promise<DropcontactResult | null> {
-  // 1. Submit enrichment request
-  console.log("[Dropcontact] Submitting:", JSON.stringify(input));
+export async function submitBatchEnrich(inputs: DropcontactInput[]): Promise<string> {
+  console.log(`[Dropcontact] Submitting batch of ${inputs.length} contacts...`);
   const submitRes = await fetch(BASE_URL, {
     method: "POST",
     headers: {
@@ -47,7 +45,7 @@ export async function enrichContact(input: DropcontactInput): Promise<Dropcontac
       "X-Access-Token": API_KEY,
     },
     body: JSON.stringify({
-      data: [input],
+      data: inputs,
       siren: true,
       language: "fr",
     }),
@@ -67,41 +65,55 @@ export async function enrichContact(input: DropcontactInput): Promise<Dropcontac
     throw new Error("Dropcontact: no request_id returned");
   }
 
-  // 2. Poll for result (max 60s, every 3s)
+  return requestId;
+}
+
+/**
+ * Poll for batch enrichment results.
+ * Returns { done: true, data } if complete, { done: false } if still processing.
+ */
+export async function pollBatchEnrich(requestId: string): Promise<{ done: boolean; data?: DropcontactResult[]; error?: string }> {
+  console.log(`[Dropcontact] Polling request ${requestId}...`);
+  const pollRes = await fetch(`${BASE_URL}/${requestId}`, {
+    method: "GET",
+    headers: {
+      "X-Access-Token": API_KEY,
+    },
+  });
+
+  if (!pollRes.ok) {
+    const text = await pollRes.text();
+    console.error("[Dropcontact] Poll error:", pollRes.status, text);
+    return { done: true, error: `Dropcontact poll error: ${pollRes.status} ${text}` };
+  }
+
+  const pollJson = await pollRes.json();
+  console.log("[Dropcontact] Poll response:", JSON.stringify(pollJson).slice(0, 800));
+
+  if (pollJson.error) {
+    return { done: true, error: pollJson.reason || "Dropcontact API error" };
+  }
+
+  if (pollJson.success && pollJson.data?.length > 0) {
+    return { done: true, data: pollJson.data as DropcontactResult[] };
+  }
+
+  // Still processing
+  return { done: false };
+}
+
+/**
+ * Legacy single-contact enrichment (with internal polling, for non-prospect use).
+ */
+export async function enrichContact(input: DropcontactInput): Promise<DropcontactResult | null> {
+  const requestId = await submitBatchEnrich([input]);
+
   for (let i = 0; i < 20; i++) {
     await new Promise((r) => setTimeout(r, 3000));
-
-    console.log(`[Dropcontact] Polling attempt ${i + 1}/20...`);
-    const pollRes = await fetch(`${BASE_URL}/${requestId}`, {
-      method: "GET",
-      headers: {
-        "X-Access-Token": API_KEY,
-      },
-    });
-
-    if (!pollRes.ok) {
-      const text = await pollRes.text();
-      console.error("[Dropcontact] Poll error:", pollRes.status, text);
-      throw new Error(`Dropcontact poll error: ${pollRes.status} ${text}`);
-    }
-
-    const pollJson = await pollRes.json();
-    console.log("[Dropcontact] Poll response:", JSON.stringify(pollJson).slice(0, 500));
-
-    if (pollJson.success && pollJson.data?.length > 0) {
-      console.log("[Dropcontact] Enrichment complete:", JSON.stringify(pollJson.data[0]).slice(0, 500));
-      return pollJson.data[0] as DropcontactResult;
-    }
-
-    // success=false means still processing, keep polling
-    if (!pollJson.success && !pollJson.error) {
-      continue;
-    }
-
-    // If error=true, stop
-    if (pollJson.error) {
-      console.error("[Dropcontact] API error:", pollJson.reason);
-      return null;
+    const result = await pollBatchEnrich(requestId);
+    if (result.done) {
+      if (result.error) throw new Error(result.error);
+      return result.data?.[0] ?? null;
     }
   }
 

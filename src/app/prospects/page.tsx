@@ -231,25 +231,58 @@ export default function ProspectsPage() {
     if (selected.size === 0) return;
     if (!confirm(`Enrichir ${selected.size} contact${selected.size > 1 ? "s" : ""} via Dropcontact ?\nCela consommera des crédits API.`)) return;
     setEnriching(true);
-    setActionMsg("Enrichissement en cours...");
+    setActionMsg("Envoi à Dropcontact...");
     try {
-      const res = await fetch("/api/prospects/enrich", {
+      // Step 1: Submit batch
+      const submitRes = await fetch("/api/prospects/enrich", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids: Array.from(selected) }),
       });
-      const json = await res.json();
-      if (json.success) {
-        setActionMsg(`${json.enriched}/${json.total} contact${json.enriched > 1 ? "s" : ""} enrichi${json.enriched > 1 ? "s" : ""}`);
-        setSelected(new Set());
-        fetchProspects();
-      } else {
-        setActionMsg(`Erreur : ${json.error}`);
+      const submitJson = await submitRes.json();
+
+      if (!submitJson.submitted) {
+        setActionMsg(`Erreur : ${submitJson.error}`);
+        setTimeout(() => setActionMsg(null), 5000);
+        setEnriching(false);
+        return;
       }
-    } catch {
+
+      const { requestId, prospectIds } = submitJson;
+      setActionMsg(`Dropcontact traite ${submitJson.count} contacts...`);
+
+      // Step 2: Poll for results (every 5s, max 2 min)
+      for (let attempt = 0; attempt < 24; attempt++) {
+        await new Promise((r) => setTimeout(r, 5000));
+        setActionMsg(`Enrichissement en cours... (${(attempt + 1) * 5}s)`);
+
+        const pollRes = await fetch(
+          `/api/prospects/enrich?requestId=${encodeURIComponent(requestId)}&ids=${prospectIds.join(",")}`
+        );
+        const pollJson = await pollRes.json();
+
+        if (pollJson.done) {
+          if (pollJson.error) {
+            setActionMsg(`Erreur Dropcontact : ${pollJson.error}`);
+          } else {
+            setActionMsg(`${pollJson.enriched}/${pollJson.total} contact${pollJson.enriched > 1 ? "s" : ""} enrichi${pollJson.enriched > 1 ? "s" : ""}`);
+            setSelected(new Set());
+            fetchProspects();
+          }
+          setTimeout(() => setActionMsg(null), 5000);
+          setEnriching(false);
+          return;
+        }
+      }
+
+      // Timeout
+      setActionMsg("Timeout — Dropcontact n'a pas répondu en 2 min");
+      setTimeout(() => setActionMsg(null), 5000);
+    } catch (err) {
+      console.error("Enrichissement error:", err);
       setActionMsg("Erreur lors de l'enrichissement");
+      setTimeout(() => setActionMsg(null), 5000);
     }
-    setTimeout(() => setActionMsg(null), 5000);
     setEnriching(false);
   };
 
