@@ -1,8 +1,8 @@
 /**
- * API Route — Résumé IA unifié (Pipedrive + Gmail)
+ * API Route — Résumé IA basé sur les 2 derniers emails Gmail
  * POST /api/summary/unified
- * Body: { pipedriveContext: string, contactEmail: string, contactName: string }
- * Returns a structured summary with 4 sections.
+ * Body: { contactEmail: string, contactName: string }
+ * Returns: 2 email blocks (opportunité commerciale) + 1 next steps block
  */
 
 import { NextResponse } from "next/server";
@@ -55,97 +55,96 @@ export async function POST(request: Request) {
       : null;
 
     const body = await request.json();
-    const { pipedriveContext, contactEmail, contactName } = body;
+    const { contactEmail, contactName } = body;
 
-    if (!pipedriveContext) {
-      return NextResponse.json({ error: "Contexte Pipedrive requis" }, { status: 400 });
+    if (!contactEmail) {
+      return NextResponse.json({ error: "Adresse email du contact requise" }, { status: 400 });
     }
 
-    // 1. Try to fetch Gmail emails if we have an access token and email
-    let gmailSection = "Aucun accès Gmail ou aucune adresse email disponible.";
-    let emailCount = 0;
+    if (!accessToken) {
+      return NextResponse.json({ error: "Token Gmail manquant. Reconnectez-vous." }, { status: 403 });
+    }
 
-    if (accessToken && contactEmail) {
-      try {
-        const query = encodeURIComponent(`from:${contactEmail} OR to:${contactEmail}`);
-        const listRes = await fetch(
-          `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=15`,
+    // 1. Fetch the 2 most recent emails with this contact
+    const query = encodeURIComponent(`from:${contactEmail} OR to:${contactEmail}`);
+    const listRes = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=2`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+
+    if (!listRes.ok) {
+      if (listRes.status === 401) {
+        return NextResponse.json({ error: "Token Gmail expiré. Reconnectez-vous." }, { status: 401 });
+      }
+      return NextResponse.json({ error: "Erreur Gmail API" }, { status: 500 });
+    }
+
+    const listJson = await listRes.json();
+    const messages: GmailMessage[] = listJson.messages || [];
+
+    if (messages.length === 0) {
+      return NextResponse.json({
+        data: { summary: "Aucun email trouvé avec ce contact.", emailCount: 0 },
+      });
+    }
+
+    // Fetch full details for the 2 emails
+    const details = await Promise.all(
+      messages.slice(0, 2).map(async (msg: GmailMessage) => {
+        const detailRes = await fetch(
+          `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`,
           { headers: { Authorization: `Bearer ${accessToken}` } }
         );
+        if (!detailRes.ok) return null;
+        const detail: GmailMessageDetail = await detailRes.json();
+        const headers = detail.payload?.headers || [];
+        const getHeader = (name: string) =>
+          headers.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value || "";
+        const textBody = extractTextBody(detail.payload);
+        const truncatedBody = textBody.length > 1500 ? textBody.slice(0, 1500) + "..." : textBody;
+        return {
+          from: getHeader("From"),
+          to: getHeader("To"),
+          subject: getHeader("Subject"),
+          date: getHeader("Date"),
+          body: truncatedBody || detail.snippet,
+        };
+      })
+    );
 
-        if (listRes.ok) {
-          const listJson = await listRes.json();
-          const messages: GmailMessage[] = listJson.messages || [];
+    const validEmails = details.filter(Boolean);
 
-          if (messages.length > 0) {
-            const details = await Promise.all(
-              messages.slice(0, 10).map(async (msg: GmailMessage) => {
-                const detailRes = await fetch(
-                  `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`,
-                  { headers: { Authorization: `Bearer ${accessToken}` } }
-                );
-                if (!detailRes.ok) return null;
-                const detail: GmailMessageDetail = await detailRes.json();
-                const headers = detail.payload?.headers || [];
-                const getHeader = (name: string) =>
-                  headers.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value || "";
-                const textBody = extractTextBody(detail.payload);
-                const truncatedBody = textBody.length > 800 ? textBody.slice(0, 800) + "..." : textBody;
-                return {
-                  from: getHeader("From"),
-                  to: getHeader("To"),
-                  subject: getHeader("Subject"),
-                  date: getHeader("Date"),
-                  body: truncatedBody || detail.snippet,
-                };
-              })
-            );
-
-            const validEmails = details.filter(Boolean);
-            emailCount = validEmails.length;
-
-            if (validEmails.length > 0) {
-              gmailSection = validEmails
-                .map(
-                  (e, i) =>
-                    `--- Email ${i + 1} ---\nDe: ${e!.from}\nÀ: ${e!.to}\nSujet: ${e!.subject}\nDate: ${e!.date}\n${e!.body}`
-                )
-                .join("\n\n");
-            }
-          } else {
-            gmailSection = "Aucun email trouvé avec ce contact.";
-          }
-        } else {
-          gmailSection = "Token Gmail expiré ou invalide. Reconnectez-vous.";
-        }
-      } catch {
-        gmailSection = "Erreur lors de la récupération des emails Gmail.";
-      }
+    if (validEmails.length === 0) {
+      return NextResponse.json({
+        data: { summary: "Impossible de lire les emails.", emailCount: 0 },
+      });
     }
 
-    // 2. Build unified prompt
+    // 2. Build prompt — emails only, no Pipedrive
+    const emailTexts = validEmails
+      .map(
+        (e, i) =>
+          `--- Email ${i === 0 ? "le plus récent" : "précédent"} ---\nDe: ${e!.from}\nÀ: ${e!.to}\nSujet: ${e!.subject}\nDate: ${e!.date}\n\n${e!.body}`
+      )
+      .join("\n\n");
+
     const systemPrompt = `Tu es l'assistant commercial de Tony chez Metagora (formation immersive IA pour le retail/luxe).
-Tu reçois deux sources d'information sur un contact "${contactName || "inconnu"}" :
-- Les données Pipedrive (deals, notes, activités)
-- Les emails Gmail échangés avec ce contact
+Tu reçois les 2 derniers emails échangés avec le contact "${contactName || "inconnu"}".
 
-Réponds EXACTEMENT dans ce format avec ces 4 sections. Chaque section fait 3-4 lignes max :
+Réponds EXACTEMENT dans ce format. Texte brut, pas de formatage markdown, pas de *, #, -.
 
-OPPORTUNITÉ COMMERCIALE
-[Budget évoqué (montant si possible), niveau d'intérêt (chaud/tiède/froid), signaux d'achat détectés dans les emails et Pipedrive, type de relation (client/partenaire/prospect).]
+DERNIER EMAIL
+[Résumé en 3-4 lignes de l'opportunité commerciale identifiée dans le dernier email : ce qui a été discuté, le niveau d'intérêt, les signaux d'achat ou demandes concrètes.]
 
-SCOPE & BESOIN
-[Besoin identifié : type de formation, produits évoqués, personas cibles, vertical métier, nombre d'accès, langues, tout détail sur le périmètre du projet.]
+EMAIL PRÉCÉDENT
+[Résumé en 3-4 lignes de l'opportunité commerciale identifiée dans l'email précédent : contexte de la conversation, besoin exprimé, éléments clés échangés.]
 
 NEXT STEPS & ACTIONS
-[Prochaines étapes concrètes : ce que le prospect a demandé, tâches à faire, relances, documents à envoyer, RDV à planifier. Recommandation : relancer / archiver / attendre.]
+[3-4 lignes : prochaines étapes concrètes basées sur ces emails. Ce que le prospect attend, ce que Tony doit faire (relancer, envoyer un doc, planifier un RDV, etc.). Recommandation claire.]
 
-HISTORIQUE PIPEDRIVE
-[Résumé chronologique des interactions : date du premier et dernier contact, deals en cours et leur statut, activités réalisées, notes clés. Fraîcheur du contact.]
+RÈGLES : Phrases courtes et factuelles. Base-toi UNIQUEMENT sur le contenu des emails. Si un seul email est disponible, écris "Pas d'email précédent disponible" pour la section EMAIL PRÉCÉDENT.`;
 
-RÈGLES : Texte brut sans formatage markdown. Pas de *, #, -. Phrases courtes et factuelles. Croise les infos Pipedrive et Gmail pour une vision complète. Si une info n'est pas disponible, écris "Non mentionné".`;
-
-    const userContent = `=== DONNÉES PIPEDRIVE ===\n${pipedriveContext}\n\n=== EMAILS GMAIL ===\n${gmailSection}`;
+    const userContent = emailTexts;
 
     // 3. Call Azure OpenAI
     const url = `${ENDPOINT}openai/deployments/${DEPLOYMENT}/chat/completions?api-version=${API_VERSION}`;
@@ -161,7 +160,7 @@ RÈGLES : Texte brut sans formatage markdown. Pas de *, #, -. Phrases courtes et
           { role: "system", content: systemPrompt },
           { role: "user", content: userContent },
         ],
-        max_completion_tokens: 1000,
+        max_completion_tokens: 800,
       }),
     });
 
@@ -177,7 +176,7 @@ RÈGLES : Texte brut sans formatage markdown. Pas de *, #, -. Phrases courtes et
     return NextResponse.json({
       data: {
         summary: summary.replace(/[*#]/g, ""),
-        emailCount,
+        emailCount: validEmails.length,
       },
     });
   } catch (error) {

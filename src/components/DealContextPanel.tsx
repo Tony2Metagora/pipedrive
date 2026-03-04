@@ -18,7 +18,6 @@ import {
   X,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
-import { getPipelineName, getStageName } from "@/lib/config";
 
 interface Activity {
   id: number;
@@ -39,10 +38,9 @@ interface DealContext {
 }
 
 const SECTION_CONFIG: Record<string, { icon: string; bg: string; border: string; title: string; text: string }> = {
-  "OPPORTUNITÉ COMMERCIALE": { icon: "💰", bg: "bg-amber-50", border: "border-amber-200", title: "text-amber-800", text: "text-amber-900" },
-  "SCOPE & BESOIN": { icon: "🎯", bg: "bg-emerald-50", border: "border-emerald-200", title: "text-emerald-800", text: "text-emerald-900" },
+  "DERNIER EMAIL": { icon: "�", bg: "bg-amber-50", border: "border-amber-200", title: "text-amber-800", text: "text-amber-900" },
+  "EMAIL PRÉCÉDENT": { icon: "📨", bg: "bg-emerald-50", border: "border-emerald-200", title: "text-emerald-800", text: "text-emerald-900" },
   "NEXT STEPS & ACTIONS": { icon: "⚡", bg: "bg-sky-50", border: "border-sky-200", title: "text-sky-800", text: "text-sky-900" },
-  "HISTORIQUE PIPEDRIVE": { icon: "📋", bg: "bg-violet-50", border: "border-violet-200", title: "text-violet-800", text: "text-violet-900" },
 };
 
 function SummaryCard({ text }: { text: string }) {
@@ -141,49 +139,19 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
   }, [personId]);
 
   const generateSummary = async () => {
-    if (!ctx) return;
+    if (!personEmail) {
+      setSummary("Aucune adresse email disponible pour ce contact.");
+      return;
+    }
     setLoadingSummary(true);
     setSummary(null);
     setNoteSaved(false);
-
-    let contextText = `Contact : ${personName || "inconnu"}\n`;
-    if (orgName) contextText += `Entreprise : ${orgName}\n`;
-
-    if (deals && deals.length > 0) {
-      contextText += `\nDeals (${deals.length}) :\n`;
-      for (const deal of deals) {
-        contextText += `- ${deal.title} | Pipeline: ${getPipelineName(deal.pipeline_id)} | Étape: ${getStageName(deal.stage_id)} | Statut: ${deal.status} | Valeur: ${deal.value} ${deal.currency}\n`;
-      }
-    }
-
-    if (ctx.activities.done.length > 0) {
-      contextText += `\nActivités terminées (${ctx.activities.done.length}) :\n`;
-      for (const a of ctx.activities.done.slice(0, 10)) {
-        contextText += `- ${a.subject} (${a.due_date})\n`;
-      }
-    }
-
-    if (ctx.activities.pending.length > 0) {
-      contextText += `\nActivités en attente (${ctx.activities.pending.length}) :\n`;
-      for (const a of ctx.activities.pending) {
-        contextText += `- ${a.subject} (${a.due_date})\n`;
-      }
-    }
-
-    if (ctx.notes.length > 0) {
-      contextText += `\nNotes (${ctx.notes.length}) :\n`;
-      for (const n of ctx.notes.slice(0, 10)) {
-        const clean = n.content.replace(/<[^>]+>/g, "").substring(0, 300);
-        contextText += `- ${clean}\n`;
-      }
-    }
 
     try {
       const res = await fetch("/api/summary/unified", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          pipedriveContext: contextText,
           contactEmail: personEmail,
           contactName: personName || "inconnu",
         }),

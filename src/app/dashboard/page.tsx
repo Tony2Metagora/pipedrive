@@ -212,13 +212,23 @@ export default function DashboardPage() {
     }
   }
 
-  // Urgent: deals whose next_activity_date is overdue/today, or deals with NO next activity at all
+  // Compute earliest pending activity date per deal from ACTUAL activities
+  const earliestActivityByDeal = (dealId: number): string | null => {
+    const acts = activitiesByDeal.get(dealId);
+    if (!acts || acts.length === 0) return null;
+    return acts.reduce((earliest, a) =>
+      !earliest || a.due_date < earliest ? a.due_date : earliest
+    , "" as string) || null;
+  };
+
+  // Urgent: deals whose earliest pending activity is overdue/today, or deals with NO pending activity
   const urgentDeals = deals.filter((d) => {
     if (!matchDeal(d)) return false;
-    return !d.next_activity_date || isOverdue(d.next_activity_date);
+    const earliest = earliestActivityByDeal(d.id);
+    return !earliest || isOverdue(earliest);
   });
 
-  // À traiter: deals with future next_activity_date (not urgent)
+  // À traiter: deals with future pending activities (not urgent)
   const urgentDealIds = new Set(urgentDeals.map((d) => d.id));
   const okDeals = deals.filter((d) => !urgentDealIds.has(d.id) && matchDeal(d));
 

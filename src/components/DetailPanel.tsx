@@ -26,7 +26,6 @@ import {
   CheckCircle,
 } from "lucide-react";
 import { cn, formatDate } from "@/lib/utils";
-import { getPipelineName, getStageName } from "@/lib/config";
 import MessagePanel from "@/components/MessagePanel";
 
 interface PersonContext {
@@ -78,10 +77,9 @@ interface Props {
 }
 
 const SECTION_CONFIG: Record<string, { icon: string; bg: string; border: string; title: string; text: string }> = {
-  "OPPORTUNITÉ COMMERCIALE": { icon: "💰", bg: "bg-amber-50", border: "border-amber-200", title: "text-amber-800", text: "text-amber-900" },
-  "SCOPE & BESOIN": { icon: "🎯", bg: "bg-emerald-50", border: "border-emerald-200", title: "text-emerald-800", text: "text-emerald-900" },
+  "DERNIER EMAIL": { icon: "�", bg: "bg-amber-50", border: "border-amber-200", title: "text-amber-800", text: "text-amber-900" },
+  "EMAIL PRÉCÉDENT": { icon: "📨", bg: "bg-emerald-50", border: "border-emerald-200", title: "text-emerald-800", text: "text-emerald-900" },
   "NEXT STEPS & ACTIONS": { icon: "⚡", bg: "bg-sky-50", border: "border-sky-200", title: "text-sky-800", text: "text-sky-900" },
-  "HISTORIQUE PIPEDRIVE": { icon: "📋", bg: "bg-violet-50", border: "border-violet-200", title: "text-violet-800", text: "text-violet-900" },
 };
 
 function SummaryCard({ text, color }: { text: string; color: "purple" | "blue" }) {
@@ -170,66 +168,21 @@ export default function DetailPanel({ personId, allParticipants, dealId, orgId, 
 
   const generateUnifiedSummary = async () => {
     if (!context) return;
+    const pEmail = context.person.email?.[0]?.value;
+    if (!pEmail) {
+      setSummary("Aucune adresse email disponible pour ce contact.");
+      return;
+    }
     setLoadingSummary(true);
     setSummary(null);
     setNoteSaved(false);
-
-    const pEmail = context.person.email?.[0]?.value || "aucun";
-    const pPhone = context.person.phone?.[0]?.value || "aucun";
-
-    let contextText = `Contact : ${context.person.name}\n`;
-    contextText += `Poste : ${context.person.job_title || "inconnu"}\n`;
-    contextText += `Email : ${pEmail}\n`;
-    contextText += `Téléphone : ${pPhone}\n`;
-
-    if (context.organization) {
-      contextText += `Entreprise : ${context.organization.name}\n`;
-    }
-
-    if (context.deals.length > 0) {
-      contextText += `\nDeals (${context.deals.length}) :\n`;
-      for (const deal of context.deals) {
-        contextText += `- ${deal.title} | Pipeline: ${getPipelineName(deal.pipeline_id)} | Étape: ${getStageName(deal.stage_id)} | Statut: ${deal.status} | Valeur: ${deal.value} ${deal.currency}\n`;
-      }
-    } else {
-      contextText += `\nAucun deal associé.\n`;
-    }
-
-    if (context.activities.done.length > 0) {
-      contextText += `\nActivités terminées (${context.activities.done.length}) :\n`;
-      for (const a of context.activities.done.slice(0, 10)) {
-        contextText += `- ${a.subject} (${a.due_date})\n`;
-      }
-    }
-
-    if (context.activities.pending.length > 0) {
-      contextText += `\nActivités en attente (${context.activities.pending.length}) :\n`;
-      for (const a of context.activities.pending) {
-        contextText += `- ${a.subject} (${a.due_date})\n`;
-      }
-    }
-
-    const allNotes = [...context.notes];
-    for (const notes of Object.values(context.dealNotes)) {
-      allNotes.push(...notes);
-    }
-    if (allNotes.length > 0) {
-      contextText += `\nNotes (${allNotes.length}) :\n`;
-      for (const n of allNotes.slice(0, 10)) {
-        const clean = n.content.replace(/<[^>]+>/g, "").substring(0, 300);
-        contextText += `- ${clean}\n`;
-      }
-    } else {
-      contextText += `\nAucune note.\n`;
-    }
 
     try {
       const res = await fetch("/api/summary/unified", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          pipedriveContext: contextText,
-          contactEmail: pEmail !== "aucun" ? pEmail : null,
+          contactEmail: pEmail,
           contactName: context.person.name,
         }),
       });
