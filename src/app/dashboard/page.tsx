@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import {
   Phone,
@@ -22,7 +22,6 @@ import {
   Search,
   Users,
   X,
-  Upload,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDate, isOverdue, isWithinDays, detectActivityType } from "@/lib/utils";
@@ -84,117 +83,6 @@ export default function DashboardPage() {
   const [batchResults, setBatchResults] = useState<{ personId: number; personName: string; status: string; enriched?: Record<string, string | undefined> }[] | null>(null);
   const [batchProgress, setBatchProgress] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [uploadResult, setUploadResult] = useState<string | null>(null);
-  const [migratingNotes, setMigratingNotes] = useState(false);
-  const [migrateProgress, setMigrateProgress] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const migrateNotesFromPipedrive = async () => {
-    setMigratingNotes(true);
-    setMigrateProgress("Import notes...");
-    let offset = 0;
-    const limit = 10;
-    let totalNotes = 0;
-    try {
-      while (true) {
-        setMigrateProgress(`Notes : affaires ${offset + 1} à ${offset + limit}...`);
-        const res = await fetch("/api/migrate/notes", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ offset, limit, force: true }),
-        });
-        const json = await res.json();
-        if (!json.success) {
-          setMigrateProgress(`Erreur : ${json.error}`);
-          break;
-        }
-        totalNotes += json.imported?.notes || 0;
-        if (json.done) {
-          setMigrateProgress(`Terminé ! ${totalNotes} notes importées`);
-          fetchActivities();
-          fetchDeals();
-          break;
-        }
-        offset = json.nextOffset;
-      }
-    } catch (err) {
-      console.error("Erreur migration notes:", err);
-      setMigrateProgress("Erreur lors de la migration");
-    } finally {
-      setMigratingNotes(false);
-    }
-  };
-
-  const migrateActivitiesFromPipedrive = async () => {
-    setMigratingNotes(true);
-    setMigrateProgress("Import activités depuis Pipedrive...");
-    try {
-      const res = await fetch("/api/migrate/activities", { method: "POST" });
-      const json = await res.json();
-      if (json.success) {
-        setMigrateProgress(
-          `Terminé ! ${json.counts.undone} tâches + ${json.counts.done} historique`
-        );
-        if (json.counts.total > 0) { fetchActivities(); fetchDeals(); }
-      } else {
-        setMigrateProgress(`Erreur : ${json.error}`);
-      }
-    } catch (err) {
-      console.error("Erreur migration activités:", err);
-      setMigrateProgress("Erreur lors de la migration");
-    } finally {
-      setMigratingNotes(false);
-    }
-  };
-
-  const migratePersonsFromPipedrive = async () => {
-    setMigratingNotes(true);
-    setMigrateProgress("Import contacts depuis Pipedrive...");
-    try {
-      const res = await fetch("/api/migrate/persons", { method: "POST" });
-      const json = await res.json();
-      if (json.success) {
-        setMigrateProgress(
-          `Terminé ! ${json.counts.updated} contacts mis à jour, ${json.counts.added} ajoutés (${json.counts.totalNow} total)`
-        );
-        fetchDeals();
-      } else {
-        setMigrateProgress(`Erreur : ${json.error}`);
-      }
-    } catch (err) {
-      console.error("Erreur migration contacts:", err);
-      setMigrateProgress("Erreur lors de la migration");
-    } finally {
-      setMigratingNotes(false);
-    }
-  };
-
-  const handleUploadDeals = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    setUploadResult(null);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await fetch("/api/migrate", { method: "POST", body: fd });
-      const json = await res.json();
-      if (json.success) {
-        setUploadResult(`${json.counts.deals} affaires importées`);
-        fetchActivities();
-        fetchDeals();
-      } else {
-        setUploadResult(`Erreur : ${json.error}`);
-      }
-    } catch (err) {
-      console.error("Erreur upload:", err);
-      setUploadResult("Erreur lors de l'import");
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
-  };
 
   const fetchActivities = useCallback(async () => {
     setLoading(true);
@@ -390,61 +278,6 @@ export default function DashboardPage() {
               </button>
             )}
           </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx,.xls"
-            onChange={handleUploadDeals}
-            className="hidden"
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 cursor-pointer shadow-sm"
-          >
-            {uploading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Upload className="w-4 h-4" />
-            )}
-            {uploading ? "Import..." : "Importer affaires"}
-          </button>
-          <button
-            onClick={migrateNotesFromPipedrive}
-            disabled={migratingNotes}
-            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50 cursor-pointer shadow-sm"
-          >
-            {migratingNotes ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <RefreshCw className="w-4 h-4" />
-            )}
-            Importer notes
-          </button>
-          <button
-            onClick={migrateActivitiesFromPipedrive}
-            disabled={migratingNotes}
-            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 cursor-pointer shadow-sm"
-          >
-            {migratingNotes ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Calendar className="w-4 h-4" />
-            )}
-            Importer activités
-          </button>
-          <button
-            onClick={migratePersonsFromPipedrive}
-            disabled={migratingNotes}
-            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-sky-600 rounded-lg hover:bg-sky-700 disabled:opacity-50 cursor-pointer shadow-sm"
-          >
-            {migratingNotes ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Users className="w-4 h-4" />
-            )}
-            Importer contacts
-          </button>
           <button
             onClick={() => { fetchActivities(); fetchDeals(); }}
             disabled={loading || loadingDeals}
@@ -453,14 +286,6 @@ export default function DashboardPage() {
             <RefreshCw className={cn("w-4 h-4", (loading || loadingDeals) && "animate-spin")} />
             Rafraîchir
           </button>
-          {(uploadResult || migrateProgress) && (
-            <span className={cn(
-              "text-xs font-medium px-2 py-1 rounded",
-              (uploadResult || migrateProgress || "").includes("Erreur") ? "text-red-600 bg-red-50" : "text-green-600 bg-green-50"
-            )}>
-              {migrateProgress || uploadResult}
-            </span>
-          )}
         </div>
       </div>
 

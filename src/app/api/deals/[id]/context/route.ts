@@ -4,7 +4,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { getActivities, getActivitiesForDeal, getNotesForDeal } from "@/lib/blob-store";
+import { getActivitiesForDeal, getNotesForDeal } from "@/lib/blob-store";
 
 export async function GET(
   _request: Request,
@@ -18,30 +18,18 @@ export async function GET(
       return NextResponse.json({ error: "dealId invalide" }, { status: 400 });
     }
 
-    const [activities, allActivities, notes] = await Promise.all([
+    const [activities, notes] = await Promise.all([
       getActivitiesForDeal(dealId),
-      getActivities(),
       getNotesForDeal(dealId),
     ]);
 
     const pending = activities.filter((a) => !a.done);
     const done = activities.filter((a) => a.done);
 
-    // Debug: log what we find
-    const sampleDealIds = [...new Set(allActivities.map((a) => a.deal_id))].slice(0, 10);
-    console.log(`[Context] dealId=${dealId}, totalActivities=${allActivities.length}, matchingActivities=${activities.length}, sampleDealIds=${JSON.stringify(sampleDealIds)}`);
-
     return NextResponse.json({
       data: {
         activities: { pending, done },
         notes,
-      },
-      debug: {
-        requestedDealId: dealId,
-        totalActivitiesInBlob: allActivities.length,
-        matchingActivities: activities.length,
-        matchingNotes: notes.length,
-        sampleActivityDealIds: sampleDealIds,
       },
     });
   } catch (error) {
