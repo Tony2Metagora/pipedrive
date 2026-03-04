@@ -173,7 +173,7 @@ export default function MessagePanel({
     setStep("sent");
   };
 
-  // Step 2: Validate activity in Pipedrive (create + mark done)
+  // Step 2: Validate activity (create + mark done)
   const validateActivity = async () => {
     setValidating(true);
     try {
@@ -208,7 +208,7 @@ export default function MessagePanel({
       onActivityCreated?.();
     } catch (err) {
       console.error("Erreur création activité:", err);
-      alert("Erreur lors de la création de l'activité Pipedrive");
+      alert("Erreur lors de la création de l'activité");
     } finally {
       setValidating(false);
     }
@@ -273,7 +273,7 @@ export default function MessagePanel({
           <div className="rounded-lg bg-green-50 border border-green-200 p-4 flex items-center gap-3">
             <CheckCircle2 className="w-6 h-6 text-green-600 flex-shrink-0" />
             <div>
-              <p className="text-sm font-semibold text-green-800">Activité validée dans Pipedrive</p>
+              <p className="text-sm font-semibold text-green-800">Activité validée</p>
               <p className="text-xs text-green-600 mt-0.5">
                 {channel === "whatsapp" ? "WhatsApp" : "Email"} envoyé à {contactName}
                 {selectedTemplate ? ` — ${selectedTemplate.etape}` : ""} — {new Date().toLocaleDateString("fr-FR")}
@@ -352,7 +352,7 @@ export default function MessagePanel({
             <p className="text-xs text-amber-700">
               {channel === "whatsapp"
                 ? "Ouvre WhatsApp, colle le message (Ctrl+V) et envoie-le. Puis valide ci-dessous."
-                : "Une fois le message envoyé dans Gmail, clique ci-dessous pour enregistrer l'activité dans Pipedrive."}
+                : "Une fois le message envoyé dans Gmail, clique ci-dessous pour enregistrer l'activité."}
             </p>
           </div>
 

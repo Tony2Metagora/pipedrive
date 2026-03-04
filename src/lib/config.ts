@@ -1,6 +1,6 @@
 /**
- * Configuration des pipelines et stages Pipedrive.
- * IDs récupérés via l'API Pipedrive le 27/02/2026.
+ * Configuration des pipelines et stages.
+ * IDs récupérés le 27/02/2026.
  */
 
 export const PIPELINES = [

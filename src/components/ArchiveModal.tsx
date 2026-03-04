@@ -90,7 +90,7 @@ export default function ArchiveModal({
             Archiver <span className="font-semibold text-gray-900">{contactName}</span> ?
             <br />
             <span className="text-xs text-gray-400">
-              Le deal sera marqué comme perdu dans Pipedrive avec le motif choisi.
+              L'affaire sera marquée comme perdue avec le motif choisi.
             </span>
           </p>
 

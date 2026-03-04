@@ -75,7 +75,7 @@ const COLUMN_MAP: Record<string, keyof ProspectRow> = {
   note: "notes",
   commentaire: "notes",
   commentaires: "notes",
-  // Pipedrive export EN
+  // CRM export EN
   "person - name": "nom",
   "person - first name": "prenom",
   "person - last name": "nom",
@@ -83,7 +83,7 @@ const COLUMN_MAP: Record<string, keyof ProspectRow> = {
   "person - phone": "telephone",
   "person - organization": "entreprise",
   "person - job title": "poste",
-  // Pipedrive export FR
+  // CRM export FR
   "personne - nom": "nom",
   "personne - prénom": "prenom",
   "personne - organisation": "entreprise",

@@ -1,6 +1,5 @@
 /**
  * Blob Store — couche de persistance JSON dans Vercel Blob Storage.
- * Remplace toutes les interactions avec l'API Pipedrive.
  *
  * Données stockées :
  * - deals.json      : tableau de Deal

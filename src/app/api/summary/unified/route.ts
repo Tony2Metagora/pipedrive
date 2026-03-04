@@ -120,7 +120,7 @@ export async function POST(request: Request) {
       });
     }
 
-    // 2. Build prompt — emails only, no Pipedrive
+    // 2. Build prompt — emails only
     const lastEmail = validEmails[0]!;
 
     // Format last email date as JJ/MM/AAAA

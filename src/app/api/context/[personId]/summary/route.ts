@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     const { context } = await request.json();
 
     const systemMessage = `Tu es l'assistant commercial de Tony chez Metagora (formation immersive IA pour le retail/luxe).
-Tu reçois le contexte complet d'un contact extrait de Pipedrive.
+Tu reçois le contexte complet d'un contact.
 
 Réponds EXACTEMENT dans ce format avec ces 3 sections. Chaque section fait 2-3 lignes max :
 

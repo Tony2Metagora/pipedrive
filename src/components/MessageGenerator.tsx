@@ -267,7 +267,7 @@ export default function MessageGenerator({ type, dealId, contact, onClose }: Pro
             <div className="flex items-center gap-2 p-4 bg-green-50 border border-green-200 rounded-xl text-green-700">
               <Check className="w-5 h-5" />
               <span className="text-sm font-medium">
-                {isEmail ? "Email" : "SMS"} marqué comme envoyé — activité créée dans Pipedrive
+                {isEmail ? "Email" : "SMS"} marqué comme envoyé — activité créée
               </span>
             </div>
           )}
