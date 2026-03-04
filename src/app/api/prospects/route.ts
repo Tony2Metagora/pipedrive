@@ -144,3 +144,29 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "Erreur mise à jour" }, { status: 500 });
   }
 }
+
+export async function PATCH(request: Request) {
+  try {
+    const body = await request.json();
+    const { ids, statut } = body as { ids: string[]; statut: string };
+    if (!ids?.length || !statut) {
+      return NextResponse.json({ error: "ids[] et statut requis" }, { status: 400 });
+    }
+
+    const rows = await readProspects();
+    const idSet = new Set(ids.map(String));
+    let updated = 0;
+    for (const row of rows) {
+      if (idSet.has(String(row.id))) {
+        row.statut = statut;
+        updated++;
+      }
+    }
+
+    await writeProspects(rows);
+    return NextResponse.json({ success: true, updated });
+  } catch (error) {
+    console.error("PATCH /api/prospects error:", error);
+    return NextResponse.json({ error: "Erreur mise à jour groupée" }, { status: 500 });
+  }
+}

@@ -33,13 +33,14 @@ interface Prospect {
   notes: string;
   score_entreprise: string;
   score_job: string;
-  // Enriched fields from API
   deal_id: number | null;
   deal_title: string | null;
   deal_status: string | null;
   deal_value: number | null;
   computed_statut: string;
 }
+
+type StatusKey = "en cours" | "perdu" | "archivé";
 
 function ScoreStars({ value, onChange }: { value: number; onChange?: (v: number) => void }) {
   return (
@@ -63,12 +64,28 @@ function ScoreStars({ value, onChange }: { value: number; onChange?: (v: number)
   );
 }
 
+function StatusBadge({ statut }: { statut: string }) {
+  const cls =
+    statut === "en cours"
+      ? "bg-green-100 text-green-700"
+      : statut === "archivé"
+        ? "bg-gray-100 text-gray-500"
+        : "bg-red-100 text-red-700";
+  const label =
+    statut === "en cours" ? "En cours" : statut === "archivé" ? "Archivé" : "Perdu";
+  return (
+    <span className={cn("inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-semibold whitespace-nowrap", cls)}>
+      {label}
+    </span>
+  );
+}
+
 export default function ProspectsPage() {
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "en cours" | "perdu">("all");
+  const [statusFilters, setStatusFilters] = useState<Set<StatusKey>>(new Set(["en cours", "perdu"]));
   const [pipelineFilter, setPipelineFilter] = useState<string>("all");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editData, setEditData] = useState<Partial<Prospect>>({});
@@ -76,6 +93,8 @@ export default function ProspectsPage() {
   const [linkingId, setLinkingId] = useState<string | null>(null);
   const [newDealTitle, setNewDealTitle] = useState("");
   const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [archiving, setArchiving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchProspects = useCallback(async () => {
@@ -178,6 +197,30 @@ export default function ProspectsPage() {
     }
   };
 
+  const bulkArchive = async () => {
+    if (selected.size === 0) return;
+    setArchiving(true);
+    try {
+      const res = await fetch("/api/prospects", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selected), statut: "archivé" }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setActionMsg(`${json.updated} prospect${json.updated > 1 ? "s" : ""} archivé${json.updated > 1 ? "s" : ""}`);
+        setSelected(new Set());
+        fetchProspects();
+      } else {
+        setActionMsg(`Erreur : ${json.error}`);
+      }
+    } catch {
+      setActionMsg("Erreur lors de l'archivage groupé");
+    }
+    setTimeout(() => setActionMsg(null), 3000);
+    setArchiving(false);
+  };
+
   const createDealForProspect = async (prospectId: string) => {
     const title = newDealTitle.trim();
     if (!title) return;
@@ -207,6 +250,24 @@ export default function ProspectsPage() {
     window.open("/api/prospects/download", "_blank");
   };
 
+  const toggleStatusFilter = (s: StatusKey) => {
+    setStatusFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(s)) next.delete(s);
+      else next.add(s);
+      return next;
+    });
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   // Get unique pipelines for filter
   const pipelineOptions = useMemo(() => {
     const all = new Set<string>();
@@ -218,16 +279,11 @@ export default function ProspectsPage() {
     return Array.from(all).sort();
   }, [prospects]);
 
-  // Non-archived prospects
-  const activeProspects = useMemo(() => {
-    return prospects.filter((p) => (p.computed_statut || p.statut) !== "archivé");
-  }, [prospects]);
-
-  // Filtered and searched prospects (excluding archived)
+  // Filtered and searched prospects
   const filtered = useMemo(() => {
-    return activeProspects.filter((p) => {
+    return prospects.filter((p) => {
       const statut = p.computed_statut || p.statut;
-      if (statusFilter !== "all" && statut !== statusFilter) return false;
+      if (statusFilters.size > 0 && !statusFilters.has(statut as StatusKey)) return false;
       if (pipelineFilter !== "all" && !p.pipelines?.includes(pipelineFilter)) return false;
       if (search) {
         const q = search.toLowerCase();
@@ -243,11 +299,22 @@ export default function ProspectsPage() {
       }
       return true;
     });
-  }, [activeProspects, search, statusFilter, pipelineFilter]);
+  }, [prospects, search, statusFilters, pipelineFilter]);
 
-  const enCoursCount = activeProspects.filter((p) => (p.computed_statut || p.statut) === "en cours").length;
-  const perduCount = activeProspects.filter((p) => (p.computed_statut || p.statut) === "perdu").length;
-  const archivedCount = prospects.length - activeProspects.length;
+  const enCoursCount = prospects.filter((p) => (p.computed_statut || p.statut) === "en cours").length;
+  const perduCount = prospects.filter((p) => (p.computed_statut || p.statut) === "perdu").length;
+  const archivedCount = prospects.filter((p) => (p.computed_statut || p.statut) === "archivé").length;
+
+  const allFilteredSelected = filtered.length > 0 && filtered.every((p) => selected.has(p.id));
+  const someFilteredSelected = filtered.some((p) => selected.has(p.id));
+
+  const toggleSelectAll = () => {
+    if (allFilteredSelected) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(filtered.map((p) => p.id)));
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -259,13 +326,22 @@ export default function ProspectsPage() {
             Prospects
           </h1>
           <p className="text-sm text-gray-500 mt-1">
-            {activeProspects.length} contacts — {enCoursCount} en cours, {perduCount} perdus
-            {archivedCount > 0 && <span className="text-gray-400"> ({archivedCount} archivés)</span>}
+            {prospects.length} contacts — {enCoursCount} en cours, {perduCount} perdus, {archivedCount} archivés
           </p>
         </div>
         <div className="flex items-center gap-2">
           {actionMsg && (
             <span className="text-xs font-medium px-2 py-1 rounded bg-green-50 text-green-700">{actionMsg}</span>
+          )}
+          {selected.size > 0 && (
+            <button
+              onClick={bulkArchive}
+              disabled={archiving}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 disabled:opacity-50 cursor-pointer"
+            >
+              {archiving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Archive className="w-4 h-4" />}
+              Archiver ({selected.size})
+            </button>
           )}
           <button
             onClick={downloadCsv}
@@ -309,17 +385,35 @@ export default function ProspectsPage() {
             className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
           />
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-3">
           <Filter className="w-4 h-4 text-gray-400" />
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as "all" | "en cours" | "perdu")}
-            className="px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-indigo-400 outline-none"
-          >
-            <option value="all">Tous les statuts</option>
-            <option value="en cours">En cours ({enCoursCount})</option>
-            <option value="perdu">Perdu ({perduCount})</option>
-          </select>
+          <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={statusFilters.has("en cours")}
+              onChange={() => toggleStatusFilter("en cours")}
+              className="rounded border-gray-300 text-green-600 focus:ring-green-500 cursor-pointer"
+            />
+            <span className="text-green-700 font-medium">En cours ({enCoursCount})</span>
+          </label>
+          <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={statusFilters.has("perdu")}
+              onChange={() => toggleStatusFilter("perdu")}
+              className="rounded border-gray-300 text-red-600 focus:ring-red-500 cursor-pointer"
+            />
+            <span className="text-red-700 font-medium">Perdu ({perduCount})</span>
+          </label>
+          <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={statusFilters.has("archivé")}
+              onChange={() => toggleStatusFilter("archivé")}
+              className="rounded border-gray-300 text-gray-500 focus:ring-gray-400 cursor-pointer"
+            />
+            <span className="text-gray-500 font-medium">Archivé ({archivedCount})</span>
+          </label>
           <select
             value={pipelineFilter}
             onChange={(e) => setPipelineFilter(e.target.value)}
@@ -338,7 +432,7 @@ export default function ProspectsPage() {
         <div className="flex items-center justify-center py-20">
           <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
         </div>
-      ) : activeProspects.length === 0 ? (
+      ) : prospects.length === 0 ? (
         <div className="text-center py-20 bg-white rounded-lg border border-gray-200">
           <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
           <p className="text-lg font-medium text-gray-600">Aucun prospect</p>
@@ -350,17 +444,26 @@ export default function ProspectsPage() {
             <table className="w-full text-sm table-fixed">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="text-left pl-3 pr-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[80px]">Prénom</th>
-                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[80px]">Nom</th>
-                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[170px]">Email</th>
-                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[100px]">Tél.</th>
-                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[100px]">Poste</th>
-                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[110px]">Entreprise</th>
-                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[65px]">Statut</th>
-                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[130px]">Affaire</th>
-                  <th className="text-center px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[90px]">Score Ent.</th>
-                  <th className="text-center px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[90px]">Score Job</th>
-                  <th className="text-center pr-3 pl-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[72px]"></th>
+                  <th className="text-center pl-3 pr-0 py-2.5 w-[36px]">
+                    <input
+                      type="checkbox"
+                      checked={allFilteredSelected}
+                      ref={(el) => { if (el) el.indeterminate = someFilteredSelected && !allFilteredSelected; }}
+                      onChange={toggleSelectAll}
+                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    />
+                  </th>
+                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[72px]">Prénom</th>
+                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[72px]">Nom</th>
+                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[160px]">Email</th>
+                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[90px]">Tél.</th>
+                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[90px]">Poste</th>
+                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[100px]">Entreprise</th>
+                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[62px]">Statut</th>
+                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[120px]">Affaire</th>
+                  <th className="text-center px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[85px]">Score Ent.</th>
+                  <th className="text-center px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[85px]">Score Job</th>
+                  <th className="text-center pr-3 pl-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[60px]"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -370,9 +473,19 @@ export default function ProspectsPage() {
                   const statut = p.computed_statut || p.statut;
                   const scoreEnt = parseInt(p.score_entreprise) || 0;
                   const scoreJob = parseInt(p.score_job) || 0;
+                  const isSelected = selected.has(p.id);
+                  const isArchived = statut === "archivé";
                   return (
-                    <tr key={p.id} className={cn("group hover:bg-gray-50 transition-colors", isEditing && "bg-blue-50")}>
-                      <td className="pl-3 pr-1 py-1.5 truncate">
+                    <tr key={p.id} className={cn("group hover:bg-gray-50 transition-colors", isEditing && "bg-blue-50", isSelected && "bg-indigo-50/50", isArchived && "opacity-60")}>
+                      <td className="text-center pl-3 pr-0 py-1.5">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelect(p.id)}
+                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                        />
+                      </td>
+                      <td className="px-1 py-1.5 truncate">
                         {isEditing ? (
                           <input
                             type="text"
@@ -445,16 +558,7 @@ export default function ProspectsPage() {
                         )}
                       </td>
                       <td className="px-1 py-1.5">
-                        <span
-                          className={cn(
-                            "inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-semibold whitespace-nowrap",
-                            statut === "en cours"
-                              ? "bg-green-100 text-green-700"
-                              : "bg-red-100 text-red-700"
-                          )}
-                        >
-                          {statut === "en cours" ? "En cours" : "Perdu"}
-                        </span>
+                        <StatusBadge statut={statut} />
                       </td>
                       <td className="px-1 py-1.5">
                         {p.deal_id ? (
@@ -531,13 +635,15 @@ export default function ProspectsPage() {
                             >
                               <Pencil className="w-3 h-3" />
                             </button>
-                            <button
-                              onClick={() => archiveProspect(p.id)}
-                              className="p-0.5 text-gray-400 hover:text-orange-500 cursor-pointer"
-                              title="Archiver"
-                            >
-                              <Archive className="w-3 h-3" />
-                            </button>
+                            {!isArchived && (
+                              <button
+                                onClick={() => archiveProspect(p.id)}
+                                className="p-0.5 text-gray-400 hover:text-orange-500 cursor-pointer"
+                                title="Archiver"
+                              >
+                                <Archive className="w-3 h-3" />
+                              </button>
+                            )}
                           </div>
                         )}
                       </td>
@@ -547,8 +653,9 @@ export default function ProspectsPage() {
               </tbody>
             </table>
           </div>
-          <div className="px-3 py-2 bg-gray-50 border-t border-gray-200 text-[10px] text-gray-500">
-            {filtered.length} résultat{filtered.length !== 1 ? "s" : ""} sur {activeProspects.length} contacts actifs
+          <div className="px-3 py-2 bg-gray-50 border-t border-gray-200 text-[10px] text-gray-500 flex items-center justify-between">
+            <span>{filtered.length} résultat{filtered.length !== 1 ? "s" : ""} sur {prospects.length} contacts</span>
+            {selected.size > 0 && <span className="font-medium text-indigo-600">{selected.size} sélectionné{selected.size > 1 ? "s" : ""}</span>}
           </div>
         </div>
       )}
