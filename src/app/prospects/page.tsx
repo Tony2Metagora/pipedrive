@@ -734,7 +734,7 @@ export default function ProspectsPage() {
                       <td className="px-1 py-1.5">
                         {p.deal_id ? (
                           <Link
-                            href={`/deal/${p.deal_id}`}
+                            href={`/dashboard?deal=${p.deal_id}`}
                             className="inline-flex items-center gap-0.5 text-[10px] text-indigo-600 hover:text-indigo-800 font-medium truncate max-w-full"
                             title={p.deal_title || ""}
                           >

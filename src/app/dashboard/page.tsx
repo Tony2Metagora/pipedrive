@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { Suspense, useEffect, useState, useCallback, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   Phone,
@@ -76,6 +77,16 @@ const TYPE_ICONS: Record<string, typeof Phone> = {
 };
 
 export default function DashboardPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>}>
+      <DashboardContent />
+    </Suspense>
+  );
+}
+
+function DashboardContent() {
+  const searchParams = useSearchParams();
+  const highlightDealId = searchParams.get("deal") ? Number(searchParams.get("deal")) : null;
   const [tab, setTab] = useState<"urgent" | "traiter">("urgent");
   const [activities, setActivities] = useState<Activity[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
@@ -153,6 +164,11 @@ export default function DashboardPage() {
     }
     setTimeout(syncBackground, 2000);
   }, [syncBackground]);
+
+  // Callback for inline activity edit: update local state optimistically
+  const handleActivityUpdated = useCallback((id: number, data: Partial<Activity>) => {
+    setActivities((prev) => prev.map((a) => a.id === id ? { ...a, ...data } : a));
+  }, []);
 
   const openArchiveModal = (activityId: number | null, dealId: number | null, contactName: string) => {
     setArchiveTarget({ activityId, dealId, contactName });
@@ -435,8 +451,10 @@ export default function DashboardPage() {
                   onTaskCreated={handleTaskCreated}
                   onMarkDone={markDone}
                   onArchive={openArchiveModal}
+                  onActivityUpdated={handleActivityUpdated}
                   selected={selectedDeals.has(deal.id)}
                   onToggleSelect={toggleDealSelection}
+                  initialExpanded={highlightDealId === deal.id}
                 />
               ))}
             </div>
@@ -617,8 +635,10 @@ export default function DashboardPage() {
                   onTaskCreated={handleTaskCreated}
                   onMarkDone={markDone}
                   onArchive={openArchiveModal}
+                  onActivityUpdated={handleActivityUpdated}
                   selected={selectedDeals.has(deal.id)}
                   onToggleSelect={toggleDealSelection}
+                  initialExpanded={highlightDealId === deal.id}
                 />
               ))}
             </div>
@@ -1033,20 +1053,24 @@ function DealRow({
   onTaskCreated,
   onMarkDone,
   onArchive,
+  onActivityUpdated,
   selected,
   onToggleSelect,
   onDealUpdated,
+  initialExpanded,
 }: {
   deal: Deal;
   dealActivities?: Activity[];
   onTaskCreated: (newActivity?: Activity) => void;
   onMarkDone?: (id: number) => void;
   onArchive: (activityId: number | null, dealId: number | null, contactName: string) => void;
+  onActivityUpdated: (id: number, data: Partial<Activity>) => void;
   selected: boolean;
   onToggleSelect: (dealId: number) => void;
   onDealUpdated?: () => void;
+  initialExpanded?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(initialExpanded || false);
   const [showAddTask, setShowAddTask] = useState(false);
   const [editingValue, setEditingValue] = useState(false);
   const [valueInput, setValueInput] = useState(String(deal.value || 0));
@@ -1080,21 +1104,22 @@ function DealRow({
   const saveActivity = async () => {
     if (!editingActivityId || !editActivitySubject.trim()) return;
     setSavingActivity(true);
+    const updatedData = { subject: editActivitySubject.trim(), due_date: editActivityDate };
+    // Optimistic: update local state immediately
+    onActivityUpdated(editingActivityId, updatedData);
     try {
       const res = await fetch(`/api/activities/${editingActivityId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject: editActivitySubject.trim(), due_date: editActivityDate }),
+        body: JSON.stringify(updatedData),
       });
-      if (res.ok) {
-        // Optimistic: update local activity in parent state
-        onTaskCreated(); // triggers delayed sync
-      }
+      if (!res.ok) console.error("saveActivity failed:", res.status, await res.text());
     } catch (err) {
       console.error("Erreur modification activité:", err);
     } finally {
       setSavingActivity(false);
       setEditingActivityId(null);
+      setTimeout(() => onTaskCreated(), 2000);
     }
   };
 
