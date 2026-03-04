@@ -324,45 +324,101 @@ export default function DashboardPage() {
       {/* ─── TAB URGENT ─── */}
       {tab === "urgent" && (
         <>
+          {/* Barre de filtres + vue toggle */}
+          <div className="flex items-center justify-between mb-4 bg-white rounded-lg border border-gray-200 p-2.5">
+            <div className="flex items-center gap-2">
+              <Filter className="w-4 h-4 text-gray-400" />
+              <select
+                value={pipelineFilter === "all" ? "all" : String(pipelineFilter)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setPipelineFilter(v === "all" ? "all" : Number(v));
+                  setStageFilter("all");
+                }}
+                className="px-2.5 py-1.5 text-xs border border-gray-300 rounded-md bg-white focus:ring-1 focus:ring-indigo-400 outline-none"
+              >
+                <option value="all">Tous les pipelines</option>
+                {PIPELINES.map((p) => (
+                  <option key={p.id} value={String(p.id)}>{p.name}</option>
+                ))}
+              </select>
+              {pipelineFilter !== "all" && availableStages.length > 0 && (
+                <select
+                  value={stageFilter === "all" ? "all" : String(stageFilter)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setStageFilter(v === "all" ? "all" : Number(v));
+                  }}
+                  className="px-2.5 py-1.5 text-xs border border-gray-300 rounded-md bg-white focus:ring-1 focus:ring-indigo-400 outline-none"
+                >
+                  <option value="all">Toutes les étapes</option>
+                  {availableStages.map((s) => (
+                    <option key={s.id} value={String(s.id)}>{s.name}</option>
+                  ))}
+                </select>
+              )}
+              <span className="text-xs text-gray-400 ml-1">
+                {urgentDeals.length} affaire{urgentDeals.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+            <div className="flex items-center gap-1 bg-gray-100 rounded-md p-0.5">
+              <button
+                onClick={() => setViewMode("list")}
+                className={cn(
+                  "p-1.5 rounded transition-colors cursor-pointer",
+                  viewMode === "list" ? "bg-white shadow-sm text-indigo-700" : "text-gray-400 hover:text-gray-600"
+                )}
+                title="Vue liste"
+              >
+                <List className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setViewMode("kanban")}
+                className={cn(
+                  "p-1.5 rounded transition-colors cursor-pointer",
+                  viewMode === "kanban" ? "bg-white shadow-sm text-indigo-700" : "text-gray-400 hover:text-gray-600"
+                )}
+                title="Vue kanban"
+              >
+                <LayoutGrid className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
           {(loading || loadingDeals) && activities.length === 0 && deals.length === 0 ? (
             <div className="flex items-center justify-center py-20">
               <RefreshCw className="w-6 h-6 animate-spin text-gray-400" />
             </div>
-          ) : (
-            <div className="space-y-8">
-              {/* Affaires urgentes avec tâches intégrées */}
-              {urgentDeals.length > 0 && (
-                <div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <Briefcase className="w-5 h-5 text-red-500" />
-                    <h2 className="text-lg font-semibold text-gray-900">Affaires urgentes</h2>
-                    <span className="text-sm text-gray-400 ml-1">({urgentDeals.length})</span>
-                  </div>
-                  <div className="space-y-2">
-                    {urgentDeals.map((deal) => (
-                      <DealRow
-                        key={deal.id}
-                        deal={deal}
-                        dealActivities={activitiesByDeal.get(deal.id) || []}
-                        onTaskCreated={() => { fetchActivities(); fetchDeals(); }}
-                        onMarkDone={markDone}
-                        onArchive={openArchiveModal}
-                        selected={selectedDeals.has(deal.id)}
-                        onToggleSelect={toggleDealSelection}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {totalUrgent === 0 && !loading && !loadingDeals && (
-                <div className="text-center py-20 text-gray-400">
-                  <CheckSquare className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                  <p className="text-lg font-medium">Aucune urgence</p>
-                  <p className="text-sm mt-1">Toutes les affaires et tâches sont à jour !</p>
-                </div>
-              )}
+          ) : urgentDeals.length === 0 ? (
+            <div className="text-center py-20 text-gray-400">
+              <CheckSquare className="w-12 h-12 mx-auto mb-4 opacity-50" />
+              <p className="text-lg font-medium">Aucune urgence</p>
+              <p className="text-sm mt-1">Toutes les affaires et tâches sont à jour !</p>
             </div>
+          ) : viewMode === "list" ? (
+            <div className="space-y-2">
+              {urgentDeals.map((deal) => (
+                <DealRow
+                  key={deal.id}
+                  deal={deal}
+                  dealActivities={activitiesByDeal.get(deal.id) || []}
+                  onTaskCreated={() => { fetchActivities(); fetchDeals(); }}
+                  onMarkDone={markDone}
+                  onArchive={openArchiveModal}
+                  selected={selectedDeals.has(deal.id)}
+                  onToggleSelect={toggleDealSelection}
+                />
+              ))}
+            </div>
+          ) : (
+            <KanbanView
+              deals={urgentDeals}
+              activitiesByDeal={activitiesByDeal}
+              pipelineFilter={pipelineFilter}
+              onTaskCreated={() => { fetchActivities(); fetchDeals(); }}
+              onMarkDone={markDone}
+              onArchive={openArchiveModal}
+            />
           )}
         </>
       )}

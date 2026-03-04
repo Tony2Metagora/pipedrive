@@ -92,7 +92,6 @@ export default function ProspectsPage() {
   const [uploading, setUploading] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilters, setStatusFilters] = useState<Set<StatusKey>>(new Set(["en cours", "perdu"]));
-  const [pipelineFilter, setPipelineFilter] = useState<string>("all");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editData, setEditData] = useState<Partial<Prospect>>({});
   const [saving, setSaving] = useState(false);
@@ -391,23 +390,12 @@ export default function ProspectsPage() {
     });
   };
 
-  // Get unique pipelines for filter
-  const pipelineOptions = useMemo(() => {
-    const all = new Set<string>();
-    for (const p of prospects) {
-      if (p.pipelines) {
-        p.pipelines.split(", ").forEach((pl) => all.add(pl));
-      }
-    }
-    return Array.from(all).sort();
-  }, [prospects]);
 
   // Filtered and searched prospects
   const filtered = useMemo(() => {
     return prospects.filter((p) => {
       const statut = p.computed_statut || p.statut;
       if (statusFilters.size > 0 && !statusFilters.has(statut as StatusKey)) return false;
-      if (pipelineFilter !== "all" && !p.pipelines?.includes(pipelineFilter)) return false;
       if (search) {
         const q = search.toLowerCase();
         return (
@@ -422,7 +410,7 @@ export default function ProspectsPage() {
       }
       return true;
     });
-  }, [prospects, search, statusFilters, pipelineFilter]);
+  }, [prospects, search, statusFilters]);
 
   const enCoursCount = prospects.filter((p) => (p.computed_statut || p.statut) === "en cours").length;
   const perduCount = prospects.filter((p) => (p.computed_statut || p.statut) === "perdu").length;
@@ -598,16 +586,6 @@ export default function ProspectsPage() {
             />
             <span className="text-gray-500 font-medium">Archivé ({archivedCount})</span>
           </label>
-          <select
-            value={pipelineFilter}
-            onChange={(e) => setPipelineFilter(e.target.value)}
-            className="px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-indigo-400 outline-none"
-          >
-            <option value="all">Tous les pipelines</option>
-            {pipelineOptions.map((pl) => (
-              <option key={pl} value={pl}>{pl}</option>
-            ))}
-          </select>
         </div>
       </div>
 
