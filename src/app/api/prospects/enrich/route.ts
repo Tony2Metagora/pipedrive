@@ -118,7 +118,7 @@ export async function POST(request: Request) {
  * Apply Dropcontact results to prospect rows
  */
 function applyResults(rows: ProspectRow[], prospectIds: string[], dcResults: DropcontactResult[]) {
-  const results: { id: string; name: string; status: string; fields: string[]; debug?: string }[] = [];
+  const results: { id: string; name: string; status: string; fields: string[]; debug?: string; raw?: Record<string, unknown> }[] = [];
 
   console.log(`[applyResults] prospectIds=${JSON.stringify(prospectIds)}, dcResults count=${dcResults.length}`);
 
@@ -209,6 +209,7 @@ function applyResults(rows: ProspectRow[], prospectIds: string[], dcResults: Dro
       name: `${rows[idx].prenom} ${rows[idx].nom}`,
       status: updatedFields.length > 0 ? "enriched" : "no_result",
       fields: updatedFields,
+      raw: dcResult ? (dcResult as unknown as Record<string, unknown>) : undefined,
     });
   }
 

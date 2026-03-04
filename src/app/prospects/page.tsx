@@ -265,6 +265,7 @@ export default function ProspectsPage() {
           if (pollJson.error) {
             setActionMsg(`Erreur Dropcontact : ${pollJson.error}`);
           } else {
+            console.log("[Enrichissement] Résultats complets:", JSON.stringify(pollJson.results, null, 2));
             const details = (pollJson.results || [])
               .filter((r: { status: string; fields?: string[] }) => r.status === "enriched")
               .map((r: { name: string; fields?: string[] }) => `${r.name}: ${(r.fields || []).join(", ")}`)
