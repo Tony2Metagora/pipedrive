@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import {
   Phone,
@@ -22,6 +22,9 @@ import {
   Search,
   Users,
   X,
+  LayoutGrid,
+  List,
+  Filter,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDate, isOverdue, isWithinDays, detectActivityType } from "@/lib/utils";
@@ -83,6 +86,9 @@ export default function DashboardPage() {
   const [batchResults, setBatchResults] = useState<{ personId: number; personName: string; status: string; enriched?: Record<string, string | undefined> }[] | null>(null);
   const [batchProgress, setBatchProgress] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [pipelineFilter, setPipelineFilter] = useState<number | "all">("all");
+  const [stageFilter, setStageFilter] = useState<number | "all">("all");
+  const [viewMode, setViewMode] = useState<"list" | "kanban">("list");
 
   const fetchActivities = useCallback(async () => {
     setLoading(true);
@@ -195,11 +201,22 @@ export default function DashboardPage() {
     a.person_name?.toLowerCase().includes(q) ||
     a.org_name?.toLowerCase().includes(q) ||
     a.deal_title?.toLowerCase().includes(q);
-  const matchDeal = (d: Deal) =>
-    !q ||
-    d.title?.toLowerCase().includes(q) ||
-    d.person_name?.toLowerCase().includes(q) ||
-    d.org_name?.toLowerCase().includes(q);
+  const matchDeal = (d: Deal) => {
+    if (q && !(
+      d.title?.toLowerCase().includes(q) ||
+      d.person_name?.toLowerCase().includes(q) ||
+      d.org_name?.toLowerCase().includes(q)
+    )) return false;
+    if (pipelineFilter !== "all" && d.pipeline_id !== pipelineFilter) return false;
+    if (stageFilter !== "all" && d.stage_id !== stageFilter) return false;
+    return true;
+  };
+
+  // Available stages based on selected pipeline filter
+  const availableStages = useMemo(() => {
+    if (pipelineFilter === "all") return [];
+    return getStagesForPipeline(pipelineFilter);
+  }, [pipelineFilter]);
 
   // Group pending activities by deal_id
   const activitiesByDeal = new Map<number, Activity[]>();
@@ -353,6 +370,67 @@ export default function DashboardPage() {
       {/* ─── TAB À TRAITER ─── */}
       {tab === "traiter" && (
         <>
+          {/* Barre de filtres + vue toggle */}
+          <div className="flex items-center justify-between mb-4 bg-white rounded-lg border border-gray-200 p-2.5">
+            <div className="flex items-center gap-2">
+              <Filter className="w-4 h-4 text-gray-400" />
+              <select
+                value={pipelineFilter === "all" ? "all" : String(pipelineFilter)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setPipelineFilter(v === "all" ? "all" : Number(v));
+                  setStageFilter("all");
+                }}
+                className="px-2.5 py-1.5 text-xs border border-gray-300 rounded-md bg-white focus:ring-1 focus:ring-indigo-400 outline-none"
+              >
+                <option value="all">Tous les pipelines</option>
+                {PIPELINES.map((p) => (
+                  <option key={p.id} value={String(p.id)}>{p.name}</option>
+                ))}
+              </select>
+              {pipelineFilter !== "all" && availableStages.length > 0 && (
+                <select
+                  value={stageFilter === "all" ? "all" : String(stageFilter)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setStageFilter(v === "all" ? "all" : Number(v));
+                  }}
+                  className="px-2.5 py-1.5 text-xs border border-gray-300 rounded-md bg-white focus:ring-1 focus:ring-indigo-400 outline-none"
+                >
+                  <option value="all">Toutes les étapes</option>
+                  {availableStages.map((s) => (
+                    <option key={s.id} value={String(s.id)}>{s.name}</option>
+                  ))}
+                </select>
+              )}
+              <span className="text-xs text-gray-400 ml-1">
+                {okDeals.length} affaire{okDeals.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+            <div className="flex items-center gap-1 bg-gray-100 rounded-md p-0.5">
+              <button
+                onClick={() => setViewMode("list")}
+                className={cn(
+                  "p-1.5 rounded transition-colors cursor-pointer",
+                  viewMode === "list" ? "bg-white shadow-sm text-indigo-700" : "text-gray-400 hover:text-gray-600"
+                )}
+                title="Vue liste"
+              >
+                <List className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setViewMode("kanban")}
+                className={cn(
+                  "p-1.5 rounded transition-colors cursor-pointer",
+                  viewMode === "kanban" ? "bg-white shadow-sm text-indigo-700" : "text-gray-400 hover:text-gray-600"
+                )}
+                title="Vue kanban"
+              >
+                <LayoutGrid className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
           {loadingDeals && deals.length === 0 ? (
             <div className="flex items-center justify-center py-20">
               <RefreshCw className="w-6 h-6 animate-spin text-gray-400" />
@@ -363,7 +441,7 @@ export default function DashboardPage() {
               <p className="text-lg font-medium">Aucune affaire à suivre</p>
               <p className="text-sm mt-1">Toutes les affaires actives sont en retard ou urgentes</p>
             </div>
-          ) : (
+          ) : viewMode === "list" ? (
             <div className="space-y-2">
               {/* Toolbar : sélection + enrichissement batch */}
               <div className="flex items-center justify-between mb-4">
@@ -377,14 +455,11 @@ export default function DashboardPage() {
                       ? "Tout désélectionner"
                       : "Tout sélectionner"}
                   </button>
-                  <p className="text-sm text-gray-500">
-                    {okDeals.length} affaire{okDeals.length !== 1 ? "s" : ""} à suivre
-                    {selectedDeals.size > 0 && (
-                      <span className="ml-2 font-medium text-indigo-600">
-                        — {selectedDeals.size} sélectionnée{selectedDeals.size > 1 ? "s" : ""}
-                      </span>
-                    )}
-                  </p>
+                  {selectedDeals.size > 0 && (
+                    <span className="text-xs font-medium text-indigo-600">
+                      {selectedDeals.size} sélectionnée{selectedDeals.size > 1 ? "s" : ""}
+                    </span>
+                  )}
                 </div>
                 {selectedDeals.size > 0 && (
                   <button
@@ -461,6 +536,16 @@ export default function DashboardPage() {
                 />
               ))}
             </div>
+          ) : (
+            /* ─── VUE KANBAN ─── */
+            <KanbanView
+              deals={okDeals}
+              activitiesByDeal={activitiesByDeal}
+              pipelineFilter={pipelineFilter}
+              onTaskCreated={() => { fetchActivities(); fetchDeals(); }}
+              onMarkDone={markDone}
+              onArchive={openArchiveModal}
+            />
           )}
         </>
       )}
@@ -479,6 +564,134 @@ export default function DashboardPage() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+/* ─── Vue Kanban ─── */
+
+function KanbanView({
+  deals,
+  activitiesByDeal,
+  pipelineFilter,
+  onTaskCreated,
+  onMarkDone,
+  onArchive,
+}: {
+  deals: Deal[];
+  activitiesByDeal: Map<number, Activity[]>;
+  pipelineFilter: number | "all";
+  onTaskCreated: () => void;
+  onMarkDone: (id: number) => void;
+  onArchive: (activityId: number | null, dealId: number | null, contactName: string) => void;
+}) {
+  // Group deals by pipeline, then by stage
+  const pipelines = pipelineFilter !== "all"
+    ? PIPELINES.filter((p) => p.id === pipelineFilter)
+    : (() => {
+        // Show only pipelines that have deals
+        const pipeIds = new Set(deals.map((d) => d.pipeline_id));
+        return PIPELINES.filter((p) => pipeIds.has(p.id));
+      })();
+
+  if (pipelines.length === 0) {
+    return (
+      <div className="text-center py-12 text-gray-400">
+        <Briefcase className="w-10 h-10 mx-auto mb-3 opacity-50" />
+        <p className="text-sm">Aucune affaire à afficher en kanban</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {pipelines.map((pipeline) => {
+        const pipeDeals = deals.filter((d) => d.pipeline_id === pipeline.id);
+        if (pipeDeals.length === 0 && pipelineFilter === "all") return null;
+        return (
+          <div key={pipeline.id}>
+            {pipelines.length > 1 && (
+              <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                <Briefcase className="w-4 h-4 text-indigo-500" />
+                {pipeline.name}
+                <span className="text-xs text-gray-400 font-normal">({pipeDeals.length} affaire{pipeDeals.length !== 1 ? "s" : ""})</span>
+              </h3>
+            )}
+            <div className="flex gap-3 overflow-x-auto pb-2">
+              {pipeline.stages.map((stage) => {
+                const stageDeals = pipeDeals.filter((d) => d.stage_id === stage.id);
+                const totalValue = stageDeals.reduce((sum, d) => sum + (d.value || 0), 0);
+                return (
+                  <div
+                    key={stage.id}
+                    className="flex-shrink-0 w-56 bg-gray-50 rounded-lg border border-gray-200"
+                  >
+                    {/* Column header */}
+                    <div className="px-3 py-2 border-b border-gray-200 bg-white rounded-t-lg">
+                      <p className="text-xs font-semibold text-gray-700 capitalize">{stage.name}</p>
+                      <p className="text-[10px] text-gray-400">
+                        {totalValue > 0 ? `${totalValue.toLocaleString("fr-FR")} €` : "0 €"} · {stageDeals.length} affaire{stageDeals.length !== 1 ? "s" : ""}
+                      </p>
+                    </div>
+                    {/* Cards */}
+                    <div className="p-2 space-y-2 max-h-[60vh] overflow-y-auto">
+                      {stageDeals.length === 0 ? (
+                        <p className="text-[9px] text-gray-300 text-center py-4">Aucune affaire</p>
+                      ) : (
+                        stageDeals.map((deal) => {
+                          const acts = activitiesByDeal.get(deal.id) || [];
+                          const nextAct = acts.length > 0
+                            ? acts.reduce((a, b) => (a.due_date < b.due_date ? a : b))
+                            : null;
+                          const isLate = nextAct ? isOverdue(nextAct.due_date) : false;
+                          return (
+                            <Link
+                              key={deal.id}
+                              href={`/deal/${deal.id}`}
+                              className="block bg-white rounded-md border border-gray-200 p-2.5 hover:shadow-md transition-shadow cursor-pointer group"
+                            >
+                              <p className="text-xs font-semibold text-gray-900 truncate group-hover:text-indigo-700">{deal.title}</p>
+                              {(deal.org_name || deal.person_name) && (
+                                <p className="text-[10px] text-gray-500 truncate mt-0.5">
+                                  {[deal.org_name, deal.person_name].filter(Boolean).join(", ")}
+                                </p>
+                              )}
+                              {deal.value > 0 && (
+                                <p className="text-[10px] font-medium text-gray-600 mt-1">
+                                  {deal.value.toLocaleString("fr-FR")} {deal.currency}
+                                </p>
+                              )}
+                              {nextAct && (
+                                <div className={cn(
+                                  "flex items-center gap-1 mt-1.5 text-[9px] rounded px-1.5 py-0.5 w-fit",
+                                  isLate ? "bg-red-50 text-red-600" : "bg-gray-100 text-gray-500"
+                                )}>
+                                  {isLate ? (
+                                    <AlertTriangle className="w-2.5 h-2.5" />
+                                  ) : (
+                                    <Clock className="w-2.5 h-2.5" />
+                                  )}
+                                  {formatDate(nextAct.due_date)}
+                                </div>
+                              )}
+                              {!nextAct && (
+                                <div className="flex items-center gap-1 mt-1.5 text-[9px] rounded px-1.5 py-0.5 w-fit bg-red-50 text-red-500">
+                                  <AlertTriangle className="w-2.5 h-2.5" />
+                                  Aucune tâche
+                                </div>
+                              )}
+                            </Link>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
