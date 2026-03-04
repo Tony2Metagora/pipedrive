@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import Link from "next/link";
 import {
   Search,
   Users,
@@ -11,6 +12,9 @@ import {
   X,
   Filter,
   Upload,
+  Plus,
+  Briefcase,
+  ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -25,6 +29,12 @@ interface Prospect {
   statut: string;
   pipelines: string;
   notes: string;
+  // Enriched fields from API
+  deal_id: number | null;
+  deal_title: string | null;
+  deal_status: string | null;
+  deal_value: number | null;
+  computed_statut: string;
 }
 
 export default function ProspectsPage() {
@@ -37,6 +47,9 @@ export default function ProspectsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editData, setEditData] = useState<Partial<Prospect>>({});
   const [saving, setSaving] = useState(false);
+  const [linkingId, setLinkingId] = useState<string | null>(null);
+  const [newDealTitle, setNewDealTitle] = useState("");
+  const [actionMsg, setActionMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchProspects = useCallback(async () => {
@@ -66,7 +79,7 @@ export default function ProspectsPage() {
       const res = await fetch("/api/prospects/upload", { method: "POST", body: formData });
       const json = await res.json();
       if (json.data) {
-        setProspects(json.data);
+        fetchProspects();
       } else {
         alert("Erreur lors de l'import : " + (json.error || "inconnue"));
       }
@@ -88,7 +101,6 @@ export default function ProspectsPage() {
       telephone: p.telephone,
       poste: p.poste,
       entreprise: p.entreprise,
-      statut: p.statut,
       notes: p.notes,
     });
   };
@@ -109,9 +121,7 @@ export default function ProspectsPage() {
       });
       const json = await res.json();
       if (json.data) {
-        setProspects((prev) =>
-          prev.map((p) => (p.id === editingId ? { ...p, ...json.data } : p))
-        );
+        fetchProspects();
       }
       setEditingId(null);
       setEditData({});
@@ -120,6 +130,31 @@ export default function ProspectsPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const createDealForProspect = async (prospectId: string) => {
+    const title = newDealTitle.trim();
+    if (!title) return;
+    setActionMsg("Création de l'affaire...");
+    try {
+      const res = await fetch("/api/prospects/link-deal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prospectId, dealTitle: title }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setActionMsg(`Affaire "${json.deal.title}" créée`);
+        setLinkingId(null);
+        setNewDealTitle("");
+        fetchProspects();
+      } else {
+        setActionMsg(`Erreur : ${json.error}`);
+      }
+    } catch {
+      setActionMsg("Erreur lors de la création");
+    }
+    setTimeout(() => setActionMsg(null), 3000);
   };
 
   const downloadCsv = () => {
@@ -140,25 +175,27 @@ export default function ProspectsPage() {
   // Filtered and searched prospects
   const filtered = useMemo(() => {
     return prospects.filter((p) => {
-      if (statusFilter !== "all" && p.statut !== statusFilter) return false;
-      if (pipelineFilter !== "all" && !p.pipelines.includes(pipelineFilter)) return false;
+      const statut = p.computed_statut || p.statut;
+      if (statusFilter !== "all" && statut !== statusFilter) return false;
+      if (pipelineFilter !== "all" && !p.pipelines?.includes(pipelineFilter)) return false;
       if (search) {
         const q = search.toLowerCase();
         return (
-          p.nom.toLowerCase().includes(q) ||
-          p.prenom.toLowerCase().includes(q) ||
-          p.email.toLowerCase().includes(q) ||
-          p.entreprise.toLowerCase().includes(q) ||
-          p.poste.toLowerCase().includes(q) ||
-          p.telephone.includes(q)
+          (p.nom || "").toLowerCase().includes(q) ||
+          (p.prenom || "").toLowerCase().includes(q) ||
+          (p.email || "").toLowerCase().includes(q) ||
+          (p.entreprise || "").toLowerCase().includes(q) ||
+          (p.poste || "").toLowerCase().includes(q) ||
+          (p.telephone || "").includes(q) ||
+          (p.deal_title || "").toLowerCase().includes(q)
         );
       }
       return true;
     });
   }, [prospects, search, statusFilter, pipelineFilter]);
 
-  const enCoursCount = prospects.filter((p) => p.statut === "en cours").length;
-  const perduCount = prospects.filter((p) => p.statut === "perdu").length;
+  const enCoursCount = prospects.filter((p) => (p.computed_statut || p.statut) === "en cours").length;
+  const perduCount = prospects.filter((p) => (p.computed_statut || p.statut) === "perdu").length;
 
   return (
     <div className="space-y-6">
@@ -174,6 +211,9 @@ export default function ProspectsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {actionMsg && (
+            <span className="text-xs font-medium px-2 py-1 rounded bg-green-50 text-green-700">{actionMsg}</span>
+          )}
           <button
             onClick={downloadCsv}
             disabled={prospects.length === 0}
@@ -212,7 +252,7 @@ export default function ProspectsPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Rechercher par nom, email, entreprise..."
+            placeholder="Rechercher par nom, email, entreprise, affaire..."
             className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
           />
         </div>
@@ -257,24 +297,26 @@ export default function ProspectsPage() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="text-left px-4 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide">Prénom</th>
-                  <th className="text-left px-4 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide">Nom</th>
-                  <th className="text-left px-4 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide">Email</th>
-                  <th className="text-left px-4 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide">Téléphone</th>
-                  <th className="text-left px-4 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide">Poste</th>
-                  <th className="text-left px-4 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide">Entreprise</th>
-                  <th className="text-left px-4 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide">Statut</th>
-                  <th className="text-left px-4 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide">Pipeline</th>
-                  <th className="text-left px-4 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide max-w-xs">Notes</th>
-                  <th className="text-center px-4 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide w-20"></th>
+                  <th className="text-left px-3 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide">Prénom</th>
+                  <th className="text-left px-3 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide">Nom</th>
+                  <th className="text-left px-3 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide">Email</th>
+                  <th className="text-left px-3 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide">Téléphone</th>
+                  <th className="text-left px-3 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide">Poste</th>
+                  <th className="text-left px-3 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide">Entreprise</th>
+                  <th className="text-left px-3 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide">Statut</th>
+                  <th className="text-left px-3 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide">Affaire</th>
+                  <th className="text-left px-3 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide max-w-[200px]">Notes</th>
+                  <th className="text-center px-3 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide w-20"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filtered.map((p) => {
                   const isEditing = editingId === p.id;
+                  const isLinking = linkingId === p.id;
+                  const statut = p.computed_statut || p.statut;
                   return (
                     <tr key={p.id} className={cn("group hover:bg-gray-50 transition-colors", isEditing && "bg-blue-50")}>
-                      <td className="px-4 py-2.5">
+                      <td className="px-3 py-2">
                         {isEditing ? (
                           <input
                             type="text"
@@ -283,10 +325,10 @@ export default function ProspectsPage() {
                             className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-indigo-400 outline-none"
                           />
                         ) : (
-                          <span className="font-medium text-gray-900">{p.prenom}</span>
+                          <span className="font-medium text-gray-900 text-xs">{p.prenom}</span>
                         )}
                       </td>
-                      <td className="px-4 py-2.5">
+                      <td className="px-3 py-2">
                         {isEditing ? (
                           <input
                             type="text"
@@ -295,10 +337,10 @@ export default function ProspectsPage() {
                             className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-indigo-400 outline-none"
                           />
                         ) : (
-                          <span className="text-gray-700">{p.nom}</span>
+                          <span className="text-gray-700 text-xs">{p.nom}</span>
                         )}
                       </td>
-                      <td className="px-4 py-2.5">
+                      <td className="px-3 py-2">
                         {isEditing ? (
                           <input
                             type="email"
@@ -307,10 +349,10 @@ export default function ProspectsPage() {
                             className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-indigo-400 outline-none"
                           />
                         ) : (
-                          <span className="text-gray-600 text-xs">{p.email}</span>
+                          <span className="text-gray-600 text-[11px]">{p.email}</span>
                         )}
                       </td>
-                      <td className="px-4 py-2.5">
+                      <td className="px-3 py-2">
                         {isEditing ? (
                           <input
                             type="text"
@@ -319,10 +361,10 @@ export default function ProspectsPage() {
                             className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-indigo-400 outline-none"
                           />
                         ) : (
-                          <span className="text-gray-600 text-xs">{p.telephone}</span>
+                          <span className="text-gray-600 text-[11px]">{p.telephone}</span>
                         )}
                       </td>
-                      <td className="px-4 py-2.5">
+                      <td className="px-3 py-2">
                         {isEditing ? (
                           <input
                             type="text"
@@ -331,10 +373,10 @@ export default function ProspectsPage() {
                             className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-indigo-400 outline-none"
                           />
                         ) : (
-                          <span className="text-gray-600 text-xs">{p.poste}</span>
+                          <span className="text-gray-600 text-[11px]">{p.poste}</span>
                         )}
                       </td>
-                      <td className="px-4 py-2.5">
+                      <td className="px-3 py-2">
                         {isEditing ? (
                           <input
                             type="text"
@@ -343,36 +385,69 @@ export default function ProspectsPage() {
                             className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-indigo-400 outline-none"
                           />
                         ) : (
-                          <span className="text-gray-700 text-xs font-medium">{p.entreprise}</span>
+                          <span className="text-gray-700 text-[11px] font-medium">{p.entreprise}</span>
                         )}
                       </td>
-                      <td className="px-4 py-2.5">
-                        {isEditing ? (
-                          <select
-                            value={editData.statut || "en cours"}
-                            onChange={(e) => setEditData({ ...editData, statut: e.target.value })}
-                            className="px-2 py-1 text-xs border border-gray-300 rounded bg-white focus:ring-1 focus:ring-indigo-400 outline-none"
+                      <td className="px-3 py-2">
+                        <span
+                          className={cn(
+                            "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold",
+                            statut === "en cours"
+                              ? "bg-green-100 text-green-700"
+                              : "bg-red-100 text-red-700"
+                          )}
+                        >
+                          {statut === "en cours" ? "En cours" : "Perdu"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">
+                        {p.deal_id ? (
+                          <Link
+                            href={`/deal/${p.deal_id}`}
+                            className="inline-flex items-center gap-1 text-[10px] text-indigo-600 hover:text-indigo-800 font-medium max-w-[160px]"
+                            title={p.deal_title || ""}
                           >
-                            <option value="en cours">En cours</option>
-                            <option value="perdu">Perdu</option>
-                          </select>
+                            <Briefcase className="w-3 h-3 flex-shrink-0" />
+                            <span className="truncate">{p.deal_title}</span>
+                            <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
+                          </Link>
+                        ) : isLinking ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="text"
+                              value={newDealTitle}
+                              onChange={(e) => setNewDealTitle(e.target.value)}
+                              placeholder="Nom de l'affaire"
+                              className="w-28 px-1.5 py-0.5 text-[10px] border border-gray-300 rounded focus:ring-1 focus:ring-indigo-400 outline-none"
+                              autoFocus
+                              onKeyDown={(e) => { if (e.key === "Enter") createDealForProspect(p.id); if (e.key === "Escape") { setLinkingId(null); setNewDealTitle(""); } }}
+                            />
+                            <button
+                              onClick={() => createDealForProspect(p.id)}
+                              disabled={!newDealTitle.trim()}
+                              className="p-0.5 text-green-600 hover:text-green-700 cursor-pointer disabled:opacity-40"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => { setLinkingId(null); setNewDealTitle(""); }}
+                              className="p-0.5 text-gray-400 hover:text-gray-600 cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         ) : (
-                          <span
-                            className={cn(
-                              "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold",
-                              p.statut === "en cours"
-                                ? "bg-green-100 text-green-700"
-                                : "bg-red-100 text-red-700"
-                            )}
+                          <button
+                            onClick={() => { setLinkingId(p.id); setNewDealTitle(p.entreprise || `${p.prenom} ${p.nom}`); }}
+                            className="inline-flex items-center gap-1 text-[10px] text-gray-400 hover:text-indigo-600 cursor-pointer transition-colors"
+                            title="Créer une affaire"
                           >
-                            {p.statut === "en cours" ? "En cours" : "Perdu"}
-                          </span>
+                            <Plus className="w-3 h-3" />
+                            Créer affaire
+                          </button>
                         )}
                       </td>
-                      <td className="px-4 py-2.5">
-                        <span className="text-gray-500 text-[10px]">{p.pipelines}</span>
-                      </td>
-                      <td className="px-4 py-2.5 max-w-xs">
+                      <td className="px-3 py-2 max-w-[200px]">
                         {isEditing ? (
                           <textarea
                             value={editData.notes || ""}
@@ -381,10 +456,10 @@ export default function ProspectsPage() {
                             className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-indigo-400 outline-none resize-none"
                           />
                         ) : (
-                          <span className="text-gray-500 text-[10px] line-clamp-2 block max-w-xs" title={p.notes}>{p.notes}</span>
+                          <span className="text-gray-500 text-[10px] line-clamp-2 block" title={p.notes}>{p.notes}</span>
                         )}
                       </td>
-                      <td className="px-4 py-2.5 text-center">
+                      <td className="px-3 py-2 text-center">
                         {isEditing ? (
                           <div className="flex items-center gap-1 justify-center">
                             <button

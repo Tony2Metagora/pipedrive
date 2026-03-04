@@ -1,11 +1,12 @@
 /**
  * API Route — Prospects (Vercel Blob)
- * GET : lire les prospects depuis Blob
+ * GET : lire les prospects depuis Blob, enrichis avec statut auto + affaire liée
  * PUT : mettre à jour une ligne et sauvegarder dans Blob
  */
 
 import { NextResponse } from "next/server";
 import { put, get } from "@vercel/blob";
+import { getDeals, getPersons } from "@/lib/blob-store";
 
 interface ProspectRow {
   id: string;
@@ -18,6 +19,14 @@ interface ProspectRow {
   statut: string;
   pipelines: string;
   notes: string;
+}
+
+interface EnrichedProspect extends ProspectRow {
+  deal_id: number | null;
+  deal_title: string | null;
+  deal_status: string | null;
+  deal_value: number | null;
+  computed_statut: string; // "en cours" | "perdu"
 }
 
 async function readProspects(): Promise<ProspectRow[]> {
@@ -55,8 +64,53 @@ async function writeProspects(rows: ProspectRow[]) {
 
 export async function GET() {
   try {
-    const rows = await readProspects();
-    return NextResponse.json({ data: rows, count: rows.length });
+    const [rows, deals, persons] = await Promise.all([
+      readProspects(),
+      getDeals(),
+      getPersons(),
+    ]);
+
+    // Build email → person mapping
+    const emailToPersonId = new Map<string, number>();
+    for (const p of persons) {
+      for (const e of p.email) {
+        if (e.value) emailToPersonId.set(e.value.toLowerCase().trim(), p.id);
+      }
+    }
+
+    // Build person_id → open deal mapping (take first open deal)
+    const personIdToDeals = new Map<number, typeof deals[0][]>();
+    for (const d of deals) {
+      if (!d.person_id) continue;
+      const existing = personIdToDeals.get(d.person_id) || [];
+      existing.push(d);
+      personIdToDeals.set(d.person_id, existing);
+    }
+
+    // Enrich each prospect
+    const enriched: EnrichedProspect[] = rows.map((r) => {
+      const email = r.email?.toLowerCase().trim();
+      const personId = email ? emailToPersonId.get(email) : undefined;
+      const personDeals = personId ? personIdToDeals.get(personId) : undefined;
+
+      // Find open deal first, otherwise any deal
+      const openDeal = personDeals?.find((d) => d.status === "open");
+      const anyDeal = personDeals?.[0];
+      const deal = openDeal || anyDeal || null;
+
+      const computed_statut = openDeal ? "en cours" : "perdu";
+
+      return {
+        ...r,
+        deal_id: deal?.id ?? null,
+        deal_title: deal?.title ?? null,
+        deal_status: deal?.status ?? null,
+        deal_value: deal?.value ?? null,
+        computed_statut,
+      };
+    });
+
+    return NextResponse.json({ data: enriched, count: enriched.length });
   } catch (error) {
     console.error("GET /api/prospects error:", error);
     return NextResponse.json({ error: "Erreur lecture" }, { status: 500 });
