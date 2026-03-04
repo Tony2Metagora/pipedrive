@@ -317,28 +317,29 @@ export default function ProspectsPage() {
   };
 
   const linkSelectedToDeal = async (dealId: number, dealTitle: string) => {
+    const selectedIds = new Set(selected);
+    // Optimistic: update local state immediately
+    setProspects((prev) => prev.map((p) =>
+      selectedIds.has(p.id) ? { ...p, deal_id: dealId, deal_title: dealTitle, computed_statut: "en cours" } : p
+    ));
+    setActionMsg(`${selectedIds.size} contact${selectedIds.size > 1 ? "s" : ""} lié${selectedIds.size > 1 ? "s" : ""} à "${dealTitle}"`);
+    setSelected(new Set());
+    setShowLinkDeal(false);
     setLinking(true);
-    setActionMsg("Liaison en cours...");
-    let linked = 0;
     try {
-      for (const prospectId of selected) {
-        const res = await fetch("/api/prospects/link-deal", {
+      for (const prospectId of selectedIds) {
+        await fetch("/api/prospects/link-deal", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prospectId, dealId }),
         });
-        const json = await res.json();
-        if (json.success) linked++;
       }
-      setActionMsg(`${linked} contact${linked > 1 ? "s" : ""} lié${linked > 1 ? "s" : ""} à "${dealTitle}"`);
-      setSelected(new Set());
-      setShowLinkDeal(false);
-      syncProspects();
     } catch {
       setActionMsg("Erreur lors de la liaison");
     }
-    setTimeout(() => setActionMsg(null), 4000);
     setLinking(false);
+    setTimeout(() => setActionMsg(null), 4000);
+    setTimeout(syncProspects, 2000);
   };
 
   const filteredDeals = useMemo(() => {
