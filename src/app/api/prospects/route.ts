@@ -19,6 +19,8 @@ interface ProspectRow {
   statut: string;
   pipelines: string;
   notes: string;
+  score_entreprise: string;
+  score_job: string;
 }
 
 interface EnrichedProspect extends ProspectRow {
@@ -26,7 +28,7 @@ interface EnrichedProspect extends ProspectRow {
   deal_title: string | null;
   deal_status: string | null;
   deal_value: number | null;
-  computed_statut: string; // "en cours" | "perdu"
+  computed_statut: string; // "en cours" | "perdu" | "archivé"
 }
 
 async function readProspects(): Promise<ProspectRow[]> {
@@ -98,7 +100,8 @@ export async function GET() {
       const anyDeal = personDeals?.[0];
       const deal = openDeal || anyDeal || null;
 
-      const computed_statut = openDeal ? "en cours" : "perdu";
+      // If manually archived, keep that status
+      const computed_statut = r.statut === "archivé" ? "archivé" : openDeal ? "en cours" : "perdu";
 
       return {
         ...r,
@@ -127,8 +130,9 @@ export async function PUT(request: Request) {
     const idx = rows.findIndex((r) => String(r.id) === String(id));
     if (idx === -1) return NextResponse.json({ error: "Contact non trouvé" }, { status: 404 });
 
+    const allowedKeys = ["nom", "prenom", "email", "telephone", "poste", "entreprise", "statut", "pipelines", "notes", "score_entreprise", "score_job"];
     for (const [key, value] of Object.entries(updates)) {
-      if (key in rows[idx]) {
+      if (allowedKeys.includes(key)) {
         (rows[idx] as unknown as Record<string, string>)[key] = String(value);
       }
     }
