@@ -90,8 +90,8 @@ export default function DashboardPage() {
   const [stageFilter, setStageFilter] = useState<number | "all">("all");
   const [viewMode, setViewMode] = useState<"list" | "kanban">("list");
 
-  const fetchActivities = useCallback(async () => {
-    setLoading(true);
+  const fetchActivities = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const res = await fetch("/api/activities");
       const json = await res.json();
@@ -99,12 +99,12 @@ export default function DashboardPage() {
     } catch (err) {
       console.error("Erreur chargement activités:", err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
-  const fetchDeals = useCallback(async () => {
-    setLoadingDeals(true);
+  const fetchDeals = useCallback(async (silent = false) => {
+    if (!silent) setLoadingDeals(true);
     try {
       const res = await fetch("/api/deals?status=open");
       const json = await res.json();
@@ -112,26 +112,37 @@ export default function DashboardPage() {
     } catch (err) {
       console.error("Erreur chargement deals:", err);
     } finally {
-      setLoadingDeals(false);
+      if (!silent) setLoadingDeals(false);
     }
   }, []);
+
+  // Background sync: refresh data silently
+  const syncBackground = useCallback(() => {
+    fetchActivities(true);
+    fetchDeals(true);
+  }, [fetchActivities, fetchDeals]);
 
   useEffect(() => {
     fetchActivities();
     fetchDeals();
   }, [fetchActivities, fetchDeals]);
 
+  // Optimistic markDone: remove activity from list immediately
   const markDone = async (id: number) => {
+    // Optimistic: remove the activity from the list immediately
+    setActivities((prev) => prev.filter((a) => a.id !== id));
     try {
       await fetch(`/api/activities/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ done: 1 }),
       });
-      fetchActivities();
-      fetchDeals();
+      // Silent background sync to get fresh data
+      syncBackground();
     } catch (err) {
       console.error("Erreur marquage done:", err);
+      // On error, re-fetch to restore correct state
+      syncBackground();
     }
   };
 
@@ -320,7 +331,7 @@ export default function DashboardPage() {
             )}
           </div>
           <button
-            onClick={() => { fetchActivities(); fetchDeals(); }}
+            onClick={syncBackground}
             disabled={loading || loadingDeals}
             className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors cursor-pointer disabled:opacity-50"
           >
@@ -413,7 +424,7 @@ export default function DashboardPage() {
                   key={deal.id}
                   deal={deal}
                   dealActivities={activitiesByDeal.get(deal.id) || []}
-                  onTaskCreated={() => { fetchActivities(); fetchDeals(); }}
+                  onTaskCreated={syncBackground}
                   onMarkDone={markDone}
                   onArchive={openArchiveModal}
                   selected={selectedDeals.has(deal.id)}
@@ -426,7 +437,7 @@ export default function DashboardPage() {
               deals={urgentDeals}
               activitiesByDeal={activitiesByDeal}
               pipelineFilter={pipelineFilter}
-              onDealMoved={() => { fetchActivities(); fetchDeals(); }}
+              onDealMoved={syncBackground}
             />
           )}
         </>
@@ -595,7 +606,7 @@ export default function DashboardPage() {
                   key={deal.id}
                   deal={deal}
                   dealActivities={activitiesByDeal.get(deal.id) || []}
-                  onTaskCreated={() => { fetchActivities(); fetchDeals(); }}
+                  onTaskCreated={syncBackground}
                   onMarkDone={markDone}
                   onArchive={openArchiveModal}
                   selected={selectedDeals.has(deal.id)}
@@ -609,7 +620,7 @@ export default function DashboardPage() {
               deals={okDeals}
               activitiesByDeal={activitiesByDeal}
               pipelineFilter={pipelineFilter}
-              onDealMoved={() => { fetchActivities(); fetchDeals(); }}
+              onDealMoved={syncBackground}
             />
           )}
         </>
@@ -624,8 +635,7 @@ export default function DashboardPage() {
           onClose={() => setArchiveTarget(null)}
           onArchived={() => {
             setArchiveTarget(null);
-            fetchActivities();
-            fetchDeals();
+            syncBackground();
           }}
         />
       )}

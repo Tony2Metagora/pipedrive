@@ -107,8 +107,8 @@ export default function ProspectsPage() {
   const [linking, setLinking] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const fetchProspects = useCallback(async () => {
-    setLoading(true);
+  const fetchProspects = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const res = await fetch("/api/prospects");
       const json = await res.json();
@@ -116,9 +116,11 @@ export default function ProspectsPage() {
     } catch (err) {
       console.error("Erreur chargement prospects:", err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
+
+  const syncProspects = useCallback(() => fetchProspects(true), [fetchProspects]);
 
   useEffect(() => {
     fetchProspects();
@@ -134,7 +136,7 @@ export default function ProspectsPage() {
       const res = await fetch("/api/prospects/upload", { method: "POST", body: formData });
       const json = await res.json();
       if (json.data) {
-        fetchProspects();
+        syncProspects();
       } else {
         alert("Erreur lors de l'import : " + (json.error || "inconnue"));
       }
@@ -169,47 +171,53 @@ export default function ProspectsPage() {
   const saveEdit = async () => {
     if (!editingId) return;
     setSaving(true);
+    // Optimistic: update local state immediately
+    setProspects((prev) => prev.map((p) => p.id === editingId ? { ...p, ...editData } : p));
+    const savedId = editingId;
+    setEditingId(null);
+    setEditData({});
     try {
-      const res = await fetch("/api/prospects", {
+      await fetch("/api/prospects", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: editingId, ...editData }),
+        body: JSON.stringify({ id: savedId, ...editData }),
       });
-      const json = await res.json();
-      if (json.data) {
-        fetchProspects();
-      }
-      setEditingId(null);
-      setEditData({});
+      syncProspects();
     } catch (err) {
       console.error("Erreur sauvegarde:", err);
+      syncProspects();
     } finally {
       setSaving(false);
     }
   };
 
   const archiveProspect = async (prospectId: string) => {
+    // Optimistic: update local state immediately
+    setProspects((prev) => prev.map((p) => p.id === prospectId ? { ...p, statut: "archivé", computed_statut: "archivé" } : p));
+    setActionMsg("Prospect archivé");
+    setTimeout(() => setActionMsg(null), 2000);
     try {
-      const res = await fetch("/api/prospects", {
+      await fetch("/api/prospects", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: prospectId, statut: "archivé" }),
       });
-      const json = await res.json();
-      if (json.data) {
-        fetchProspects();
-        setActionMsg("Prospect archivé");
-        setTimeout(() => setActionMsg(null), 2000);
-      }
+      syncProspects();
     } catch {
       setActionMsg("Erreur lors de l'archivage");
       setTimeout(() => setActionMsg(null), 3000);
+      syncProspects();
     }
   };
 
   const bulkArchive = async () => {
     if (selected.size === 0) return;
     setArchiving(true);
+    const count = selected.size;
+    // Optimistic: update local state immediately
+    setProspects((prev) => prev.map((p) => selected.has(p.id) ? { ...p, statut: "archivé", computed_statut: "archivé" } : p));
+    setActionMsg(`${count} prospect${count > 1 ? "s" : ""} archivé${count > 1 ? "s" : ""}`);
+    setSelected(new Set());
     try {
       const res = await fetch("/api/prospects", {
         method: "PATCH",
@@ -218,9 +226,7 @@ export default function ProspectsPage() {
       });
       const json = await res.json();
       if (json.success) {
-        setActionMsg(`${json.updated} prospect${json.updated > 1 ? "s" : ""} archivé${json.updated > 1 ? "s" : ""}`);
-        setSelected(new Set());
-        fetchProspects();
+        syncProspects();
       } else {
         setActionMsg(`Erreur : ${json.error}`);
       }
@@ -276,7 +282,7 @@ export default function ProspectsPage() {
               .join(" | ");
             setActionMsg(`${pollJson.enriched}/${pollJson.total} enrichi${pollJson.enriched > 1 ? "s" : ""}${details ? ` — ${details}` : ""}`);
             setSelected(new Set());
-            fetchProspects();
+            syncProspects();
           }
           setTimeout(() => setActionMsg(null), 8000);
           setEnriching(false);
@@ -327,7 +333,7 @@ export default function ProspectsPage() {
       setActionMsg(`${linked} contact${linked > 1 ? "s" : ""} lié${linked > 1 ? "s" : ""} à "${dealTitle}"`);
       setSelected(new Set());
       setShowLinkDeal(false);
-      fetchProspects();
+      syncProspects();
     } catch {
       setActionMsg("Erreur lors de la liaison");
     }
@@ -358,7 +364,7 @@ export default function ProspectsPage() {
         setActionMsg(`Affaire "${json.deal.title}" créée`);
         setLinkingId(null);
         setNewDealTitle("");
-        fetchProspects();
+        syncProspects();
       } else {
         setActionMsg(`Erreur : ${json.error}`);
       }
