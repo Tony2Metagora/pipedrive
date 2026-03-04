@@ -12,6 +12,7 @@ import {
   createDeal,
   createPerson,
   updateDeal,
+  addDealParticipant,
   type Person,
 } from "@/lib/blob-store";
 import { get } from "@vercel/blob";
@@ -92,14 +93,17 @@ export async function POST(request: Request) {
     }
 
     if (dealId) {
-      // Link prospect to existing deal
+      // Link prospect to existing deal as participant (secondary contact)
       const deals = await getDeals();
       const deal = deals.find((d) => d.id === Number(dealId));
       if (!deal) {
         return NextResponse.json({ error: "Affaire non trouvée" }, { status: 404 });
       }
 
-      // Update deal to reference this person if not already
+      // Add as participant (secondary contact)
+      await addDealParticipant(deal.id, person.id);
+
+      // If deal has no primary contact, set this person as primary
       if (!deal.person_id) {
         await updateDeal(deal.id, {
           person_id: person.id,

@@ -280,6 +280,17 @@ export async function getDealParticipants(dealId: number): Promise<Person[]> {
     .filter((p): p is Person => p !== undefined);
 }
 
+export async function addDealParticipant(dealId: number, personId: number): Promise<void> {
+  const deals = await getDeals();
+  const idx = deals.findIndex((d) => d.id === dealId);
+  if (idx === -1) throw new Error("Deal not found");
+  const deal = deals[idx];
+  const current = deal.participants || (deal.person_id ? [deal.person_id] : []);
+  if (current.includes(personId)) return; // already a participant
+  deals[idx] = { ...deal, participants: [...current, personId] };
+  await writeBlob("deals.json", deals);
+}
+
 // ─── Bulk write (for migration) ──────────────────────────
 
 export async function bulkWriteDeals(deals: Deal[]): Promise<void> {

@@ -19,6 +19,7 @@ import {
   Star,
   Sparkles,
   Linkedin,
+  Link2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -101,6 +102,10 @@ export default function ProspectsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [archiving, setArchiving] = useState(false);
   const [enriching, setEnriching] = useState(false);
+  const [showLinkDeal, setShowLinkDeal] = useState(false);
+  const [allDeals, setAllDeals] = useState<{ id: number; title: string; person_name?: string; org_name?: string }[]>([]);
+  const [dealSearch, setDealSearch] = useState("");
+  const [linking, setLinking] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchProspects = useCallback(async () => {
@@ -291,6 +296,54 @@ export default function ProspectsPage() {
     setEnriching(false);
   };
 
+  const openLinkDeal = async () => {
+    setShowLinkDeal(true);
+    setDealSearch("");
+    // Fetch deals if not already loaded
+    if (allDeals.length === 0) {
+      try {
+        const res = await fetch("/api/deals?status=open");
+        const json = await res.json();
+        if (json.data) setAllDeals(json.data);
+      } catch (err) {
+        console.error("Erreur chargement affaires:", err);
+      }
+    }
+  };
+
+  const linkSelectedToDeal = async (dealId: number, dealTitle: string) => {
+    setLinking(true);
+    setActionMsg("Liaison en cours...");
+    let linked = 0;
+    try {
+      for (const prospectId of selected) {
+        const res = await fetch("/api/prospects/link-deal", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prospectId, dealId }),
+        });
+        const json = await res.json();
+        if (json.success) linked++;
+      }
+      setActionMsg(`${linked} contact${linked > 1 ? "s" : ""} lié${linked > 1 ? "s" : ""} à "${dealTitle}"`);
+      setSelected(new Set());
+      setShowLinkDeal(false);
+      fetchProspects();
+    } catch {
+      setActionMsg("Erreur lors de la liaison");
+    }
+    setTimeout(() => setActionMsg(null), 4000);
+    setLinking(false);
+  };
+
+  const filteredDeals = useMemo(() => {
+    if (!dealSearch) return allDeals.slice(0, 20);
+    const q = dealSearch.toLowerCase();
+    return allDeals.filter(
+      (d) => d.title?.toLowerCase().includes(q) || d.person_name?.toLowerCase().includes(q) || d.org_name?.toLowerCase().includes(q)
+    ).slice(0, 20);
+  }, [allDeals, dealSearch]);
+
   const createDealForProspect = async (prospectId: string) => {
     const title = newDealTitle.trim();
     if (!title) return;
@@ -405,6 +458,57 @@ export default function ProspectsPage() {
           )}
           {selected.size > 0 && (
             <>
+              <div className="relative">
+                <button
+                  onClick={openLinkDeal}
+                  disabled={linking}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 disabled:opacity-50 cursor-pointer"
+                >
+                  {linking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
+                  Lier ({selected.size})
+                </button>
+                {showLinkDeal && (
+                  <div className="absolute right-0 top-full mt-1 w-80 bg-white rounded-lg border border-gray-200 shadow-xl z-50 p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold text-gray-700">Lier à une affaire existante</p>
+                      <button onClick={() => setShowLinkDeal(false)} className="p-0.5 text-gray-400 hover:text-gray-600 cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+                    </div>
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                      <input
+                        type="text"
+                        value={dealSearch}
+                        onChange={(e) => setDealSearch(e.target.value)}
+                        placeholder="Rechercher une affaire..."
+                        className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-300 rounded-md focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="max-h-48 overflow-y-auto space-y-0.5">
+                      {filteredDeals.length === 0 ? (
+                        <p className="text-[10px] text-gray-400 py-2 text-center">Aucune affaire trouvée</p>
+                      ) : (
+                        filteredDeals.map((d) => (
+                          <button
+                            key={d.id}
+                            onClick={() => linkSelectedToDeal(d.id, d.title)}
+                            disabled={linking}
+                            className="w-full text-left px-2 py-1.5 rounded-md hover:bg-indigo-50 text-xs transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-2"
+                          >
+                            <Briefcase className="w-3 h-3 text-indigo-500 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-gray-800 truncate">{d.title}</p>
+                              {(d.person_name || d.org_name) && (
+                                <p className="text-[9px] text-gray-400 truncate">{[d.person_name, d.org_name].filter(Boolean).join(" · ")}</p>
+                              )}
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
               <button
                 onClick={enrichProspects}
                 disabled={enriching}
