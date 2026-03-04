@@ -115,6 +115,7 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
   const [editType, setEditType] = useState("");
   const [editDate, setEditDate] = useState("");
   const [savingTask, setSavingTask] = useState(false);
+  const [personEmail, setPersonEmail] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -126,6 +127,18 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
       .catch((err) => console.error("Erreur chargement contexte deal:", err))
       .finally(() => setLoading(false));
   }, [dealId]);
+
+  // Fetch person email for Gmail integration
+  useEffect(() => {
+    if (!personId) return;
+    fetch(`/api/persons/${personId}`)
+      .then((r) => r.json())
+      .then((json) => {
+        const email = json.data?.email?.[0]?.value;
+        if (email) setPersonEmail(email);
+      })
+      .catch(() => {});
+  }, [personId]);
 
   const generateSummary = async () => {
     if (!ctx) return;
@@ -171,7 +184,7 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           pipedriveContext: contextText,
-          contactEmail: null,
+          contactEmail: personEmail,
           contactName: personName || "inconnu",
         }),
       });
