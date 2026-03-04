@@ -12,6 +12,8 @@ import {
   ExternalLink,
   RefreshCw,
   Plus,
+  Pencil,
+  Save,
   AlertTriangle,
   Clock,
   Archive,
@@ -1064,6 +1066,37 @@ function DealRow({
   const [participants, setParticipants] = useState<{ id: number; name: string; email: { value: string; primary: boolean }[]; phone: { value: string; primary: boolean }[]; job_title?: string; primary: boolean }[]>([]);
   const [loadingParticipants, setLoadingParticipants] = useState(false);
   const [participantsFetched, setParticipantsFetched] = useState(false);
+  const [editingActivityId, setEditingActivityId] = useState<number | null>(null);
+  const [editActivitySubject, setEditActivitySubject] = useState("");
+  const [editActivityDate, setEditActivityDate] = useState("");
+  const [savingActivity, setSavingActivity] = useState(false);
+
+  const startEditActivity = (a: Activity) => {
+    setEditingActivityId(a.id);
+    setEditActivitySubject(a.subject);
+    setEditActivityDate(a.due_date);
+  };
+
+  const saveActivity = async () => {
+    if (!editingActivityId || !editActivitySubject.trim()) return;
+    setSavingActivity(true);
+    try {
+      const res = await fetch(`/api/activities/${editingActivityId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject: editActivitySubject.trim(), due_date: editActivityDate }),
+      });
+      if (res.ok) {
+        // Optimistic: update local activity in parent state
+        onTaskCreated(); // triggers delayed sync
+      }
+    } catch (err) {
+      console.error("Erreur modification activité:", err);
+    } finally {
+      setSavingActivity(false);
+      setEditingActivityId(null);
+    }
+  };
 
   const savePipelineStage = async () => {
     setSavingPipeline(true);
@@ -1351,32 +1384,75 @@ function DealRow({
               const detectedType = detectActivityType(a.subject);
               const IconComp = TYPE_ICONS[detectedType] || CheckSquare;
               const overdue = isOverdue(a.due_date);
+              const isEditingThis = editingActivityId === a.id;
               return (
                 <div key={a.id} className={cn(
                   "flex items-center gap-2 py-1.5 px-2 rounded-lg text-xs",
                   overdue ? "bg-red-50 border border-red-100" : "bg-white border border-gray-100"
                 )}>
                   <IconComp className={cn("w-3.5 h-3.5 flex-shrink-0", overdue ? "text-red-500" : "text-amber-500")} />
-                  <span className="flex-1 truncate font-medium text-gray-700">{a.subject}</span>
-                  {a.person_name && <span className="text-gray-400 text-[10px]">{a.person_name}</span>}
-                  <span className={cn("text-[10px] flex-shrink-0", overdue ? "text-red-500 font-semibold" : "text-gray-400")}>
-                    {formatDate(a.due_date)}
-                  </span>
-                  {onMarkDone && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onMarkDone(a.id); }}
-                      className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded border border-green-200 text-green-700 bg-green-50 hover:bg-green-100 cursor-pointer"
-                    >
-                      <Check className="w-3 h-3" />
-                      Done
-                    </button>
+                  {isEditingThis ? (
+                    <>
+                      <input
+                        type="text"
+                        value={editActivitySubject}
+                        onChange={(e) => setEditActivitySubject(e.target.value)}
+                        className="flex-1 px-1.5 py-0.5 text-[11px] border border-gray-300 rounded focus:ring-1 focus:ring-indigo-400 outline-none"
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => { if (e.key === "Enter") saveActivity(); if (e.key === "Escape") setEditingActivityId(null); }}
+                      />
+                      <input
+                        type="date"
+                        value={editActivityDate}
+                        onChange={(e) => setEditActivityDate(e.target.value)}
+                        className="w-28 px-1.5 py-0.5 text-[11px] border border-gray-300 rounded focus:ring-1 focus:ring-indigo-400 outline-none"
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      <button
+                        onClick={(e) => { e.stopPropagation(); saveActivity(); }}
+                        disabled={savingActivity}
+                        className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 cursor-pointer disabled:opacity-50"
+                      >
+                        {savingActivity ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setEditingActivityId(null); }}
+                        className="flex items-center px-1.5 py-0.5 text-[10px] rounded border border-gray-200 text-gray-500 hover:bg-gray-100 cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="flex-1 truncate font-medium text-gray-700">{a.subject}</span>
+                      {a.person_name && <span className="text-gray-400 text-[10px]">{a.person_name}</span>}
+                      <span className={cn("text-[10px] flex-shrink-0", overdue ? "text-red-500 font-semibold" : "text-gray-400")}>
+                        {formatDate(a.due_date)}
+                      </span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); startEditActivity(a); }}
+                        className="flex items-center px-1.5 py-0.5 text-[10px] rounded border border-gray-200 text-gray-500 hover:bg-gray-100 cursor-pointer"
+                        title="Modifier"
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </button>
+                      {onMarkDone && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onMarkDone(a.id); }}
+                          className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded border border-green-200 text-green-700 bg-green-50 hover:bg-green-100 cursor-pointer"
+                        >
+                          <Check className="w-3 h-3" />
+                          Done
+                        </button>
+                      )}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onArchive(a.id, deal.id, a.person_name || deal.title); }}
+                        className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded border border-orange-200 text-orange-700 bg-orange-50 hover:bg-orange-100 cursor-pointer"
+                      >
+                        <Archive className="w-3 h-3" />
+                      </button>
+                    </>
                   )}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onArchive(a.id, deal.id, a.person_name || deal.title); }}
-                    className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded border border-orange-200 text-orange-700 bg-orange-50 hover:bg-orange-100 cursor-pointer"
-                  >
-                    <Archive className="w-3 h-3" />
-                  </button>
                 </div>
               );
             })}

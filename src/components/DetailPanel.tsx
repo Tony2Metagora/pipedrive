@@ -149,7 +149,7 @@ export default function DetailPanel({ personId, allParticipants, dealId, orgId, 
   const [linkedinUrl, setLinkedinUrl] = useState<string | null>(null);
   const [editingLinkedin, setEditingLinkedin] = useState(false);
   const [newLinkedin, setNewLinkedin] = useState("");
-  const [showMessagePanel, setShowMessagePanel] = useState(false);
+  const [showMessagePanel, setShowMessagePanel] = useState<false | "whatsapp" | "email">(false);
 
   useEffect(() => {
     const fetchContext = async () => {
@@ -465,16 +465,28 @@ export default function DetailPanel({ personId, allParticipants, dealId, orgId, 
                 {enriching ? "Recherche..." : "Dropcontact"}
               </button>
               <button
-                onClick={() => setShowMessagePanel(!showMessagePanel)}
+                onClick={() => setShowMessagePanel(showMessagePanel === "whatsapp" ? false : "whatsapp")}
                 className={cn(
                   "flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-medium rounded-md cursor-pointer transition-colors",
-                  showMessagePanel
+                  showMessagePanel === "whatsapp"
+                    ? "bg-green-700 text-white"
+                    : "bg-green-600 text-white hover:bg-green-700"
+                )}
+              >
+                <Phone className="w-3 h-3" />
+                WhatsApp
+              </button>
+              <button
+                onClick={() => setShowMessagePanel(showMessagePanel === "email" ? false : "email")}
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-medium rounded-md cursor-pointer transition-colors",
+                  showMessagePanel === "email"
                     ? "bg-indigo-700 text-white"
                     : "bg-indigo-600 text-white hover:bg-indigo-700"
                 )}
               >
-                <MessageSquare className="w-3 h-3" />
-                Message
+                <Mail className="w-3 h-3" />
+                Gmail
               </button>
             </div>
             {/* Résultats enrichissement Dropcontact */}
@@ -502,8 +514,9 @@ export default function DetailPanel({ personId, allParticipants, dealId, orgId, 
           allParticipants={allParticipants}
           dealId={dealId}
           orgId={orgId}
-          onClose={() => setShowMessagePanel(false)}
+          onClose={() => setShowMessagePanel(false as const)}
           onActivityCreated={onActivityCreated}
+          initialChannel={showMessagePanel}
         />
       )}
     </div>
