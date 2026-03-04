@@ -25,6 +25,11 @@ export interface DropcontactResult {
   linkedin?: string;
   company?: string;
   website?: string;
+  nb_employees?: string;
+  naf5_code?: string;
+  naf5_des?: string;
+  siren?: string;
+  siret?: string;
 }
 
 /**
@@ -43,7 +48,7 @@ export async function enrichContact(input: DropcontactInput): Promise<Dropcontac
     },
     body: JSON.stringify({
       data: [input],
-      siren: false,
+      siren: true,
       language: "fr",
     }),
   });

@@ -17,6 +17,8 @@ import {
   ExternalLink,
   Archive,
   Star,
+  Sparkles,
+  Linkedin,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +35,9 @@ interface Prospect {
   notes: string;
   score_entreprise: string;
   score_job: string;
+  linkedin: string;
+  naf_code: string;
+  effectifs: string;
   deal_id: number | null;
   deal_title: string | null;
   deal_status: string | null;
@@ -95,6 +100,7 @@ export default function ProspectsPage() {
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [archiving, setArchiving] = useState(false);
+  const [enriching, setEnriching] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchProspects = useCallback(async () => {
@@ -221,6 +227,32 @@ export default function ProspectsPage() {
     setArchiving(false);
   };
 
+  const enrichProspects = async () => {
+    if (selected.size === 0) return;
+    if (!confirm(`Enrichir ${selected.size} contact${selected.size > 1 ? "s" : ""} via Dropcontact ?\nCela consommera des crédits API.`)) return;
+    setEnriching(true);
+    setActionMsg("Enrichissement en cours...");
+    try {
+      const res = await fetch("/api/prospects/enrich", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selected) }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setActionMsg(`${json.enriched}/${json.total} contact${json.enriched > 1 ? "s" : ""} enrichi${json.enriched > 1 ? "s" : ""}`);
+        setSelected(new Set());
+        fetchProspects();
+      } else {
+        setActionMsg(`Erreur : ${json.error}`);
+      }
+    } catch {
+      setActionMsg("Erreur lors de l'enrichissement");
+    }
+    setTimeout(() => setActionMsg(null), 5000);
+    setEnriching(false);
+  };
+
   const createDealForProspect = async (prospectId: string) => {
     const title = newDealTitle.trim();
     if (!title) return;
@@ -334,14 +366,24 @@ export default function ProspectsPage() {
             <span className="text-xs font-medium px-2 py-1 rounded bg-green-50 text-green-700">{actionMsg}</span>
           )}
           {selected.size > 0 && (
-            <button
-              onClick={bulkArchive}
-              disabled={archiving}
-              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 disabled:opacity-50 cursor-pointer"
-            >
-              {archiving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Archive className="w-4 h-4" />}
-              Archiver ({selected.size})
-            </button>
+            <>
+              <button
+                onClick={enrichProspects}
+                disabled={enriching}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 disabled:opacity-50 cursor-pointer"
+              >
+                {enriching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                Enrichir ({selected.size})
+              </button>
+              <button
+                onClick={bulkArchive}
+                disabled={archiving}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 disabled:opacity-50 cursor-pointer"
+              >
+                {archiving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Archive className="w-4 h-4" />}
+                Archiver ({selected.size})
+              </button>
+            </>
           )}
           <button
             onClick={downloadCsv}
@@ -461,8 +503,11 @@ export default function ProspectsPage() {
                   <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[100px]">Entreprise</th>
                   <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[62px]">Statut</th>
                   <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[120px]">Affaire</th>
-                  <th className="text-center px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[85px]">Score Ent.</th>
-                  <th className="text-center px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[85px]">Score Job</th>
+                  <th className="text-center px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[80px]">Score Ent.</th>
+                  <th className="text-center px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[80px]">Score Job</th>
+                  <th className="text-center px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[30px]" title="LinkedIn"><Linkedin className="w-3 h-3 mx-auto text-gray-500" /></th>
+                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[70px]">NAF</th>
+                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[55px]">Eff.</th>
                   <th className="text-center pr-3 pl-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[60px]"></th>
                 </tr>
               </thead>
@@ -615,6 +660,21 @@ export default function ProspectsPage() {
                         ) : (
                           <ScoreStars value={scoreJob} />
                         )}
+                      </td>
+                      <td className="px-1 py-1.5 text-center">
+                        {p.linkedin ? (
+                          <a href={p.linkedin} target="_blank" rel="noopener noreferrer" className="text-[#0077B5] hover:text-[#005885]" title={p.linkedin}>
+                            <Linkedin className="w-3.5 h-3.5 mx-auto" />
+                          </a>
+                        ) : (
+                          <span className="text-gray-200"><Linkedin className="w-3.5 h-3.5 mx-auto" /></span>
+                        )}
+                      </td>
+                      <td className="px-1 py-1.5 truncate">
+                        <span className="text-gray-600 text-[9px]" title={p.naf_code}>{p.naf_code}</span>
+                      </td>
+                      <td className="px-1 py-1.5 truncate">
+                        <span className="text-gray-600 text-[9px]">{p.effectifs}</span>
                       </td>
                       <td className="pr-3 pl-1 py-1.5 text-center">
                         {isEditing ? (
