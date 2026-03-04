@@ -83,13 +83,24 @@ export async function GET() {
       }
     }
 
-    // Build person_id → open deal mapping (take first open deal)
+    // Build person_id → deal mapping (primary contact + participants)
     const personIdToDeals = new Map<number, typeof deals[0][]>();
     for (const d of deals) {
-      if (!d.person_id) continue;
-      const existing = personIdToDeals.get(d.person_id) || [];
-      existing.push(d);
-      personIdToDeals.set(d.person_id, existing);
+      // Primary contact
+      if (d.person_id) {
+        const existing = personIdToDeals.get(d.person_id) || [];
+        existing.push(d);
+        personIdToDeals.set(d.person_id, existing);
+      }
+      // Secondary contacts (participants)
+      if (d.participants) {
+        for (const pid of d.participants) {
+          if (pid === d.person_id) continue; // already added above
+          const existing = personIdToDeals.get(pid) || [];
+          existing.push(d);
+          personIdToDeals.set(pid, existing);
+        }
+      }
     }
 
     // Enrich each prospect
