@@ -201,23 +201,37 @@ export default function DashboardPage() {
     d.person_name?.toLowerCase().includes(q) ||
     d.org_name?.toLowerCase().includes(q);
 
-  // Activités classées par date (filtrées par recherche)
-  const urgentActivities = activities.filter((a) => isOverdue(a.due_date) && matchActivity(a));
-  const upcoming = activities.filter(
-    (a) => !isOverdue(a.due_date) && isWithinDays(a.due_date, 7) && matchActivity(a)
-  );
-  const later = activities.filter(
-    (a) => !isOverdue(a.due_date) && !isWithinDays(a.due_date, 7) && matchActivity(a)
-  );
+  // Group pending activities by deal_id
+  const activitiesByDeal = new Map<number, Activity[]>();
+  const orphanActivities: Activity[] = [];
+  for (const a of activities) {
+    if (!matchActivity(a)) continue;
+    if (a.deal_id) {
+      const list = activitiesByDeal.get(a.deal_id) || [];
+      list.push(a);
+      activitiesByDeal.set(a.deal_id, list);
+    } else {
+      orphanActivities.push(a);
+    }
+  }
 
-  // Deals classés : urgent = pas de prochaine activité OU activité en retard (filtrés par recherche)
-  const urgentDeals = deals.filter(
-    (d) => (!d.next_activity_date || isOverdue(d.next_activity_date)) && matchDeal(d)
-  );
-  const okDeals = deals.filter(
-    (d) => d.next_activity_date && !isOverdue(d.next_activity_date) && matchDeal(d)
-  );
-  const totalUrgent = urgentActivities.length + urgentDeals.length;
+  // Urgent: deals with overdue/today activities OR no next activity
+  const urgentDeals = deals.filter((d) => {
+    if (!matchDeal(d)) return false;
+    const dealActivities = activitiesByDeal.get(d.id) || [];
+    const hasOverdue = dealActivities.some((a) => isOverdue(a.due_date));
+    return hasOverdue || !d.next_activity_date || isOverdue(d.next_activity_date);
+  });
+
+  // À traiter: deals with future activities (not urgent)
+  const urgentDealIds = new Set(urgentDeals.map((d) => d.id));
+  const okDeals = deals.filter((d) => !urgentDealIds.has(d.id) && matchDeal(d));
+
+  // Orphan urgent activities (no deal)
+  const urgentOrphanActivities = orphanActivities.filter((a) => isOverdue(a.due_date));
+  const otherOrphanActivities = orphanActivities.filter((a) => !isOverdue(a.due_date));
+
+  const totalUrgent = urgentDeals.length + urgentOrphanActivities.length;
 
   return (
     <div>
@@ -298,12 +312,12 @@ export default function DashboardPage() {
             </div>
           ) : (
             <div className="space-y-8">
-              {/* Deals urgents : pas de prochaine activité ou activité en retard */}
+              {/* Affaires urgentes avec tâches intégrées */}
               {urgentDeals.length > 0 && (
                 <div>
                   <div className="flex items-center gap-2 mb-3">
                     <Briefcase className="w-5 h-5 text-red-500" />
-                    <h2 className="text-lg font-semibold text-gray-900">Affaires en retard</h2>
+                    <h2 className="text-lg font-semibold text-gray-900">Affaires urgentes</h2>
                     <span className="text-sm text-gray-400 ml-1">({urgentDeals.length})</span>
                   </div>
                   <div className="space-y-2">
@@ -311,7 +325,9 @@ export default function DashboardPage() {
                       <DealRow
                         key={deal.id}
                         deal={deal}
+                        dealActivities={activitiesByDeal.get(deal.id) || []}
                         onTaskCreated={() => { fetchActivities(); fetchDeals(); }}
+                        onMarkDone={markDone}
                         onArchive={openArchiveModal}
                         selected={selectedDeals.has(deal.id)}
                         onToggleSelect={toggleDealSelection}
@@ -321,12 +337,12 @@ export default function DashboardPage() {
                 </div>
               )}
 
-              {/* Activités en retard */}
-              {urgentActivities.length > 0 && (
+              {/* Tâches orphelines urgentes (sans affaire) */}
+              {urgentOrphanActivities.length > 0 && (
                 <ActivitySection
-                  title="Tâches en retard"
+                  title="Tâches sans affaire"
                   icon={<AlertTriangle className="w-5 h-5 text-red-500" />}
-                  activities={urgentActivities}
+                  activities={urgentOrphanActivities}
                   onMarkDone={markDone}
                   onArchive={openArchiveModal}
                   onSelect={openDetail}
@@ -335,33 +351,7 @@ export default function DashboardPage() {
                 />
               )}
 
-              {upcoming.length > 0 && (
-                <ActivitySection
-                  title="7 prochains jours"
-                  icon={<Clock className="w-5 h-5 text-amber-500" />}
-                  activities={upcoming}
-                  onMarkDone={markDone}
-                  onArchive={openArchiveModal}
-                  onSelect={openDetail}
-                  selectedId={selectedActivity?.id ?? null}
-                  variant="upcoming"
-                />
-              )}
-
-              {later.length > 0 && (
-                <ActivitySection
-                  title="Plus tard"
-                  icon={<Calendar className="w-5 h-5 text-gray-400" />}
-                  activities={later}
-                  onMarkDone={markDone}
-                  onArchive={openArchiveModal}
-                  onSelect={openDetail}
-                  selectedId={selectedActivity?.id ?? null}
-                  variant="later"
-                />
-              )}
-
-              {totalUrgent === 0 && activities.length === 0 && !loading && !loadingDeals && (
+              {totalUrgent === 0 && !loading && !loadingDeals && (
                 <div className="text-center py-20 text-gray-400">
                   <CheckSquare className="w-12 h-12 mx-auto mb-4 opacity-50" />
                   <p className="text-lg font-medium">Aucune urgence</p>
@@ -475,7 +465,9 @@ export default function DashboardPage() {
                 <DealRow
                   key={deal.id}
                   deal={deal}
+                  dealActivities={activitiesByDeal.get(deal.id) || []}
                   onTaskCreated={() => { fetchActivities(); fetchDeals(); }}
+                  onMarkDone={markDone}
                   onArchive={openArchiveModal}
                   selected={selectedDeals.has(deal.id)}
                   onToggleSelect={toggleDealSelection}
@@ -696,14 +688,18 @@ function ActivityRow({
 
 function DealRow({
   deal,
+  dealActivities,
   onTaskCreated,
+  onMarkDone,
   onArchive,
   selected,
   onToggleSelect,
   onDealUpdated,
 }: {
   deal: Deal;
+  dealActivities?: Activity[];
   onTaskCreated: () => void;
+  onMarkDone?: (id: number) => void;
   onArchive: (activityId: number | null, dealId: number | null, contactName: string) => void;
   selected: boolean;
   onToggleSelect: (dealId: number) => void;
@@ -1007,6 +1003,47 @@ function DealRow({
           {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </div>
       </div>
+
+      {/* Inline activities for this deal */}
+      {dealActivities && dealActivities.length > 0 && (
+        <div className="border-t border-gray-100 bg-amber-50/40 px-4 py-2 space-y-1">
+          {dealActivities
+            .sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())
+            .map((a) => {
+              const detectedType = detectActivityType(a.subject);
+              const IconComp = TYPE_ICONS[detectedType] || CheckSquare;
+              const overdue = isOverdue(a.due_date);
+              return (
+                <div key={a.id} className={cn(
+                  "flex items-center gap-2 py-1.5 px-2 rounded-lg text-xs",
+                  overdue ? "bg-red-50 border border-red-100" : "bg-white border border-gray-100"
+                )}>
+                  <IconComp className={cn("w-3.5 h-3.5 flex-shrink-0", overdue ? "text-red-500" : "text-amber-500")} />
+                  <span className="flex-1 truncate font-medium text-gray-700">{a.subject}</span>
+                  {a.person_name && <span className="text-gray-400 text-[10px]">{a.person_name}</span>}
+                  <span className={cn("text-[10px] flex-shrink-0", overdue ? "text-red-500 font-semibold" : "text-gray-400")}>
+                    {formatDate(a.due_date)}
+                  </span>
+                  {onMarkDone && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onMarkDone(a.id); }}
+                      className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded border border-green-200 text-green-700 bg-green-50 hover:bg-green-100 cursor-pointer"
+                    >
+                      <Check className="w-3 h-3" />
+                      Done
+                    </button>
+                  )}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onArchive(a.id, deal.id, a.person_name || deal.title); }}
+                    className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded border border-orange-200 text-orange-700 bg-orange-50 hover:bg-orange-100 cursor-pointer"
+                  >
+                    <Archive className="w-3 h-3" />
+                  </button>
+                </div>
+              );
+            })}
+        </div>
+      )}
 
       {/* Expanded: add task form + contact detail */}
       {expanded && (
