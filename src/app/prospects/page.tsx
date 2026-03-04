@@ -774,7 +774,7 @@ export default function ProspectsPage() {
                           </div>
                         ) : (
                           <button
-                            onClick={() => { setLinkingId(p.id); setNewDealTitle(p.entreprise || `${p.prenom} ${p.nom}`); }}
+                            onClick={() => { setLinkingId(p.id); setNewDealTitle(p.entreprise ? `${p.entreprise} - ${p.prenom} ${p.nom}`.trim() : `${p.prenom} ${p.nom}`.trim()); }}
                             className="inline-flex items-center gap-0.5 text-[10px] text-gray-400 hover:text-indigo-600 cursor-pointer transition-colors"
                             title="Créer une affaire"
                           >
