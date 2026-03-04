@@ -156,17 +156,19 @@ function applyResults(rows: ProspectRow[], prospectIds: string[], dcResults: Dro
         }
       }
 
-      // Job — fill if empty
+      // Job — always overwrite
       if (dcResult.job) {
-        if (!rows[idx].poste) {
-          rows[idx].poste = dcResult.job;
-          updatedFields.push("poste");
-        }
+        rows[idx].poste = dcResult.job;
+        updatedFields.push("poste");
       }
 
-      // LinkedIn — always overwrite
+      // LinkedIn — always overwrite, ensure full URL
       if (dcResult.linkedin) {
-        rows[idx].linkedin = dcResult.linkedin;
+        let url = dcResult.linkedin;
+        if (url && !url.startsWith("http")) {
+          url = `https://${url}`;
+        }
+        rows[idx].linkedin = url;
         updatedFields.push("linkedin");
       }
 

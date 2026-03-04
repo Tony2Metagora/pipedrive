@@ -700,7 +700,7 @@ export default function ProspectsPage() {
                       </td>
                       <td className="px-1 py-1.5 text-center">
                         {p.linkedin ? (
-                          <a href={p.linkedin} target="_blank" rel="noopener noreferrer" className="text-[#0077B5] hover:text-[#005885]" title={p.linkedin}>
+                          <a href={p.linkedin.startsWith("http") ? p.linkedin : `https://${p.linkedin}`} target="_blank" rel="noopener noreferrer" className="text-[#0077B5] hover:text-[#005885]" title={p.linkedin}>
                             <Linkedin className="w-3.5 h-3.5 mx-auto" />
                           </a>
                         ) : (
