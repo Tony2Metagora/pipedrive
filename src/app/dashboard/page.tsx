@@ -127,24 +127,30 @@ export default function DashboardPage() {
     fetchDeals();
   }, [fetchActivities, fetchDeals]);
 
-  // Optimistic markDone: remove activity from list immediately
+  // Optimistic markDone: remove activity from list immediately, delayed sync
   const markDone = async (id: number) => {
-    // Optimistic: remove the activity from the list immediately
     setActivities((prev) => prev.filter((a) => a.id !== id));
     try {
-      await fetch(`/api/activities/${id}`, {
+      const res = await fetch(`/api/activities/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ done: 1 }),
       });
-      // Silent background sync to get fresh data
-      syncBackground();
+      if (!res.ok) console.error("markDone failed:", res.status, await res.text());
     } catch (err) {
       console.error("Erreur marquage done:", err);
-      // On error, re-fetch to restore correct state
-      syncBackground();
     }
+    // Delayed sync to let blob write propagate
+    setTimeout(syncBackground, 2000);
   };
+
+  // Callback for task creation: add new activity to local state optimistically
+  const handleTaskCreated = useCallback((newActivity?: Activity) => {
+    if (newActivity) {
+      setActivities((prev) => [...prev, newActivity]);
+    }
+    setTimeout(syncBackground, 2000);
+  }, [syncBackground]);
 
   const openArchiveModal = (activityId: number | null, dealId: number | null, contactName: string) => {
     setArchiveTarget({ activityId, dealId, contactName });
@@ -424,7 +430,7 @@ export default function DashboardPage() {
                   key={deal.id}
                   deal={deal}
                   dealActivities={activitiesByDeal.get(deal.id) || []}
-                  onTaskCreated={syncBackground}
+                  onTaskCreated={handleTaskCreated}
                   onMarkDone={markDone}
                   onArchive={openArchiveModal}
                   selected={selectedDeals.has(deal.id)}
@@ -606,7 +612,7 @@ export default function DashboardPage() {
                   key={deal.id}
                   deal={deal}
                   dealActivities={activitiesByDeal.get(deal.id) || []}
-                  onTaskCreated={syncBackground}
+                  onTaskCreated={handleTaskCreated}
                   onMarkDone={markDone}
                   onArchive={openArchiveModal}
                   selected={selectedDeals.has(deal.id)}
@@ -635,7 +641,14 @@ export default function DashboardPage() {
           onClose={() => setArchiveTarget(null)}
           onArchived={() => {
             setArchiveTarget(null);
-            syncBackground();
+            // Optimistic: remove the deal from local state if archived
+            if (archiveTarget.dealId) {
+              setDeals((prev) => prev.filter((d) => d.id !== archiveTarget.dealId));
+            }
+            if (archiveTarget.activityId) {
+              setActivities((prev) => prev.filter((a) => a.id !== archiveTarget.activityId));
+            }
+            setTimeout(syncBackground, 2000);
           }}
         />
       )}
@@ -1024,7 +1037,7 @@ function DealRow({
 }: {
   deal: Deal;
   dealActivities?: Activity[];
-  onTaskCreated: () => void;
+  onTaskCreated: (newActivity?: Activity) => void;
   onMarkDone?: (id: number) => void;
   onArchive: (activityId: number | null, dealId: number | null, contactName: string) => void;
   selected: boolean;
@@ -1130,7 +1143,7 @@ function DealRow({
     if (!taskSubject.trim()) return;
     setCreatingTask(true);
     try {
-      await fetch("/api/activities", {
+      const res = await fetch("/api/activities", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1142,9 +1155,17 @@ function DealRow({
           org_id: deal.org_id,
         }),
       });
+      if (!res.ok) {
+        console.error("createTask failed:", res.status, await res.text());
+        return;
+      }
+      const json = await res.json();
       setTaskSubject("");
       setShowAddTask(false);
-      onTaskCreated();
+      // Optimistic: add the new activity to local state immediately
+      if (json.data) {
+        onTaskCreated(json.data);
+      }
     } catch (err) {
       console.error("Erreur création tâche:", err);
     } finally {
