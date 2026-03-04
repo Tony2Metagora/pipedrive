@@ -266,7 +266,7 @@ export default function DashboardPage() {
             )}
           >
             <Briefcase className="w-4 h-4" />
-            Affaires
+            À traiter
             {okDeals.length > 0 && (
               <span className="ml-1 px-1.5 py-0.5 text-[10px] font-bold bg-indigo-100 text-indigo-700 rounded-full">
                 {okDeals.length}
