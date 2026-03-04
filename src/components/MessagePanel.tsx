@@ -45,6 +45,9 @@ interface MessagePanelProps {
   orgId?: number | null;
   onClose: () => void;
   onActivityCreated?: () => void;
+  initialMessage?: string;
+  initialSubject?: string;
+  initialChannel?: "whatsapp" | "email";
 }
 
 type Step = "draft" | "sent" | "validated";
@@ -60,17 +63,29 @@ export default function MessagePanel({
   orgId,
   onClose,
   onActivityCreated,
+  initialMessage,
+  initialSubject,
+  initialChannel,
 }: MessagePanelProps) {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
   const [showTemplateDropdown, setShowTemplateDropdown] = useState(false);
-  const [messageText, setMessageText] = useState("");
+  const [messageText, setMessageText] = useState(initialMessage || "");
   const [aiPrompt, setAiPrompt] = useState("");
   const [rewriting, setRewriting] = useState(false);
-  const [channel, setChannel] = useState<"whatsapp" | "email">("whatsapp");
+  const [channel, setChannel] = useState<"whatsapp" | "email">(initialChannel || "whatsapp");
   const [step, setStep] = useState<Step>("draft");
   const [validating, setValidating] = useState(false);
+  const [followupSubjectOverride] = useState(initialSubject || "");
+  const [showTaskForm, setShowTaskForm] = useState(false);
+  const [taskSubject, setTaskSubject] = useState("");
+  const [taskDate, setTaskDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 3);
+    return d.toISOString().split("T")[0];
+  });
+  const [creatingTask, setCreatingTask] = useState(false);
 
   // Derive main contact first name and CC emails from participants
   const mainFirstName = contactName.split(" ")[0] || "";
@@ -150,7 +165,7 @@ export default function MessagePanel({
       }
       const to = encodeURIComponent(contactEmail);
       const cc = ccEmails.length > 0 ? `&cc=${encodeURIComponent(ccEmails.join(","))}` : "";
-      const subject = encodeURIComponent(selectedTemplate?.etape || "Metagora");
+      const subject = encodeURIComponent(followupSubjectOverride || selectedTemplate?.etape || "Metagora");
       const body = encodeURIComponent(messageText);
       window.open(`https://mail.google.com/mail/?view=cm&to=${to}${cc}&su=${subject}&body=${body}`, "_blank");
     }
@@ -188,12 +203,39 @@ export default function MessagePanel({
         });
       }
       setStep("validated");
+      setShowTaskForm(true);
+      setTaskSubject(`Relance ${contactName}${followupSubjectOverride ? ` — ${followupSubjectOverride}` : ""}`);
       onActivityCreated?.();
     } catch (err) {
       console.error("Erreur création activité:", err);
       alert("Erreur lors de la création de l'activité Pipedrive");
     } finally {
       setValidating(false);
+    }
+  };
+
+  const createFollowupTask = async () => {
+    if (!taskSubject.trim()) return;
+    setCreatingTask(true);
+    try {
+      await fetch("/api/activities", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: taskSubject.trim(),
+          type: "task",
+          due_date: taskDate,
+          deal_id: dealId || undefined,
+          person_id: personId,
+          org_id: orgId || undefined,
+        }),
+      });
+      setShowTaskForm(false);
+      onActivityCreated?.();
+    } catch (err) {
+      console.error("Erreur création tâche:", err);
+    } finally {
+      setCreatingTask(false);
     }
   };
 
@@ -238,6 +280,47 @@ export default function MessagePanel({
               </p>
             </div>
           </div>
+
+          {/* Pré-remplir une tâche de suivi */}
+          {showTaskForm && (
+            <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 space-y-2">
+              <p className="text-xs font-semibold text-amber-800 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5" />
+                Créer une tâche de suivi ?
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={taskSubject}
+                  onChange={(e) => setTaskSubject(e.target.value)}
+                  placeholder="Sujet de la tâche..."
+                  className="flex-1 px-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+                  onKeyDown={(e) => { if (e.key === "Enter") createFollowupTask(); }}
+                />
+                <input
+                  type="date"
+                  value={taskDate}
+                  onChange={(e) => setTaskDate(e.target.value)}
+                  className="px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:ring-1 focus:ring-indigo-400 outline-none"
+                />
+                <button
+                  onClick={createFollowupTask}
+                  disabled={creatingTask || !taskSubject.trim()}
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 cursor-pointer"
+                >
+                  {creatingTask ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                  Créer
+                </button>
+                <button
+                  onClick={() => setShowTaskForm(false)}
+                  className="px-2 py-1.5 text-xs text-gray-500 hover:text-gray-700 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center gap-2">
             <button
               onClick={resetDraft}

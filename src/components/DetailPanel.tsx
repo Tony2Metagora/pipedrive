@@ -76,29 +76,36 @@ interface Props {
   onActivityCreated?: () => void;
 }
 
-const SECTION_CONFIG: Record<string, { icon: string; bg: string; border: string; title: string; text: string }> = {
-  "DERNIER EMAIL": { icon: "�", bg: "bg-amber-50", border: "border-amber-200", title: "text-amber-800", text: "text-amber-900" },
-  "EMAIL PRÉCÉDENT": { icon: "📨", bg: "bg-emerald-50", border: "border-emerald-200", title: "text-emerald-800", text: "text-emerald-900" },
-  "NEXT STEPS & ACTIONS": { icon: "⚡", bg: "bg-sky-50", border: "border-sky-200", title: "text-sky-800", text: "text-sky-900" },
-};
+const SECTION_STYLES: { match: string; icon: string; bg: string; border: string; title: string; text: string }[] = [
+  { match: "DERNIER EMAIL", icon: "📧", bg: "bg-amber-50", border: "border-amber-200", title: "text-amber-800", text: "text-amber-900" },
+  { match: "NEXT STEPS", icon: "⚡", bg: "bg-sky-50", border: "border-sky-200", title: "text-sky-800", text: "text-sky-900" },
+  { match: "FOLLOWUP EMAIL", icon: "✉️", bg: "bg-green-50", border: "border-green-200", title: "text-green-800", text: "text-green-900" },
+];
 
 function SummaryCard({ text, color }: { text: string; color: "purple" | "blue" }) {
   const sections = useMemo(() => {
-    const keys = Object.keys(SECTION_CONFIG);
-    const parts: { title: string; content: string }[] = [];
-    let remaining = text;
-
-    keys.forEach((key, i) => {
-      const idx = remaining.indexOf(key);
-      if (idx === -1) return;
-      const after = remaining.slice(idx + key.length).trim();
-      const nextKey = keys[i + 1];
-      const nextIdx = nextKey ? after.indexOf(nextKey) : -1;
-      const content = nextIdx > -1 ? after.slice(0, nextIdx).trim() : after.trim();
-      parts.push({ title: key, content });
-      if (nextIdx > -1) remaining = after.slice(nextIdx);
-    });
-
+    const parts: { title: string; content: string; styleIdx: number }[] = [];
+    const positions: { idx: number; title: string; styleIdx: number; endOfTitle: number }[] = [];
+    for (let si = 0; si < SECTION_STYLES.length; si++) {
+      const keyword = SECTION_STYLES[si].match;
+      const idx = text.indexOf(keyword);
+      if (idx === -1) continue;
+      const lineEnd = text.indexOf("\n", idx);
+      const endOfTitle = lineEnd > -1 ? lineEnd : text.length;
+      const fullTitle = text.slice(idx, endOfTitle).trim();
+      positions.push({ idx, title: fullTitle, styleIdx: si, endOfTitle });
+    }
+    positions.sort((a, b) => a.idx - b.idx);
+    for (let i = 0; i < positions.length; i++) {
+      const start = positions[i].endOfTitle;
+      const end = i + 1 < positions.length ? positions[i + 1].idx : text.length;
+      const content = text.slice(start, end).trim();
+      let cleanContent = content;
+      if (SECTION_STYLES[positions[i].styleIdx].match === "FOLLOWUP EMAIL") {
+        cleanContent = content.replace(/^Objet\s*:.*\n?/i, "").trim();
+      }
+      parts.push({ title: positions[i].title, content: cleanContent, styleIdx: positions[i].styleIdx });
+    }
     return parts.length > 0 ? parts : null;
   }, [text]);
 
@@ -109,14 +116,13 @@ function SummaryCard({ text, color }: { text: string; color: "purple" | "blue" }
   return (
     <div className="space-y-2">
       {sections.map((s) => {
-        const cfg = SECTION_CONFIG[s.title];
-        if (!cfg) return null;
+        const cfg = SECTION_STYLES[s.styleIdx];
         return (
           <div key={s.title} className={`rounded-lg ${cfg.bg} border ${cfg.border} px-3 py-2`}>
             <p className={`text-[10px] font-bold uppercase tracking-wide ${cfg.title} mb-1`}>
               {cfg.icon} {s.title}
             </p>
-            <p className={`text-xs leading-relaxed ${cfg.text}`}>{s.content}</p>
+            <p className={`text-xs leading-relaxed ${cfg.text} whitespace-pre-line`}>{s.content}</p>
           </div>
         );
       })}

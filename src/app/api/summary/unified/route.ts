@@ -121,6 +121,7 @@ export async function POST(request: Request) {
     }
 
     // 2. Build prompt — emails only, no Pipedrive
+    const lastEmail = validEmails[0]!;
     const emailTexts = validEmails
       .map(
         (e, i) =>
@@ -129,20 +130,21 @@ export async function POST(request: Request) {
       .join("\n\n");
 
     const systemPrompt = `Tu es l'assistant commercial de Tony chez Metagora (formation immersive IA pour le retail/luxe).
-Tu reçois les 2 derniers emails échangés avec le contact "${contactName || "inconnu"}".
+Tu reçois les derniers emails échangés avec le contact "${contactName || "inconnu"}".
 
 Réponds EXACTEMENT dans ce format. Texte brut, pas de formatage markdown, pas de *, #, -.
 
-DERNIER EMAIL
-[Résumé en 3-4 lignes de l'opportunité commerciale identifiée dans le dernier email : ce qui a été discuté, le niveau d'intérêt, les signaux d'achat ou demandes concrètes.]
-
-EMAIL PRÉCÉDENT
-[Résumé en 3-4 lignes de l'opportunité commerciale identifiée dans l'email précédent : contexte de la conversation, besoin exprimé, éléments clés échangés.]
+DERNIER EMAIL (${lastEmail.date})
+[3-4 lignes : résumé de l'opportunité commerciale dans ce dernier email. Ce qui a été discuté, niveau d'intérêt, signaux d'achat, demandes concrètes.]
 
 NEXT STEPS & ACTIONS
-[3-4 lignes : prochaines étapes concrètes basées sur ces emails. Ce que le prospect attend, ce que Tony doit faire (relancer, envoyer un doc, planifier un RDV, etc.). Recommandation claire.]
+[3-4 lignes : prochaines étapes concrètes. Ce que le prospect attend, ce que Tony doit faire. Recommandation claire.]
 
-RÈGLES : Phrases courtes et factuelles. Base-toi UNIQUEMENT sur le contenu des emails. Si un seul email est disponible, écris "Pas d'email précédent disponible" pour la section EMAIL PRÉCÉDENT.`;
+FOLLOWUP EMAIL
+Objet: [objet du mail de followup]
+[Rédige un email de followup professionnel mais naturel que Tony pourrait envoyer en réponse. Le mail doit être court (5-8 lignes), en français, tutoyer le contact si le dernier email tutoyait, vouvoyer sinon. Signe "Tony" à la fin. Le mail doit être la suite logique de la conversation : relancer, proposer un RDV, envoyer un document, confirmer une action, etc.]
+
+RÈGLES : Phrases courtes et factuelles. Base-toi UNIQUEMENT sur le contenu des emails.`;
 
     const userContent = emailTexts;
 
@@ -160,7 +162,7 @@ RÈGLES : Phrases courtes et factuelles. Base-toi UNIQUEMENT sur le contenu des 
           { role: "system", content: systemPrompt },
           { role: "user", content: userContent },
         ],
-        max_completion_tokens: 800,
+        max_completion_tokens: 1200,
       }),
     });
 
@@ -171,12 +173,24 @@ RÈGLES : Phrases courtes et factuelles. Base-toi UNIQUEMENT sur le contenu des 
     }
 
     const aiJson = await aiRes.json();
-    const summary = aiJson.choices?.[0]?.message?.content?.trim() || "Impossible de générer le résumé.";
+    const rawSummary = aiJson.choices?.[0]?.message?.content?.trim() || "Impossible de générer le résumé.";
+    const summary = rawSummary.replace(/[*#]/g, "");
+
+    // Extract followup email and subject from the summary
+    let followupEmail = "";
+    let followupSubject = "";
+    const followupMatch = summary.match(/FOLLOWUP EMAIL\s*\n(?:Objet\s*:\s*(.+)\n)?([\s\S]*?)$/i);
+    if (followupMatch) {
+      followupSubject = followupMatch[1]?.trim() || "";
+      followupEmail = followupMatch[2]?.trim() || "";
+    }
 
     return NextResponse.json({
       data: {
-        summary: summary.replace(/[*#]/g, ""),
+        summary,
         emailCount: validEmails.length,
+        followupEmail,
+        followupSubject,
       },
     });
   } catch (error) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import {
   StickyNote,
   Clock,
@@ -37,27 +37,40 @@ interface DealContext {
   notes: Note[];
 }
 
-const SECTION_CONFIG: Record<string, { icon: string; bg: string; border: string; title: string; text: string }> = {
-  "DERNIER EMAIL": { icon: "�", bg: "bg-amber-50", border: "border-amber-200", title: "text-amber-800", text: "text-amber-900" },
-  "EMAIL PRÉCÉDENT": { icon: "📨", bg: "bg-emerald-50", border: "border-emerald-200", title: "text-emerald-800", text: "text-emerald-900" },
-  "NEXT STEPS & ACTIONS": { icon: "⚡", bg: "bg-sky-50", border: "border-sky-200", title: "text-sky-800", text: "text-sky-900" },
-};
+// Section styling by keyword
+const SECTION_STYLES: { match: string; icon: string; bg: string; border: string; title: string; text: string }[] = [
+  { match: "DERNIER EMAIL", icon: "📧", bg: "bg-amber-50", border: "border-amber-200", title: "text-amber-800", text: "text-amber-900" },
+  { match: "NEXT STEPS", icon: "⚡", bg: "bg-sky-50", border: "border-sky-200", title: "text-sky-800", text: "text-sky-900" },
+  { match: "FOLLOWUP EMAIL", icon: "✉️", bg: "bg-green-50", border: "border-green-200", title: "text-green-800", text: "text-green-900" },
+];
 
-function SummaryCard({ text }: { text: string }) {
+function SummaryCard({ text, onUseFollowup }: { text: string; onUseFollowup?: () => void }) {
   const sections = useMemo(() => {
-    const keys = Object.keys(SECTION_CONFIG);
-    const parts: { title: string; content: string }[] = [];
-    let remaining = text;
-    keys.forEach((key, i) => {
-      const idx = remaining.indexOf(key);
-      if (idx === -1) return;
-      const after = remaining.slice(idx + key.length).trim();
-      const nextKey = keys[i + 1];
-      const nextIdx = nextKey ? after.indexOf(nextKey) : -1;
-      const content = nextIdx > -1 ? after.slice(0, nextIdx).trim() : after.trim();
-      parts.push({ title: key, content });
-      if (nextIdx > -1) remaining = after.slice(nextIdx);
-    });
+    const parts: { title: string; content: string; styleIdx: number }[] = [];
+    // Find all section positions
+    const positions: { idx: number; title: string; styleIdx: number; endOfTitle: number }[] = [];
+    for (let si = 0; si < SECTION_STYLES.length; si++) {
+      const keyword = SECTION_STYLES[si].match;
+      const idx = text.indexOf(keyword);
+      if (idx === -1) continue;
+      // Find the end of the title line (could have date suffix like "DERNIER EMAIL (Mon, 3 Mar...)")
+      const lineEnd = text.indexOf("\n", idx);
+      const endOfTitle = lineEnd > -1 ? lineEnd : text.length;
+      const fullTitle = text.slice(idx, endOfTitle).trim();
+      positions.push({ idx, title: fullTitle, styleIdx: si, endOfTitle });
+    }
+    positions.sort((a, b) => a.idx - b.idx);
+    for (let i = 0; i < positions.length; i++) {
+      const start = positions[i].endOfTitle;
+      const end = i + 1 < positions.length ? positions[i + 1].idx : text.length;
+      const content = text.slice(start, end).trim();
+      // For FOLLOWUP EMAIL, strip the "Objet: ..." line from content (it's extracted separately)
+      let cleanContent = content;
+      if (SECTION_STYLES[positions[i].styleIdx].match === "FOLLOWUP EMAIL") {
+        cleanContent = content.replace(/^Objet\s*:.*\n?/i, "").trim();
+      }
+      parts.push({ title: positions[i].title, content: cleanContent, styleIdx: positions[i].styleIdx });
+    }
     return parts.length > 0 ? parts : null;
   }, [text]);
 
@@ -68,14 +81,25 @@ function SummaryCard({ text }: { text: string }) {
   return (
     <div className="space-y-2">
       {sections.map((s) => {
-        const cfg = SECTION_CONFIG[s.title];
-        if (!cfg) return null;
+        const cfg = SECTION_STYLES[s.styleIdx];
+        const isFollowup = cfg.match === "FOLLOWUP EMAIL";
         return (
           <div key={s.title} className={`rounded-lg ${cfg.bg} border ${cfg.border} px-3 py-2`}>
-            <p className={`text-[10px] font-bold uppercase tracking-wide ${cfg.title} mb-1`}>
-              {cfg.icon} {s.title}
-            </p>
-            <p className={`text-xs leading-relaxed ${cfg.text}`}>{s.content}</p>
+            <div className="flex items-center justify-between mb-1">
+              <p className={`text-[10px] font-bold uppercase tracking-wide ${cfg.title}`}>
+                {cfg.icon} {s.title}
+              </p>
+              {isFollowup && onUseFollowup && (
+                <button
+                  onClick={onUseFollowup}
+                  className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold text-white bg-green-600 rounded-md hover:bg-green-700 cursor-pointer transition-colors"
+                >
+                  <Mail className="w-3 h-3" />
+                  Utiliser ce followup
+                </button>
+              )}
+            </div>
+            <p className={`text-xs leading-relaxed ${cfg.text} whitespace-pre-line`}>{s.content}</p>
           </div>
         );
       })}
@@ -99,9 +123,10 @@ interface Props {
   orgName?: string;
   deals?: { id: number; title: string; pipeline_id: number; stage_id: number; value: number; status: string; currency: string }[];
   onActivityChanged?: () => void;
+  onUseFollowup?: (email: string, subject: string) => void;
 }
 
-export default function DealContextPanel({ dealId, personId, orgId, personName, orgName, deals, onActivityChanged }: Props) {
+export default function DealContextPanel({ dealId, personId, orgId, personName, orgName, deals, onActivityChanged, onUseFollowup }: Props) {
   const [ctx, setCtx] = useState<DealContext | null>(null);
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<string | null>(null);
@@ -114,6 +139,8 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
   const [editDate, setEditDate] = useState("");
   const [savingTask, setSavingTask] = useState(false);
   const [personEmail, setPersonEmail] = useState<string | null>(null);
+  const [followupEmail, setFollowupEmail] = useState<string>("");
+  const [followupSubject, setFollowupSubject] = useState<string>("");
 
   useEffect(() => {
     setLoading(true);
@@ -159,6 +186,8 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
       const json = await res.json();
       if (json.data?.summary) {
         setSummary(json.data.summary);
+        if (json.data.followupEmail) setFollowupEmail(json.data.followupEmail);
+        if (json.data.followupSubject) setFollowupSubject(json.data.followupSubject);
       } else {
         setSummary("Erreur : " + (json.error || "Impossible de générer le résumé"));
       }
@@ -350,7 +379,10 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
         )}
         {/* Résumé IA généré */}
         {summary ? (
-          <SummaryCard text={summary} />
+          <SummaryCard
+            text={summary}
+            onUseFollowup={followupEmail ? () => onUseFollowup?.(followupEmail, followupSubject) : undefined}
+          />
         ) : (
           <p className="text-[10px] text-purple-400">
             Cliquer sur Générer pour un résumé IA complet.
