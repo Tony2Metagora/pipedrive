@@ -218,6 +218,15 @@ export default function DashboardPage() {
     return getStagesForPipeline(pipelineFilter);
   }, [pipelineFilter]);
 
+  // Deal counts per pipeline (for filter labels)
+  const dealCountByPipeline = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const d of deals) {
+      if (d.pipeline_id) counts.set(d.pipeline_id, (counts.get(d.pipeline_id) || 0) + 1);
+    }
+    return counts;
+  }, [deals]);
+
   // Group pending activities by deal_id
   const activitiesByDeal = new Map<number, Activity[]>();
   for (const a of activities) {
@@ -337,10 +346,11 @@ export default function DashboardPage() {
                 }}
                 className="px-2.5 py-1.5 text-xs border border-gray-300 rounded-md bg-white focus:ring-1 focus:ring-indigo-400 outline-none"
               >
-                <option value="all">Tous les pipelines</option>
-                {PIPELINES.map((p) => (
-                  <option key={p.id} value={String(p.id)}>{p.name}</option>
-                ))}
+                <option value="all">Tous les pipelines ({deals.length})</option>
+                {PIPELINES.map((p) => {
+                  const cnt = dealCountByPipeline.get(p.id) || 0;
+                  return <option key={p.id} value={String(p.id)}>{p.name} ({cnt})</option>;
+                })}
               </select>
               {pipelineFilter !== "all" && availableStages.length > 0 && (
                 <select
@@ -352,9 +362,10 @@ export default function DashboardPage() {
                   className="px-2.5 py-1.5 text-xs border border-gray-300 rounded-md bg-white focus:ring-1 focus:ring-indigo-400 outline-none"
                 >
                   <option value="all">Toutes les étapes</option>
-                  {availableStages.map((s) => (
-                    <option key={s.id} value={String(s.id)}>{s.name}</option>
-                  ))}
+                  {availableStages.map((s) => {
+                    const cnt = deals.filter((d) => d.stage_id === s.id).length;
+                    return <option key={s.id} value={String(s.id)}>{s.name} ({cnt})</option>;
+                  })}
                 </select>
               )}
               <span className="text-xs text-gray-400 ml-1">
@@ -437,10 +448,11 @@ export default function DashboardPage() {
                 }}
                 className="px-2.5 py-1.5 text-xs border border-gray-300 rounded-md bg-white focus:ring-1 focus:ring-indigo-400 outline-none"
               >
-                <option value="all">Tous les pipelines</option>
-                {PIPELINES.map((p) => (
-                  <option key={p.id} value={String(p.id)}>{p.name}</option>
-                ))}
+                <option value="all">Tous les pipelines ({deals.length})</option>
+                {PIPELINES.map((p) => {
+                  const cnt = dealCountByPipeline.get(p.id) || 0;
+                  return <option key={p.id} value={String(p.id)}>{p.name} ({cnt})</option>;
+                })}
               </select>
               {pipelineFilter !== "all" && availableStages.length > 0 && (
                 <select
@@ -452,9 +464,10 @@ export default function DashboardPage() {
                   className="px-2.5 py-1.5 text-xs border border-gray-300 rounded-md bg-white focus:ring-1 focus:ring-indigo-400 outline-none"
                 >
                   <option value="all">Toutes les étapes</option>
-                  {availableStages.map((s) => (
-                    <option key={s.id} value={String(s.id)}>{s.name}</option>
-                  ))}
+                  {availableStages.map((s) => {
+                    const cnt = deals.filter((d) => d.stage_id === s.id).length;
+                    return <option key={s.id} value={String(s.id)}>{s.name} ({cnt})</option>;
+                  })}
                 </select>
               )}
               <span className="text-xs text-gray-400 ml-1">
