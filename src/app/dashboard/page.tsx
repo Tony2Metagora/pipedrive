@@ -133,17 +133,37 @@ export default function DashboardPage() {
       const res = await fetch("/api/migrate/activities", { method: "POST" });
       const json = await res.json();
       if (json.success) {
-        const dbg = json.debug || {};
         setMigrateProgress(
-          `Terminé ! ${json.counts.undone} tâches + ${json.counts.done} historique (${dbg.totalPdActivities || 0} activités PD, ${dbg.totalPdDeals || 0} deals PD, ${dbg.totalBlobDeals || 0} deals Blob)`
+          `Terminé ! ${json.counts.undone} tâches + ${json.counts.done} historique`
         );
         if (json.counts.total > 0) { fetchActivities(); fetchDeals(); }
-        console.log("Migration debug:", json.debug);
       } else {
         setMigrateProgress(`Erreur : ${json.error}`);
       }
     } catch (err) {
       console.error("Erreur migration activités:", err);
+      setMigrateProgress("Erreur lors de la migration");
+    } finally {
+      setMigratingNotes(false);
+    }
+  };
+
+  const migratePersonsFromPipedrive = async () => {
+    setMigratingNotes(true);
+    setMigrateProgress("Import contacts depuis Pipedrive...");
+    try {
+      const res = await fetch("/api/migrate/persons", { method: "POST" });
+      const json = await res.json();
+      if (json.success) {
+        setMigrateProgress(
+          `Terminé ! ${json.counts.updated} contacts mis à jour, ${json.counts.added} ajoutés (${json.counts.totalNow} total)`
+        );
+        fetchDeals();
+      } else {
+        setMigrateProgress(`Erreur : ${json.error}`);
+      }
+    } catch (err) {
+      console.error("Erreur migration contacts:", err);
       setMigrateProgress("Erreur lors de la migration");
     } finally {
       setMigratingNotes(false);
@@ -412,6 +432,18 @@ export default function DashboardPage() {
               <Calendar className="w-4 h-4" />
             )}
             Importer activités
+          </button>
+          <button
+            onClick={migratePersonsFromPipedrive}
+            disabled={migratingNotes}
+            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-sky-600 rounded-lg hover:bg-sky-700 disabled:opacity-50 cursor-pointer shadow-sm"
+          >
+            {migratingNotes ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Users className="w-4 h-4" />
+            )}
+            Importer contacts
           </button>
           <button
             onClick={() => { fetchActivities(); fetchDeals(); }}
