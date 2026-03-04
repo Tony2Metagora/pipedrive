@@ -203,35 +203,26 @@ export default function DashboardPage() {
 
   // Group pending activities by deal_id
   const activitiesByDeal = new Map<number, Activity[]>();
-  const orphanActivities: Activity[] = [];
   for (const a of activities) {
     if (!matchActivity(a)) continue;
     if (a.deal_id) {
       const list = activitiesByDeal.get(a.deal_id) || [];
       list.push(a);
       activitiesByDeal.set(a.deal_id, list);
-    } else {
-      orphanActivities.push(a);
     }
   }
 
-  // Urgent: deals with overdue/today activities OR no next activity
+  // Urgent: deals whose next_activity_date is overdue/today, or deals with NO next activity at all
   const urgentDeals = deals.filter((d) => {
     if (!matchDeal(d)) return false;
-    const dealActivities = activitiesByDeal.get(d.id) || [];
-    const hasOverdue = dealActivities.some((a) => isOverdue(a.due_date));
-    return hasOverdue || !d.next_activity_date || isOverdue(d.next_activity_date);
+    return !d.next_activity_date || isOverdue(d.next_activity_date);
   });
 
-  // À traiter: deals with future activities (not urgent)
+  // À traiter: deals with future next_activity_date (not urgent)
   const urgentDealIds = new Set(urgentDeals.map((d) => d.id));
   const okDeals = deals.filter((d) => !urgentDealIds.has(d.id) && matchDeal(d));
 
-  // Orphan urgent activities (no deal)
-  const urgentOrphanActivities = orphanActivities.filter((a) => isOverdue(a.due_date));
-  const otherOrphanActivities = orphanActivities.filter((a) => !isOverdue(a.due_date));
-
-  const totalUrgent = urgentDeals.length + urgentOrphanActivities.length;
+  const totalUrgent = urgentDeals.length;
 
   return (
     <div>
@@ -335,20 +326,6 @@ export default function DashboardPage() {
                     ))}
                   </div>
                 </div>
-              )}
-
-              {/* Tâches orphelines urgentes (sans affaire) */}
-              {urgentOrphanActivities.length > 0 && (
-                <ActivitySection
-                  title="Tâches sans affaire"
-                  icon={<AlertTriangle className="w-5 h-5 text-red-500" />}
-                  activities={urgentOrphanActivities}
-                  onMarkDone={markDone}
-                  onArchive={openArchiveModal}
-                  onSelect={openDetail}
-                  selectedId={selectedActivity?.id ?? null}
-                  variant="urgent"
-                />
               )}
 
               {totalUrgent === 0 && !loading && !loadingDeals && (
