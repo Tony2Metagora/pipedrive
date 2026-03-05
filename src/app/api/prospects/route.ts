@@ -134,6 +134,49 @@ export async function GET() {
   }
 }
 
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const { nom, prenom, email, telephone, poste, entreprise, notes, linkedin } = body;
+
+    if (!email || !nom || !prenom || !entreprise || !poste) {
+      return NextResponse.json({ error: "Champs obligatoires : email, nom, prenom, entreprise, poste" }, { status: 400 });
+    }
+
+    const rows = await readProspects();
+
+    // Generate unique ID
+    const maxId = rows.reduce((max, r) => Math.max(max, Number(r.id) || 0), 0);
+    const newId = String(maxId + 1);
+
+    const newProspect: ProspectRow = {
+      id: newId,
+      nom: nom || "",
+      prenom: prenom || "",
+      email: email || "",
+      telephone: telephone || "",
+      poste: poste || "",
+      entreprise: entreprise || "",
+      statut: "en cours",
+      pipelines: "",
+      notes: notes || "",
+      score_entreprise: "",
+      score_job: "",
+      linkedin: linkedin || "",
+      naf_code: "",
+      effectifs: "",
+    };
+
+    rows.push(newProspect);
+    await writeProspects(rows);
+
+    return NextResponse.json({ data: newProspect });
+  } catch (error) {
+    console.error("POST /api/prospects error:", error);
+    return NextResponse.json({ error: "Erreur création prospect" }, { status: 500 });
+  }
+}
+
 export async function PUT(request: Request) {
   try {
     const body = await request.json();

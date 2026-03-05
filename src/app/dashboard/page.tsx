@@ -35,6 +35,7 @@ import { formatDate, isOverdue, isWithinDays, detectActivityType } from "@/lib/u
 import { PIPELINES, getPipelineName, getStageName, getStagesForPipeline } from "@/lib/config";
 import NewActivityModal from "@/components/NewActivityModal";
 import ArchiveModal from "@/components/ArchiveModal";
+import NewDealModal from "@/components/NewDealModal";
 import DetailPanel from "@/components/DetailPanel";
 import DealContextPanel from "@/components/DealContextPanel";
 
@@ -103,6 +104,7 @@ function DashboardContent() {
   const [pipelineFilter, setPipelineFilter] = useState<number | "all">("all");
   const [stageFilter, setStageFilter] = useState<number | "all">("all");
   const [viewMode, setViewMode] = useState<"list" | "kanban">("list");
+  const [showNewDeal, setShowNewDeal] = useState(false);
 
   const fetchActivities = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -370,6 +372,13 @@ function DashboardContent() {
               </button>
             )}
           </div>
+          <button
+            onClick={() => setShowNewDeal(true)}
+            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors cursor-pointer shadow-sm"
+          >
+            <Plus className="w-4 h-4" />
+            Nouvelle affaire
+          </button>
           <button
             onClick={syncBackground}
             disabled={loading || loadingDeals}
@@ -670,6 +679,17 @@ function DashboardContent() {
             />
           )}
         </>
+      )}
+
+      {/* Modal nouvelle affaire */}
+      {showNewDeal && (
+        <NewDealModal
+          onClose={() => setShowNewDeal(false)}
+          onCreated={(deal) => {
+            setDeals((prev) => [...prev, deal]);
+            setTimeout(syncBackground, 2000);
+          }}
+        />
       )}
 
       {/* Modal archivage */}

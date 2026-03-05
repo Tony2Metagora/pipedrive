@@ -22,6 +22,7 @@ import {
   Link2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import NewProspectModal from "@/components/NewProspectModal";
 
 interface Prospect {
   id: string;
@@ -104,6 +105,7 @@ export default function ProspectsPage() {
   const [showLinkDeal, setShowLinkDeal] = useState(false);
   const [allDeals, setAllDeals] = useState<{ id: number; title: string; person_name?: string; org_name?: string }[]>([]);
   const [dealSearch, setDealSearch] = useState("");
+  const [showNewProspect, setShowNewProspect] = useState(false);
   const [linking, setLinking] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -538,6 +540,13 @@ export default function ProspectsPage() {
             className="hidden"
           />
           <button
+            onClick={() => setShowNewProspect(true)}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 cursor-pointer shadow-sm"
+          >
+            <Plus className="w-4 h-4" />
+            Ajouter contact
+          </button>
+          <button
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 cursor-pointer shadow-sm"
@@ -845,6 +854,32 @@ export default function ProspectsPage() {
             {selected.size > 0 && <span className="font-medium text-indigo-600">{selected.size} sélectionné{selected.size > 1 ? "s" : ""}</span>}
           </div>
         </div>
+      )}
+
+      {/* Modal nouveau contact */}
+      {showNewProspect && (
+        <NewProspectModal
+          onClose={() => setShowNewProspect(false)}
+          onCreated={(prospect) => {
+            setProspects((prev) => [...prev, {
+              ...prospect,
+              statut: "en cours",
+              pipelines: "",
+              notes: "",
+              score_entreprise: "",
+              score_job: "",
+              linkedin: "",
+              naf_code: "",
+              effectifs: "",
+              deal_id: null,
+              deal_title: null,
+              deal_status: null,
+              deal_value: null,
+              computed_statut: "en cours",
+            } as Prospect]);
+            setTimeout(() => syncProspects(), 2000);
+          }}
+        />
       )}
     </div>
   );
