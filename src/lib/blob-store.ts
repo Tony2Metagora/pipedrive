@@ -74,7 +74,7 @@ export interface Note {
 
 const locks = new Map<string, Promise<void>>();
 
-function withLock<T>(filename: string, fn: () => Promise<T>): Promise<T> {
+export function withLock<T>(filename: string, fn: () => Promise<T>): Promise<T> {
   const prev = locks.get(filename) ?? Promise.resolve();
   const next = prev.then(fn, fn); // run fn after previous completes (even if it failed)
   locks.set(filename, next.then(() => {}, () => {})); // swallow result, keep chain
@@ -83,7 +83,7 @@ function withLock<T>(filename: string, fn: () => Promise<T>): Promise<T> {
 
 // ─── Generic Blob helpers ────────────────────────────────
 
-async function readBlob<T>(filename: string): Promise<T[]> {
+export async function readBlob<T>(filename: string): Promise<T[]> {
   try {
     const result = await get(filename, { access: "private" });
     if (!result || result.statusCode !== 200 || !result.stream) {
@@ -110,7 +110,7 @@ async function readBlob<T>(filename: string): Promise<T[]> {
   }
 }
 
-async function writeBlob<T>(filename: string, data: T[]): Promise<void> {
+export async function writeBlob<T>(filename: string, data: T[]): Promise<void> {
   await put(filename, JSON.stringify(data), {
     access: "private",
     addRandomSuffix: false,

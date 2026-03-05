@@ -12,7 +12,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { put, get } from "@vercel/blob";
+import { readBlob, writeBlob, withLock } from "@/lib/blob-store";
 import { submitBatchEnrich, pollBatchEnrich, type DropcontactResult } from "@/lib/dropcontact";
 
 interface ProspectRow {
@@ -34,36 +34,11 @@ interface ProspectRow {
 }
 
 async function readProspects(): Promise<ProspectRow[]> {
-  try {
-    const result = await get("prospects.json", { access: "private" });
-    if (!result || result.statusCode !== 200 || !result.stream) return [];
-    const chunks: Uint8Array[] = [];
-    const reader = result.stream.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-    }
-    const text = new TextDecoder().decode(
-      chunks.reduce((acc, chunk) => {
-        const merged = new Uint8Array(acc.length + chunk.length);
-        merged.set(acc);
-        merged.set(chunk, acc.length);
-        return merged;
-      }, new Uint8Array())
-    );
-    return JSON.parse(text);
-  } catch {
-    return [];
-  }
+  return readBlob<ProspectRow>("prospects.json");
 }
 
 async function writeProspects(rows: ProspectRow[]) {
-  await put("prospects.json", JSON.stringify(rows), {
-    access: "private",
-    addRandomSuffix: false,
-    allowOverwrite: true,
-  });
+  await writeBlob("prospects.json", rows);
 }
 
 /**
@@ -245,12 +220,15 @@ export async function GET(request: Request) {
     console.log(`[GET enrich] Dropcontact returned ${pollResult.data?.length ?? 0} results`);
     console.log(`[GET enrich] Raw DC data: ${JSON.stringify(pollResult.data).slice(0, 1500)}`);
 
-    // Apply results to prospects
-    const rows = await readProspects();
-    console.log(`[GET enrich] Read ${rows.length} prospects from blob`);
-    const results = applyResults(rows, prospectIds, pollResult.data || []);
-    await writeProspects(rows);
-    console.log(`[GET enrich] Wrote ${rows.length} prospects back to blob`);
+    // Apply results to prospects (locked to prevent race conditions)
+    let results: { id: string; name: string; status: string; fields: string[]; debug?: string; raw?: Record<string, unknown> }[] = [];
+    await withLock("prospects.json", async () => {
+      const rows = await readProspects();
+      console.log(`[GET enrich] Read ${rows.length} prospects from blob`);
+      results = applyResults(rows, prospectIds, pollResult.data || []);
+      await writeProspects(rows);
+      console.log(`[GET enrich] Wrote ${rows.length} prospects back to blob`);
+    });
 
     const enrichedCount = results.filter((r) => r.status === "enriched").length;
 

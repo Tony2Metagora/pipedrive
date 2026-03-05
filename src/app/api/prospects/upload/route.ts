@@ -5,7 +5,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { put } from "@vercel/blob";
+import { writeBlob, withLock } from "@/lib/blob-store";
 import * as XLSX from "xlsx";
 
 interface ProspectRow {
@@ -241,11 +241,9 @@ export async function POST(request: Request) {
       rows.push(row);
     }
 
-    // Store in Vercel Blob
-    await put("prospects.json", JSON.stringify(rows), {
-      access: "private",
-      addRandomSuffix: false,
-      allowOverwrite: true,
+    // Store in Vercel Blob (locked to prevent race conditions)
+    await withLock("prospects.json", async () => {
+      await writeBlob("prospects.json", rows);
     });
 
     return NextResponse.json({
