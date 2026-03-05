@@ -70,6 +70,17 @@ export interface Note {
   org_id: number | null;
 }
 
+// ─── Per-file mutex to prevent read-modify-write race conditions ────
+
+const locks = new Map<string, Promise<void>>();
+
+function withLock<T>(filename: string, fn: () => Promise<T>): Promise<T> {
+  const prev = locks.get(filename) ?? Promise.resolve();
+  const next = prev.then(fn, fn); // run fn after previous completes (even if it failed)
+  locks.set(filename, next.then(() => {}, () => {})); // swallow result, keep chain
+  return next;
+}
+
 // ─── Generic Blob helpers ────────────────────────────────
 
 async function readBlob<T>(filename: string): Promise<T[]> {
@@ -107,6 +118,15 @@ async function writeBlob<T>(filename: string, data: T[]): Promise<void> {
   });
 }
 
+async function mutateBlob<T>(filename: string, mutator: (data: T[]) => T[] | Promise<T[]>): Promise<T[]> {
+  return withLock(filename, async () => {
+    const data = await readBlob<T>(filename);
+    const updated = await mutator(data);
+    await writeBlob(filename, updated);
+    return updated;
+  });
+}
+
 // ─── Deals ───────────────────────────────────────────────
 
 export async function getDeals(): Promise<Deal[]> {
@@ -119,26 +139,29 @@ export async function getDeal(id: number): Promise<Deal | null> {
 }
 
 export async function createDeal(data: Omit<Deal, "id">): Promise<Deal> {
-  const deals = await getDeals();
-  const maxId = deals.reduce((max, d) => Math.max(max, d.id), 0);
-  const deal: Deal = { ...data, id: maxId + 1 };
-  deals.push(deal);
-  await writeBlob("deals.json", deals);
-  return deal;
+  let created!: Deal;
+  await mutateBlob<Deal>("deals.json", (deals) => {
+    const maxId = deals.reduce((max, d) => Math.max(max, d.id), 0);
+    created = { ...data, id: maxId + 1 } as Deal;
+    return [...deals, created];
+  });
+  return created;
 }
 
 export async function updateDeal(id: number, data: Partial<Deal>): Promise<Deal | null> {
-  const deals = await getDeals();
-  const idx = deals.findIndex((d) => d.id === id);
-  if (idx === -1) return null;
-  deals[idx] = { ...deals[idx], ...data, id }; // never override id
-  await writeBlob("deals.json", deals);
-  return deals[idx];
+  let result: Deal | null = null;
+  await mutateBlob<Deal>("deals.json", (deals) => {
+    const idx = deals.findIndex((d) => d.id === id);
+    if (idx === -1) return deals;
+    deals[idx] = { ...deals[idx], ...data, id };
+    result = deals[idx];
+    return deals;
+  });
+  return result;
 }
 
 export async function deleteDeal(id: number): Promise<void> {
-  const deals = await getDeals();
-  await writeBlob("deals.json", deals.filter((d) => d.id !== id));
+  await mutateBlob<Deal>("deals.json", (deals) => deals.filter((d) => d.id !== id));
 }
 
 // ─── Persons ─────────────────────────────────────────────
@@ -153,29 +176,33 @@ export async function getPerson(id: number): Promise<Person | null> {
 }
 
 export async function createPerson(data: Omit<Person, "id">): Promise<Person> {
-  const persons = await getPersons();
-  const maxId = persons.reduce((max, p) => Math.max(max, p.id), 0);
-  const person: Person = { ...data, id: maxId + 1 };
-  persons.push(person);
-  await writeBlob("persons.json", persons);
-  return person;
+  let created!: Person;
+  await mutateBlob<Person>("persons.json", (persons) => {
+    const maxId = persons.reduce((max, p) => Math.max(max, p.id), 0);
+    created = { ...data, id: maxId + 1 } as Person;
+    return [...persons, created];
+  });
+  return created;
 }
 
 export async function updatePerson(id: number, data: Partial<Person>): Promise<Person | null> {
-  const persons = await getPersons();
-  const idx = persons.findIndex((p) => p.id === id);
-  if (idx === -1) return null;
-  // Handle email/phone as special fields (string → array)
-  const update = { ...data };
-  if (typeof update.email === "string") {
-    (update as Person).email = [{ value: update.email as unknown as string, primary: true }];
-  }
-  if (typeof update.phone === "string") {
-    (update as Person).phone = [{ value: update.phone as unknown as string, primary: true }];
-  }
-  persons[idx] = { ...persons[idx], ...update, id };
-  await writeBlob("persons.json", persons);
-  return persons[idx];
+  let result: Person | null = null;
+  await mutateBlob<Person>("persons.json", (persons) => {
+    const idx = persons.findIndex((p) => p.id === id);
+    if (idx === -1) return persons;
+    // Handle email/phone as special fields (string → array)
+    const update = { ...data };
+    if (typeof update.email === "string") {
+      (update as Person).email = [{ value: update.email as unknown as string, primary: true }];
+    }
+    if (typeof update.phone === "string") {
+      (update as Person).phone = [{ value: update.phone as unknown as string, primary: true }];
+    }
+    persons[idx] = { ...persons[idx], ...update, id };
+    result = persons[idx];
+    return persons;
+  });
+  return result;
 }
 
 // ─── Organizations ───────────────────────────────────────
@@ -190,12 +217,13 @@ export async function getOrganization(id: number): Promise<Organization | null> 
 }
 
 export async function createOrganization(name: string): Promise<Organization> {
-  const orgs = await getOrganizations();
-  const maxId = orgs.reduce((max, o) => Math.max(max, o.id), 0);
-  const org: Organization = { id: maxId + 1, name };
-  orgs.push(org);
-  await writeBlob("orgs.json", orgs);
-  return org;
+  let created!: Organization;
+  await mutateBlob<Organization>("orgs.json", (orgs) => {
+    const maxId = orgs.reduce((max, o) => Math.max(max, o.id), 0);
+    created = { id: maxId + 1, name };
+    return [...orgs, created];
+  });
+  return created;
 }
 
 // ─── Activities ──────────────────────────────────────────
@@ -210,26 +238,29 @@ export async function getActivity(id: number): Promise<Activity | null> {
 }
 
 export async function createActivity(data: Omit<Activity, "id">): Promise<Activity> {
-  const activities = await getActivities();
-  const maxId = activities.reduce((max, a) => Math.max(max, a.id), 0);
-  const activity: Activity = { ...data, id: maxId + 1 };
-  activities.push(activity);
-  await writeBlob("activities.json", activities);
-  return activity;
+  let created!: Activity;
+  await mutateBlob<Activity>("activities.json", (activities) => {
+    const maxId = activities.reduce((max, a) => Math.max(max, a.id), 0);
+    created = { ...data, id: maxId + 1 } as Activity;
+    return [...activities, created];
+  });
+  return created;
 }
 
 export async function updateActivity(id: number, data: Partial<Activity>): Promise<Activity | null> {
-  const activities = await getActivities();
-  const idx = activities.findIndex((a) => a.id === id);
-  if (idx === -1) return null;
-  activities[idx] = { ...activities[idx], ...data, id };
-  await writeBlob("activities.json", activities);
-  return activities[idx];
+  let result: Activity | null = null;
+  await mutateBlob<Activity>("activities.json", (activities) => {
+    const idx = activities.findIndex((a) => a.id === id);
+    if (idx === -1) return activities;
+    activities[idx] = { ...activities[idx], ...data, id };
+    result = activities[idx];
+    return activities;
+  });
+  return result;
 }
 
 export async function deleteActivity(id: number): Promise<void> {
-  const activities = await getActivities();
-  await writeBlob("activities.json", activities.filter((a) => a.id !== id));
+  await mutateBlob<Activity>("activities.json", (activities) => activities.filter((a) => a.id !== id));
 }
 
 export async function getActivitiesForDeal(dealId: number): Promise<Activity[]> {
@@ -249,12 +280,13 @@ export async function getNotes(): Promise<Note[]> {
 }
 
 export async function createNote(data: Omit<Note, "id">): Promise<Note> {
-  const notes = await getNotes();
-  const maxId = notes.reduce((max, n) => Math.max(max, n.id), 0);
-  const note: Note = { ...data, id: maxId + 1 };
-  notes.push(note);
-  await writeBlob("notes.json", notes);
-  return note;
+  let created!: Note;
+  await mutateBlob<Note>("notes.json", (notes) => {
+    const maxId = notes.reduce((max, n) => Math.max(max, n.id), 0);
+    created = { ...data, id: maxId + 1 } as Note;
+    return [...notes, created];
+  });
+  return created;
 }
 
 export async function getNotesForDeal(dealId: number): Promise<Note[]> {
@@ -280,14 +312,15 @@ export async function getDealParticipants(dealId: number): Promise<Person[]> {
 }
 
 export async function addDealParticipant(dealId: number, personId: number): Promise<void> {
-  const deals = await getDeals();
-  const idx = deals.findIndex((d) => d.id === dealId);
-  if (idx === -1) throw new Error("Deal not found");
-  const deal = deals[idx];
-  const current = deal.participants || (deal.person_id ? [deal.person_id] : []);
-  if (current.includes(personId)) return; // already a participant
-  deals[idx] = { ...deal, participants: [...current, personId] };
-  await writeBlob("deals.json", deals);
+  await mutateBlob<Deal>("deals.json", (deals) => {
+    const idx = deals.findIndex((d) => d.id === dealId);
+    if (idx === -1) throw new Error("Deal not found");
+    const deal = deals[idx];
+    const current = deal.participants || (deal.person_id ? [deal.person_id] : []);
+    if (current.includes(personId)) return deals; // already a participant
+    deals[idx] = { ...deal, participants: [...current, personId] };
+    return deals;
+  });
 }
 
 // ─── Bulk write (for migration) ──────────────────────────
