@@ -15,6 +15,7 @@ import {
   Plus,
   Pencil,
   Save,
+  Trophy,
   AlertTriangle,
   Clock,
   Archive,
@@ -169,6 +170,21 @@ function DashboardContent() {
   const handleActivityUpdated = useCallback((id: number, data: Partial<Activity>) => {
     setActivities((prev) => prev.map((a) => a.id === id ? { ...a, ...data } : a));
   }, []);
+
+  // Marquer une affaire comme gagnée
+  const markWon = useCallback(async (dealId: number) => {
+    setDeals((prev) => prev.filter((d) => d.id !== dealId));
+    try {
+      await fetch(`/api/deals/${dealId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "won" }),
+      });
+    } catch (err) {
+      console.error("Erreur marquage gagné:", err);
+    }
+    setTimeout(syncBackground, 2000);
+  }, [syncBackground]);
 
   const openArchiveModal = (activityId: number | null, dealId: number | null, contactName: string) => {
     setArchiveTarget({ activityId, dealId, contactName });
@@ -451,6 +467,7 @@ function DashboardContent() {
                   onTaskCreated={handleTaskCreated}
                   onMarkDone={markDone}
                   onArchive={openArchiveModal}
+                  onWon={markWon}
                   onActivityUpdated={handleActivityUpdated}
                   selected={selectedDeals.has(deal.id)}
                   onToggleSelect={toggleDealSelection}
@@ -635,6 +652,7 @@ function DashboardContent() {
                   onTaskCreated={handleTaskCreated}
                   onMarkDone={markDone}
                   onArchive={openArchiveModal}
+                  onWon={markWon}
                   onActivityUpdated={handleActivityUpdated}
                   selected={selectedDeals.has(deal.id)}
                   onToggleSelect={toggleDealSelection}
@@ -1053,6 +1071,7 @@ function DealRow({
   onTaskCreated,
   onMarkDone,
   onArchive,
+  onWon,
   onActivityUpdated,
   selected,
   onToggleSelect,
@@ -1064,6 +1083,7 @@ function DealRow({
   onTaskCreated: (newActivity?: Activity) => void;
   onMarkDone?: (id: number) => void;
   onArchive: (activityId: number | null, dealId: number | null, contactName: string) => void;
+  onWon: (dealId: number) => void;
   onActivityUpdated: (id: number, data: Partial<Activity>) => void;
   selected: boolean;
   onToggleSelect: (dealId: number) => void;
@@ -1385,6 +1405,13 @@ function DealRow({
           >
             <Plus className="w-3.5 h-3.5" />
             Tâche
+          </button>
+          <button
+            onClick={() => onWon(deal.id)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-yellow-300 text-yellow-700 bg-yellow-50 hover:bg-yellow-100 hover:border-yellow-400 transition-colors cursor-pointer"
+          >
+            <Trophy className="w-3.5 h-3.5" />
+            Gagné
           </button>
           <button
             onClick={() => onArchive(null, deal.id, deal.title)}

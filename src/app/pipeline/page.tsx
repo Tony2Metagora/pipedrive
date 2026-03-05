@@ -12,6 +12,7 @@ import {
   ExternalLink,
   Building2,
   User,
+  Trophy,
 } from "lucide-react";
 import { PIPELINES } from "@/lib/config";
 import { cn } from "@/lib/utils";
@@ -57,17 +58,23 @@ function formatCurrency(value: number): string {
 
 export default function PipelinePage() {
   const [deals, setDeals] = useState<Deal[]>([]);
+  const [wonDeals, setWonDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedPipeline, setExpandedPipeline] = useState<number | null>(null);
   const [expandedStage, setExpandedStage] = useState<string | null>(null);
+  const [expandedWon, setExpandedWon] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchDeals = async () => {
       setLoading(true);
       try {
-        const res = await fetch("/api/deals?status=open");
-        const json = await res.json();
-        setDeals(json.data || []);
+        const [openRes, wonRes] = await Promise.all([
+          fetch("/api/deals?status=open"),
+          fetch("/api/deals?status=won"),
+        ]);
+        const [openJson, wonJson] = await Promise.all([openRes.json(), wonRes.json()]);
+        setDeals(openJson.data || []);
+        setWonDeals(wonJson.data || []);
       } catch (err) {
         console.error("Erreur chargement deals:", err);
       } finally {
@@ -102,6 +109,15 @@ export default function PipelinePage() {
   const grandTotalDeals = pipelineStats.reduce((s, p) => s + p.totalDeals, 0);
   const grandTotalValue = pipelineStats.reduce((s, p) => s + p.totalValue, 0);
 
+  // Won deals stats per pipeline
+  const wonByPipeline = new Map<number, Deal[]>();
+  for (const d of wonDeals) {
+    const arr = wonByPipeline.get(d.pipeline_id) || [];
+    arr.push(d);
+    wonByPipeline.set(d.pipeline_id, arr);
+  }
+  const totalWonValue = wonDeals.reduce((s, d) => s + (d.value || 0), 0);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -122,7 +138,7 @@ export default function PipelinePage() {
       </div>
 
       {/* Totaux globaux */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center">
@@ -140,8 +156,20 @@ export default function PipelinePage() {
               <DollarSign className="w-5 h-5 text-emerald-600" />
             </div>
             <div>
-              <p className="text-sm text-gray-500">Valeur totale</p>
+              <p className="text-sm text-gray-500">Valeur totale (ouvertes)</p>
               <p className="text-2xl font-bold text-gray-900">{formatCurrency(grandTotalValue)}</p>
+            </div>
+          </div>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-yellow-50 flex items-center justify-center">
+              <Trophy className="w-5 h-5 text-yellow-600" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Gagné</p>
+              <p className="text-2xl font-bold text-yellow-600">{formatCurrency(totalWonValue)}</p>
+              <p className="text-xs text-gray-400">{wonDeals.length} affaire{wonDeals.length !== 1 ? "s" : ""}</p>
             </div>
           </div>
         </div>
@@ -327,6 +355,91 @@ export default function PipelinePage() {
                       </div>
                     );
                   })}
+
+                  {/* Gagné row */}
+                  {(() => {
+                    const pipelineWonDeals = wonByPipeline.get(pipeline.pipelineId) || [];
+                    const wonValue = pipelineWonDeals.reduce((s, d) => s + (d.value || 0), 0);
+                    const hasWon = pipelineWonDeals.length > 0;
+                    const isWonExpanded = expandedWon === pipeline.pipelineId;
+                    const barWidth = pipeline.totalValue > 0 && wonValue > 0
+                      ? Math.max((wonValue / (pipeline.totalValue + wonValue)) * 100, 3)
+                      : hasWon ? 50 : 0;
+
+                    return (
+                      <div>
+                        <button
+                          onClick={() => hasWon && setExpandedWon(isWonExpanded ? null : pipeline.pipelineId)}
+                          disabled={!hasWon}
+                          className={cn(
+                            "w-full flex items-center gap-4 px-5 py-3 border-b border-gray-50 transition-colors bg-yellow-50/40",
+                            hasWon ? "hover:bg-yellow-50 cursor-pointer" : "opacity-50 cursor-default"
+                          )}
+                        >
+                          <div className="w-32 text-left flex items-center gap-1.5">
+                            <Trophy className="w-3.5 h-3.5 text-yellow-600" />
+                            <p className={cn("text-sm font-medium", hasWon ? "text-yellow-700" : "text-gray-400")}>
+                              Gagné
+                            </p>
+                          </div>
+                          <div className="flex-1">
+                            <div className="h-6 bg-gray-100 rounded-full overflow-hidden relative">
+                              <div
+                                className="h-full bg-gradient-to-r from-yellow-400 to-yellow-500 rounded-full transition-all duration-500"
+                                style={{ width: `${barWidth}%` }}
+                              />
+                              {hasWon && (
+                                <span className="absolute inset-0 flex items-center px-3 text-xs font-medium text-gray-700">
+                                  {pipelineWonDeals.length} affaire{pipelineWonDeals.length !== 1 ? "s" : ""}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="w-28 text-right">
+                            <p className={cn("text-sm font-semibold", wonValue > 0 ? "text-yellow-600" : "text-gray-400")}>
+                              {formatCurrency(wonValue)}
+                            </p>
+                          </div>
+                          <div className="w-5">
+                            {hasWon && (isWonExpanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />)}
+                          </div>
+                        </button>
+
+                        {isWonExpanded && (
+                          <div className="bg-yellow-50/60 border-b border-gray-100">
+                            {pipelineWonDeals.map((deal) => (
+                              <Link
+                                key={deal.id}
+                                href={`/dashboard?deal=${deal.id}`}
+                                className="flex items-center justify-between px-8 py-2.5 hover:bg-yellow-100/60 transition-colors border-b border-yellow-100 last:border-0"
+                              >
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <Trophy className="w-3.5 h-3.5 text-yellow-500 flex-shrink-0" />
+                                  <span className="text-sm font-medium text-gray-800 truncate">{deal.title}</span>
+                                  {deal.org_name && (
+                                    <span className="flex items-center gap-1 text-xs text-gray-400">
+                                      <Building2 className="w-3 h-3" />{deal.org_name}
+                                    </span>
+                                  )}
+                                  {deal.person_name && (
+                                    <span className="flex items-center gap-1 text-xs text-gray-400">
+                                      <User className="w-3 h-3" />{deal.person_name}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-3 flex-shrink-0">
+                                  <span className={cn("text-sm font-semibold", deal.value > 0 ? "text-yellow-600" : "text-gray-400")}>
+                                    {formatCurrency(deal.value || 0)}
+                                  </span>
+                                  <ExternalLink className="w-3.5 h-3.5 text-gray-300" />
+                                </div>
+                              </Link>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>
