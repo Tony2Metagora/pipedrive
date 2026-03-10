@@ -156,8 +156,8 @@ function DashboardContent() {
     } catch (err) {
       console.error("Erreur marquage done:", err);
     }
-    // Delayed sync to let blob write propagate
-    setTimeout(syncBackground, 2000);
+    // Safety-net sync — UI is already updated optimistically
+    setTimeout(syncBackground, 5000);
   };
 
   // Callback for task creation: add new activity to local state optimistically
@@ -165,7 +165,8 @@ function DashboardContent() {
     if (newActivity) {
       setActivities((prev) => [...prev, newActivity]);
     }
-    setTimeout(syncBackground, 2000);
+    // Safety-net sync — UI is already updated optimistically
+    setTimeout(syncBackground, 5000);
   }, [syncBackground]);
 
   // Callback for inline activity edit: update local state optimistically
@@ -185,7 +186,7 @@ function DashboardContent() {
     } catch (err) {
       console.error("Erreur marquage gagné:", err);
     }
-    setTimeout(syncBackground, 2000);
+    setTimeout(syncBackground, 5000);
   }, [syncBackground]);
 
   const openArchiveModal = (activityId: number | null, dealId: number | null, contactName: string) => {
@@ -1160,7 +1161,8 @@ function DealRow({
     } finally {
       setSavingActivity(false);
       setEditingActivityId(null);
-      setTimeout(() => onTaskCreated(), 2000);
+      setContextRefreshKey((k) => k + 1);
+      setTimeout(() => onTaskCreated(), 5000);
     }
   };
 
@@ -1263,7 +1265,18 @@ function DealRow({
       setShowAddTask(false);
       // Optimistic: add the new activity to local state immediately
       if (json.data) {
-        onTaskCreated(json.data);
+        const enriched = {
+          ...json.data,
+          deal_id: deal.id,
+          deal_title: deal.title,
+          person_name: deal.person_name,
+          org_name: deal.org_name,
+          person_id: deal.person_id,
+          org_id: deal.org_id,
+        };
+        onTaskCreated(enriched);
+        // Update DealContextPanel immediately
+        setContextRefreshKey((k) => k + 1);
       }
     } catch (err) {
       console.error("Erreur création tâche:", err);
@@ -1517,7 +1530,7 @@ function DealRow({
                       </button>
                       {onMarkDone && (
                         <button
-                          onClick={(e) => { e.stopPropagation(); onMarkDone(a.id); setTimeout(() => setContextRefreshKey((k) => k + 1), 1500); }}
+                          onClick={(e) => { e.stopPropagation(); onMarkDone(a.id); setContextRefreshKey((k) => k + 1); }}
                           className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded border border-green-200 text-green-700 bg-green-50 hover:bg-green-100 cursor-pointer"
                         >
                           <Check className="w-3 h-3" />

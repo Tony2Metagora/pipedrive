@@ -147,14 +147,17 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
   const [followupSubject, setFollowupSubject] = useState<string>("");
 
   useEffect(() => {
-    setLoading(true);
+    // Only show loading spinner on initial load, not on refreshKey updates
+    const isInitial = !ctx;
+    if (isInitial) setLoading(true);
     fetch(`/api/deals/${dealId}/context`)
       .then((r) => r.json())
       .then((json) => {
         if (json.data) setCtx(json.data);
       })
       .catch((err) => console.error("Erreur chargement contexte deal:", err))
-      .finally(() => setLoading(false));
+      .finally(() => { if (isInitial) setLoading(false); });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dealId, refreshKey]);
 
   // Fetch person email for Gmail integration
