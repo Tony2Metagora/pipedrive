@@ -4,13 +4,12 @@ import { useState } from "react";
 import { X, Archive, Loader2 } from "lucide-react";
 
 const MOTIFS_PREDÉFINIS = [
+  "Niveau prospect",
   "Pas de potentiel business",
-  "Plus de produit à vendre",
-  "Budget insuffisant",
-  "Pas de réponse après relances",
-  "Déjà équipé / concurrent choisi",
+  "Concurrent choisi / déjà équipé",
   "Contact plus en poste",
-  "Timing pas bon – à recontacter plus tard",
+  "Recontacter plus tard",
+  "Pas de budget",
 ];
 
 interface Props {
