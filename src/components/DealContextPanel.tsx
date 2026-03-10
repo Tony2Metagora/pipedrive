@@ -293,7 +293,7 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
     // Only show loading spinner on initial load, not on refreshKey updates
     const isInitial = !ctx;
     if (isInitial) setLoading(true);
-    fetch(`/api/deals/${dealId}/context`)
+    fetch(`/api/deals/${dealId}/context?t=${Date.now()}`)
       .then((r) => r.json())
       .then((json) => {
         if (json.data) setCtx(json.data);
