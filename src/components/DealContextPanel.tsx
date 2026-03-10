@@ -266,7 +266,8 @@ interface Props {
   personName?: string;
   orgName?: string;
   deals?: { id: number; title: string; pipeline_id: number; stage_id: number; value: number; status: string; currency: string }[];
-  onActivityChanged?: () => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onActivityChanged?: (newActivity?: any) => void;
   onMarkDone?: (activityId: number) => void;
   refreshKey?: number;
 }
@@ -399,7 +400,15 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
             },
           };
         });
-        onActivityChanged?.();
+        onActivityChanged?.({
+          ...json.data,
+          deal_id: dealId,
+          deal_title: "",
+          person_name: personName || "",
+          org_name: orgName || "",
+          person_id: personId || null,
+          org_id: orgId || null,
+        });
       }
     } catch (err) {
       console.error("Erreur création tâche:", err);
