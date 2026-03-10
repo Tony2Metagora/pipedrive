@@ -396,38 +396,57 @@ function DashboardContent() {
         <>
           {/* Barre de filtres + vue toggle */}
           <div className="flex items-center justify-between mb-4 bg-white rounded-lg border border-gray-200 p-2.5">
-            <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4 text-gray-400" />
-              <select
-                value={pipelineFilter === "all" ? "all" : String(pipelineFilter)}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setPipelineFilter(v === "all" ? "all" : Number(v));
-                  setStageFilter("all");
-                }}
-                className="px-2.5 py-1.5 text-xs border border-gray-300 rounded-md bg-white focus:ring-1 focus:ring-indigo-400 outline-none"
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <Filter className="w-4 h-4 text-gray-400 flex-shrink-0" />
+              <button
+                onClick={() => { setPipelineFilter("all"); setStageFilter("all"); }}
+                className={cn(
+                  "px-2.5 py-1 text-xs font-medium rounded-full border transition-colors cursor-pointer",
+                  pipelineFilter === "all"
+                    ? "bg-indigo-600 text-white border-indigo-600"
+                    : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                )}
               >
-                <option value="all">Tous les pipelines ({deals.length})</option>
-                {PIPELINES.map((p) => {
-                  const cnt = dealCountByPipeline.get(p.id) || 0;
-                  return <option key={p.id} value={String(p.id)}>{p.name} ({cnt})</option>;
-                })}
-              </select>
+                Tous ({deals.length})
+              </button>
+              {PIPELINES.map((p) => {
+                const cnt = dealCountByPipeline.get(p.id) || 0;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => { setPipelineFilter(p.id); setStageFilter("all"); }}
+                    className={cn(
+                      "px-2.5 py-1 text-xs font-medium rounded-full border transition-colors cursor-pointer",
+                      pipelineFilter === p.id
+                        ? "bg-indigo-600 text-white border-indigo-600"
+                        : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                    )}
+                  >
+                    {p.name} ({cnt})
+                  </button>
+                );
+              })}
               {pipelineFilter !== "all" && availableStages.length > 0 && (
-                <select
-                  value={stageFilter === "all" ? "all" : String(stageFilter)}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setStageFilter(v === "all" ? "all" : Number(v));
-                  }}
-                  className="px-2.5 py-1.5 text-xs border border-gray-300 rounded-md bg-white focus:ring-1 focus:ring-indigo-400 outline-none"
-                >
-                  <option value="all">Toutes les étapes</option>
+                <>
+                  <span className="text-gray-300 mx-0.5">|</span>
                   {availableStages.map((s) => {
                     const cnt = deals.filter((d) => d.stage_id === s.id).length;
-                    return <option key={s.id} value={String(s.id)}>{s.name} ({cnt})</option>;
+                    return (
+                      <button
+                        key={s.id}
+                        onClick={() => setStageFilter(stageFilter === s.id ? "all" : s.id)}
+                        className={cn(
+                          "px-2 py-0.5 text-[11px] font-medium rounded-full border transition-colors cursor-pointer",
+                          stageFilter === s.id
+                            ? "bg-violet-600 text-white border-violet-600"
+                            : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
+                        )}
+                      >
+                        {s.name} ({cnt})
+                      </button>
+                    );
                   })}
-                </select>
+                </>
               )}
               <span className="text-xs text-gray-400 ml-1">
                 {urgentDeals.length} affaire{urgentDeals.length !== 1 ? "s" : ""}
@@ -501,38 +520,57 @@ function DashboardContent() {
         <>
           {/* Barre de filtres + vue toggle */}
           <div className="flex items-center justify-between mb-4 bg-white rounded-lg border border-gray-200 p-2.5">
-            <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4 text-gray-400" />
-              <select
-                value={pipelineFilter === "all" ? "all" : String(pipelineFilter)}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setPipelineFilter(v === "all" ? "all" : Number(v));
-                  setStageFilter("all");
-                }}
-                className="px-2.5 py-1.5 text-xs border border-gray-300 rounded-md bg-white focus:ring-1 focus:ring-indigo-400 outline-none"
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <Filter className="w-4 h-4 text-gray-400 flex-shrink-0" />
+              <button
+                onClick={() => { setPipelineFilter("all"); setStageFilter("all"); }}
+                className={cn(
+                  "px-2.5 py-1 text-xs font-medium rounded-full border transition-colors cursor-pointer",
+                  pipelineFilter === "all"
+                    ? "bg-indigo-600 text-white border-indigo-600"
+                    : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                )}
               >
-                <option value="all">Tous les pipelines ({deals.length})</option>
-                {PIPELINES.map((p) => {
-                  const cnt = dealCountByPipeline.get(p.id) || 0;
-                  return <option key={p.id} value={String(p.id)}>{p.name} ({cnt})</option>;
-                })}
-              </select>
+                Tous ({deals.length})
+              </button>
+              {PIPELINES.map((p) => {
+                const cnt = dealCountByPipeline.get(p.id) || 0;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => { setPipelineFilter(p.id); setStageFilter("all"); }}
+                    className={cn(
+                      "px-2.5 py-1 text-xs font-medium rounded-full border transition-colors cursor-pointer",
+                      pipelineFilter === p.id
+                        ? "bg-indigo-600 text-white border-indigo-600"
+                        : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                    )}
+                  >
+                    {p.name} ({cnt})
+                  </button>
+                );
+              })}
               {pipelineFilter !== "all" && availableStages.length > 0 && (
-                <select
-                  value={stageFilter === "all" ? "all" : String(stageFilter)}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setStageFilter(v === "all" ? "all" : Number(v));
-                  }}
-                  className="px-2.5 py-1.5 text-xs border border-gray-300 rounded-md bg-white focus:ring-1 focus:ring-indigo-400 outline-none"
-                >
-                  <option value="all">Toutes les étapes</option>
+                <>
+                  <span className="text-gray-300 mx-0.5">|</span>
                   {availableStages.map((s) => {
                     const cnt = deals.filter((d) => d.stage_id === s.id).length;
-                    return <option key={s.id} value={String(s.id)}>{s.name} ({cnt})</option>;
+                    return (
+                      <button
+                        key={s.id}
+                        onClick={() => setStageFilter(stageFilter === s.id ? "all" : s.id)}
+                        className={cn(
+                          "px-2 py-0.5 text-[11px] font-medium rounded-full border transition-colors cursor-pointer",
+                          stageFilter === s.id
+                            ? "bg-violet-600 text-white border-violet-600"
+                            : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
+                        )}
+                      >
+                        {s.name} ({cnt})
+                      </button>
+                    );
                   })}
-                </select>
+                </>
               )}
               <span className="text-xs text-gray-400 ml-1">
                 {okDeals.length} affaire{okDeals.length !== 1 ? "s" : ""}
