@@ -16,6 +16,8 @@ import {
   Trash2,
   Pencil,
   X,
+  Plus,
+  Save,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 
@@ -51,6 +53,8 @@ function SummaryCard({
   onFollowupSubjectChange,
   onSendFollowup,
   onRefineFollowup,
+  onCreateTask,
+  creatingTask,
   refining,
 }: {
   text: string;
@@ -60,9 +64,14 @@ function SummaryCard({
   onFollowupSubjectChange?: (val: string) => void;
   onSendFollowup?: () => void;
   onRefineFollowup?: (prompt: string) => void;
+  onCreateTask?: (subject: string, date: string) => void;
+  creatingTask?: boolean;
   refining?: boolean;
 }) {
   const [refinePrompt, setRefinePrompt] = useState("");
+  const [showTaskPrompt, setShowTaskPrompt] = useState(false);
+  const [taskSubject, setTaskSubject] = useState("");
+  const [taskDate, setTaskDate] = useState("");
 
   const sections = useMemo(() => {
     const parts: { title: string; content: string; objet: string; styleIdx: number }[] = [];
@@ -110,13 +119,25 @@ function SummaryCard({
                 {cfg.icon} {s.title}
               </p>
               {isFollowup && onSendFollowup && (
-                <button
-                  onClick={onSendFollowup}
-                  className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-semibold text-white bg-green-600 rounded-md hover:bg-green-700 cursor-pointer transition-colors"
-                >
-                  <Mail className="w-3 h-3" />
-                  Envoyer
-                </button>
+                <div className="flex items-center gap-1.5">
+                  {!showTaskPrompt && (
+                    <button
+                      onClick={() => {
+                        onSendFollowup();
+                        setTaskSubject(followupSubject || "Followup");
+                        setTaskDate(new Date().toISOString().slice(0, 10));
+                        setShowTaskPrompt(true);
+                      }}
+                      className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-semibold text-white bg-green-600 rounded-md hover:bg-green-700 cursor-pointer transition-colors"
+                    >
+                      <Mail className="w-3 h-3" />
+                      Envoyer
+                    </button>
+                  )}
+                  {showTaskPrompt && (
+                    <span className="text-[9px] text-green-600 font-medium">✓ Gmail ouvert</span>
+                  )}
+                </div>
               )}
             </div>
             {isFollowup && onFollowupSubjectChange && followupSubject !== undefined ? (
@@ -139,6 +160,48 @@ function SummaryCard({
                     className="w-full mt-0.5 px-2 py-1.5 text-xs leading-relaxed border border-green-200 rounded bg-white focus:ring-1 focus:ring-green-400 outline-none resize-y"
                   />
                 </div>
+                {showTaskPrompt && onCreateTask && (
+                  <div className="mt-2 p-2 rounded-lg bg-blue-50 border border-blue-200">
+                    <p className="text-[10px] font-semibold text-blue-700 mb-1.5 flex items-center gap-1">
+                      <Plus className="w-3 h-3" />
+                      Ajouter une tâche de suivi ?
+                    </p>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        value={taskSubject}
+                        onChange={(e) => setTaskSubject(e.target.value)}
+                        className="flex-1 px-2 py-1 text-[11px] border border-blue-200 rounded bg-white focus:ring-1 focus:ring-blue-400 outline-none"
+                        placeholder="Objet de la tâche"
+                      />
+                      <input
+                        type="date"
+                        value={taskDate}
+                        onChange={(e) => setTaskDate(e.target.value)}
+                        className="px-1.5 py-1 text-[11px] border border-blue-200 rounded bg-white focus:ring-1 focus:ring-blue-400 outline-none"
+                      />
+                      <button
+                        onClick={() => {
+                          if (taskSubject.trim()) {
+                            onCreateTask(taskSubject.trim(), taskDate);
+                            setShowTaskPrompt(false);
+                          }
+                        }}
+                        disabled={creatingTask || !taskSubject.trim()}
+                        className="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-blue-600 rounded hover:bg-blue-700 disabled:opacity-50 cursor-pointer transition-colors"
+                      >
+                        {creatingTask ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                        Créer
+                      </button>
+                      <button
+                        onClick={() => setShowTaskPrompt(false)}
+                        className="p-1 text-gray-400 hover:text-gray-600 cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {onRefineFollowup && (
                   <div className="flex items-center gap-1.5 mt-1">
                     <input
@@ -224,6 +287,7 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
   const [followupEmail, setFollowupEmail] = useState<string>("");
   const [followupSubject, setFollowupSubject] = useState<string>("");
   const [refining, setRefining] = useState(false);
+  const [creatingTask, setCreatingTask] = useState(false);
 
   useEffect(() => {
     // Only show loading spinner on initial load, not on refreshKey updates
@@ -305,6 +369,42 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
       console.error("Erreur refinement IA");
     } finally {
       setRefining(false);
+    }
+  };
+
+  const createTaskAfterSend = async (subject: string, date: string) => {
+    setCreatingTask(true);
+    try {
+      const res = await fetch("/api/activities", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject,
+          type: "email",
+          due_date: date,
+          deal_id: dealId,
+          person_id: personId || null,
+        }),
+      });
+      const json = await res.json();
+      if (json.data) {
+        // Optimistic: add to local task list
+        setCtx((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            activities: {
+              ...prev.activities,
+              pending: [...prev.activities.pending, json.data],
+            },
+          };
+        });
+        onActivityChanged?.();
+      }
+    } catch (err) {
+      console.error("Erreur création tâche:", err);
+    } finally {
+      setCreatingTask(false);
     }
   };
 
@@ -510,6 +610,8 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
             onFollowupSubjectChange={setFollowupSubject}
             onRefineFollowup={refineFollowup}
             refining={refining}
+            onCreateTask={createTaskAfterSend}
+            creatingTask={creatingTask}
             onSendFollowup={followupEmail && personEmail ? () => {
               const to = encodeURIComponent(personEmail);
               const subject = encodeURIComponent(followupSubject || "Metagora");
