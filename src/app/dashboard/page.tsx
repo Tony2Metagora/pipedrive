@@ -1418,18 +1418,25 @@ function DealRow({
           )}
         </div>
 
-        {/* Prochaine activité */}
-        <div className="flex-shrink-0 text-xs text-gray-400">
-          {deal.next_activity_date ? (
-            <span className={cn(
-              isOverdue(deal.next_activity_date) && "text-red-500 font-medium"
-            )}>
-              {formatDate(deal.next_activity_date)}
-            </span>
-          ) : (
-            <span className="text-amber-500 font-medium">Pas de tâche</span>
-          )}
-        </div>
+        {/* Prochaine activité — computed from actual dealActivities */}
+        {(() => {
+          const nextDate = dealActivities && dealActivities.length > 0
+            ? dealActivities.reduce((earliest, a) => (!earliest || a.due_date < earliest ? a.due_date : earliest), "" as string)
+            : null;
+          return (
+            <div className="flex-shrink-0 text-xs text-gray-400">
+              {nextDate ? (
+                <span className={cn(
+                  isOverdue(nextDate) && "text-red-500 font-medium"
+                )}>
+                  {formatDate(nextDate)}
+                </span>
+              ) : (
+                <span className="text-amber-500 font-medium">Pas de tâche</span>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Actions */}
         <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
