@@ -43,7 +43,27 @@ const SECTION_STYLES: { match: string; icon: string; bg: string; border: string;
   { match: "FOLLOWUP EMAIL", icon: "✉️", bg: "bg-green-50", border: "border-green-200", title: "text-green-800", text: "text-green-900" },
 ];
 
-function SummaryCard({ text, onSendFollowup }: { text: string; onSendFollowup?: () => void }) {
+function SummaryCard({
+  text,
+  followupEmail,
+  followupSubject,
+  onFollowupEmailChange,
+  onFollowupSubjectChange,
+  onSendFollowup,
+  onRefineFollowup,
+  refining,
+}: {
+  text: string;
+  followupEmail?: string;
+  followupSubject?: string;
+  onFollowupEmailChange?: (val: string) => void;
+  onFollowupSubjectChange?: (val: string) => void;
+  onSendFollowup?: () => void;
+  onRefineFollowup?: (prompt: string) => void;
+  refining?: boolean;
+}) {
+  const [refinePrompt, setRefinePrompt] = useState("");
+
   const sections = useMemo(() => {
     const parts: { title: string; content: string; objet: string; styleIdx: number }[] = [];
     const positions: { idx: number; title: string; styleIdx: number; endOfTitle: number }[] = [];
@@ -99,10 +119,68 @@ function SummaryCard({ text, onSendFollowup }: { text: string; onSendFollowup?: 
                 </button>
               )}
             </div>
-            {isFollowup && s.objet && (
-              <p className={`text-xs font-semibold ${cfg.text} mb-2`}>Objet : {s.objet}</p>
+            {isFollowup && onFollowupSubjectChange && followupSubject !== undefined ? (
+              <>
+                <div className="mb-2">
+                  <label className="text-[9px] font-semibold text-green-700 uppercase tracking-wide">Objet</label>
+                  <input
+                    type="text"
+                    value={followupSubject}
+                    onChange={(e) => onFollowupSubjectChange(e.target.value)}
+                    className="w-full mt-0.5 px-2 py-1 text-xs border border-green-200 rounded bg-white focus:ring-1 focus:ring-green-400 outline-none"
+                  />
+                </div>
+                <div className="mb-2">
+                  <label className="text-[9px] font-semibold text-green-700 uppercase tracking-wide">Corps du mail</label>
+                  <textarea
+                    value={followupEmail || ""}
+                    onChange={(e) => onFollowupEmailChange?.(e.target.value)}
+                    rows={8}
+                    className="w-full mt-0.5 px-2 py-1.5 text-xs leading-relaxed border border-green-200 rounded bg-white focus:ring-1 focus:ring-green-400 outline-none resize-y"
+                  />
+                </div>
+                {onRefineFollowup && (
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <input
+                      type="text"
+                      value={refinePrompt}
+                      onChange={(e) => setRefinePrompt(e.target.value)}
+                      placeholder="Ex: rends le mail plus court, ajoute une ref au salon..."
+                      className="flex-1 px-2 py-1 text-[11px] border border-green-200 rounded bg-white focus:ring-1 focus:ring-green-400 outline-none"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && refinePrompt.trim()) {
+                          onRefineFollowup(refinePrompt.trim());
+                          setRefinePrompt("");
+                        }
+                      }}
+                    />
+                    <button
+                      onClick={() => {
+                        if (refinePrompt.trim()) {
+                          onRefineFollowup(refinePrompt.trim());
+                          setRefinePrompt("");
+                        }
+                      }}
+                      disabled={refining || !refinePrompt.trim()}
+                      className="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-purple-600 rounded hover:bg-purple-700 disabled:opacity-50 cursor-pointer transition-colors"
+                    >
+                      {refining ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                      Modifier
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                {isFollowup && s.objet && (
+                  <p className={`text-xs font-semibold ${cfg.text} mb-2`}>Objet : {s.objet}</p>
+                )}
+                <p className={`text-xs leading-relaxed ${cfg.text} whitespace-pre-line`}>{s.content}</p>
+              </>
             )}
-            <p className={`text-xs leading-relaxed ${cfg.text} whitespace-pre-line`}>{s.content}</p>
+            {!isFollowup && (
+              <p className={`text-xs leading-relaxed ${cfg.text} whitespace-pre-line`}>{s.content}</p>
+            )}
           </div>
         );
       })}
@@ -145,6 +223,7 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
   const [personEmail, setPersonEmail] = useState<string | null>(null);
   const [followupEmail, setFollowupEmail] = useState<string>("");
   const [followupSubject, setFollowupSubject] = useState<string>("");
+  const [refining, setRefining] = useState(false);
 
   useEffect(() => {
     // Only show loading spinner on initial load, not on refreshKey updates
@@ -202,6 +281,30 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
       setSummary("Erreur de connexion à l'IA");
     } finally {
       setLoadingSummary(false);
+    }
+  };
+
+  const refineFollowup = async (prompt: string) => {
+    if (!followupEmail) return;
+    setRefining(true);
+    try {
+      const res = await fetch("/api/summary/refine", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          currentEmail: followupEmail,
+          currentSubject: followupSubject,
+          prompt,
+          contactName: personName || "inconnu",
+        }),
+      });
+      const json = await res.json();
+      if (json.data?.followupEmail) setFollowupEmail(json.data.followupEmail);
+      if (json.data?.followupSubject) setFollowupSubject(json.data.followupSubject);
+    } catch {
+      console.error("Erreur refinement IA");
+    } finally {
+      setRefining(false);
     }
   };
 
@@ -401,6 +504,12 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
         {summary ? (
           <SummaryCard
             text={summary}
+            followupEmail={followupEmail}
+            followupSubject={followupSubject}
+            onFollowupEmailChange={setFollowupEmail}
+            onFollowupSubjectChange={setFollowupSubject}
+            onRefineFollowup={refineFollowup}
+            refining={refining}
             onSendFollowup={followupEmail && personEmail ? () => {
               const to = encodeURIComponent(personEmail);
               const subject = encodeURIComponent(followupSubject || "Metagora");

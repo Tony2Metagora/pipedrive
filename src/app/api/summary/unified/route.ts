@@ -65,10 +65,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Token Gmail manquant. Reconnectez-vous." }, { status: 403 });
     }
 
-    // 1. Fetch the 2 most recent emails with this contact
+    // 1. Fetch recent emails with this contact (fetch more to filter out CC-only)
+    const emailLower = contactEmail.toLowerCase();
     const query = encodeURIComponent(`from:${contactEmail} OR to:${contactEmail}`);
     const listRes = await fetch(
-      `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=2`,
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=10`,
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
 
@@ -88,9 +89,9 @@ export async function POST(request: Request) {
       });
     }
 
-    // Fetch full details for the 2 emails
-    const details = await Promise.all(
-      messages.slice(0, 2).map(async (msg: GmailMessage) => {
+    // Fetch full details and filter: only keep emails where contact is directly in From or To (not just CC)
+    const allDetails = await Promise.all(
+      messages.map(async (msg: GmailMessage) => {
         const detailRes = await fetch(
           `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`,
           { headers: { Authorization: `Bearer ${accessToken}` } }
@@ -100,11 +101,17 @@ export async function POST(request: Request) {
         const headers = detail.payload?.headers || [];
         const getHeader = (name: string) =>
           headers.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value || "";
+        const from = getHeader("From");
+        const to = getHeader("To");
+        // Only keep if contact email is in From or To (not just CC/BCC)
+        const inFrom = from.toLowerCase().includes(emailLower);
+        const inTo = to.toLowerCase().includes(emailLower);
+        if (!inFrom && !inTo) return null;
         const textBody = extractTextBody(detail.payload);
         const truncatedBody = textBody.length > 1500 ? textBody.slice(0, 1500) + "..." : textBody;
         return {
-          from: getHeader("From"),
-          to: getHeader("To"),
+          from,
+          to,
           subject: getHeader("Subject"),
           date: getHeader("Date"),
           body: truncatedBody || detail.snippet,
@@ -112,7 +119,8 @@ export async function POST(request: Request) {
       })
     );
 
-    const validEmails = details.filter(Boolean);
+    // Take only the 2 most recent direct emails with this contact
+    const validEmails = allDetails.filter(Boolean).slice(0, 2);
 
     if (validEmails.length === 0) {
       return NextResponse.json({
