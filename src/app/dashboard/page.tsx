@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   Clock,
   Archive,
+  Trash2,
   Briefcase,
   ChevronDown,
   ChevronUp,
@@ -89,7 +90,7 @@ export default function DashboardPage() {
 function DashboardContent() {
   const searchParams = useSearchParams();
   const highlightDealId = searchParams.get("deal") ? Number(searchParams.get("deal")) : null;
-  const [tab, setTab] = useState<"urgent" | "traiter">("urgent");
+  const [statusFilter, setStatusFilter] = useState<"all" | "urgent" | "sans_info">("all");
   const [activities, setActivities] = useState<Activity[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);
@@ -206,6 +207,18 @@ function DashboardContent() {
     setDeals((prev) => prev.map((d) => d.id === dealId ? { ...d, ...fields } : d));
   }, []);
 
+  // Supprimer une activité
+  const deleteActivityById = async (id: number) => {
+    hiddenActivityIds.current.add(id);
+    setActivities((prev) => prev.filter((a) => a.id !== id));
+    try {
+      await fetch(`/api/activities/${id}`, { method: "DELETE" });
+    } catch (err) {
+      console.error("Erreur suppression activité:", err);
+    }
+    setTimeout(syncBackground, 5000);
+  };
+
   const openArchiveModal = (activityId: number | null, dealId: number | null, contactName: string) => {
     setArchiveTarget({ activityId, dealId, contactName });
   };
@@ -318,59 +331,39 @@ function DashboardContent() {
     , "" as string) || null;
   };
 
-  // Urgent: deals whose earliest pending activity is overdue/today, or deals with NO pending activity
-  const urgentDeals = deals.filter((d) => {
-    if (!matchDeal(d)) return false;
+  // Classify deals by urgency
+  const allFilteredDeals = deals.filter(matchDeal);
+
+  const isUrgentDeal = (d: Deal) => {
     const earliest = earliestActivityByDeal(d.id);
-    return !earliest || isOverdue(earliest);
+    return earliest !== null && isOverdue(earliest);
+  };
+  const isSansInfoDeal = (d: Deal) => {
+    const earliest = earliestActivityByDeal(d.id);
+    return earliest === null;
+  };
+
+  const urgentCount = allFilteredDeals.filter(isUrgentDeal).length;
+  const sansInfoCount = allFilteredDeals.filter(isSansInfoDeal).length;
+
+  // Apply status filter
+  const filteredDeals = allFilteredDeals.filter((d) => {
+    if (statusFilter === "urgent") return isUrgentDeal(d);
+    if (statusFilter === "sans_info") return isSansInfoDeal(d);
+    return true;
   });
 
-  // À traiter: deals with future pending activities (not urgent)
-  const urgentDealIds = new Set(urgentDeals.map((d) => d.id));
-  const okDeals = deals.filter((d) => !urgentDealIds.has(d.id) && matchDeal(d));
-
-  const totalUrgent = urgentDeals.length;
+  // Sort: urgent first (overdue), then sans info, then à jour
+  const sortedDeals = [...filteredDeals].sort((a, b) => {
+    const aUrgent = isUrgentDeal(a) ? 0 : isSansInfoDeal(a) ? 1 : 2;
+    const bUrgent = isUrgentDeal(b) ? 0 : isSansInfoDeal(b) ? 1 : 2;
+    return aUrgent - bUrgent;
+  });
 
   return (
     <div>
-      {/* Header with tabs */}
+      {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
-          <button
-            onClick={() => setTab("urgent")}
-            className={cn(
-              "flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors cursor-pointer",
-              tab === "urgent"
-                ? "bg-white text-red-700 shadow-sm"
-                : "text-gray-500 hover:text-gray-700"
-            )}
-          >
-            <AlertTriangle className="w-4 h-4" />
-            Urgent
-            {totalUrgent > 0 && (
-              <span className="ml-1 px-1.5 py-0.5 text-[10px] font-bold bg-red-100 text-red-700 rounded-full">
-                {totalUrgent}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => setTab("traiter")}
-            className={cn(
-              "flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors cursor-pointer",
-              tab === "traiter"
-                ? "bg-white text-indigo-700 shadow-sm"
-                : "text-gray-500 hover:text-gray-700"
-            )}
-          >
-            <Briefcase className="w-4 h-4" />
-            À traiter
-            {okDeals.length > 0 && (
-              <span className="ml-1 px-1.5 py-0.5 text-[10px] font-bold bg-indigo-100 text-indigo-700 rounded-full">
-                {okDeals.length}
-              </span>
-            )}
-          </button>
-        </div>
         <div className="flex items-center gap-2">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -390,6 +383,8 @@ function DashboardContent() {
               </button>
             )}
           </div>
+        </div>
+        <div className="flex items-center gap-2">
           <button
             onClick={() => setShowNewDeal(true)}
             className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors cursor-pointer shadow-sm"
@@ -408,335 +403,236 @@ function DashboardContent() {
         </div>
       </div>
 
-      {/* ─── TAB URGENT ─── */}
-      {tab === "urgent" && (
-        <>
-          {/* Barre de filtres + vue toggle */}
-          <div className="flex items-center justify-between mb-4 bg-white rounded-lg border border-gray-200 p-2.5">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <Filter className="w-4 h-4 text-gray-400 flex-shrink-0" />
+      {/* Barre de filtres unifiée */}
+      <div className="flex items-center justify-between mb-4 bg-white rounded-lg border border-gray-200 p-2.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <Filter className="w-4 h-4 text-gray-400 flex-shrink-0" />
+          {/* Status filters */}
+          <button
+            onClick={() => setStatusFilter("all")}
+            className={cn(
+              "px-2.5 py-1 text-xs font-medium rounded-full border transition-colors cursor-pointer",
+              statusFilter === "all"
+                ? "bg-indigo-600 text-white border-indigo-600"
+                : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+            )}
+          >
+            Tous ({allFilteredDeals.length})
+          </button>
+          <button
+            onClick={() => setStatusFilter(statusFilter === "urgent" ? "all" : "urgent")}
+            className={cn(
+              "px-2.5 py-1 text-xs font-medium rounded-full border transition-colors cursor-pointer",
+              statusFilter === "urgent"
+                ? "bg-red-600 text-white border-red-600"
+                : "bg-white text-red-600 border-red-200 hover:bg-red-50"
+            )}
+          >
+            <span className="inline-flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3" />
+              Urgent ({urgentCount})
+            </span>
+          </button>
+          <button
+            onClick={() => setStatusFilter(statusFilter === "sans_info" ? "all" : "sans_info")}
+            className={cn(
+              "px-2.5 py-1 text-xs font-medium rounded-full border transition-colors cursor-pointer",
+              statusFilter === "sans_info"
+                ? "bg-amber-600 text-white border-amber-600"
+                : "bg-white text-amber-600 border-amber-200 hover:bg-amber-50"
+            )}
+          >
+            <span className="inline-flex items-center gap-1">
+              <Clock className="w-3 h-3" />
+              Sans tâche ({sansInfoCount})
+            </span>
+          </button>
+          {/* Pipeline filters */}
+          <span className="text-gray-300 mx-0.5">|</span>
+          {PIPELINES.map((p) => {
+            const cnt = dealCountByPipeline.get(p.id) || 0;
+            return (
               <button
-                onClick={() => { setPipelineFilter("all"); setStageFilter("all"); }}
+                key={p.id}
+                onClick={() => { setPipelineFilter(pipelineFilter === p.id ? "all" : p.id); setStageFilter("all"); }}
                 className={cn(
                   "px-2.5 py-1 text-xs font-medium rounded-full border transition-colors cursor-pointer",
-                  pipelineFilter === "all"
+                  pipelineFilter === p.id
                     ? "bg-indigo-600 text-white border-indigo-600"
                     : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
                 )}
               >
-                Tous ({deals.length})
+                {p.name} ({cnt})
               </button>
-              {PIPELINES.map((p) => {
-                const cnt = dealCountByPipeline.get(p.id) || 0;
+            );
+          })}
+          {pipelineFilter !== "all" && availableStages.length > 0 && (
+            <>
+              <span className="text-gray-300 mx-0.5">|</span>
+              {availableStages.map((s) => {
+                const cnt = deals.filter((d) => d.stage_id === s.id).length;
                 return (
                   <button
-                    key={p.id}
-                    onClick={() => { setPipelineFilter(p.id); setStageFilter("all"); }}
+                    key={s.id}
+                    onClick={() => setStageFilter(stageFilter === s.id ? "all" : s.id)}
                     className={cn(
-                      "px-2.5 py-1 text-xs font-medium rounded-full border transition-colors cursor-pointer",
-                      pipelineFilter === p.id
-                        ? "bg-indigo-600 text-white border-indigo-600"
-                        : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                      "px-2 py-0.5 text-[11px] font-medium rounded-full border transition-colors cursor-pointer",
+                      stageFilter === s.id
+                        ? "bg-violet-600 text-white border-violet-600"
+                        : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
                     )}
                   >
-                    {p.name} ({cnt})
+                    {s.name} ({cnt})
                   </button>
                 );
               })}
-              {pipelineFilter !== "all" && availableStages.length > 0 && (
-                <>
-                  <span className="text-gray-300 mx-0.5">|</span>
-                  {availableStages.map((s) => {
-                    const cnt = deals.filter((d) => d.stage_id === s.id).length;
-                    return (
-                      <button
-                        key={s.id}
-                        onClick={() => setStageFilter(stageFilter === s.id ? "all" : s.id)}
-                        className={cn(
-                          "px-2 py-0.5 text-[11px] font-medium rounded-full border transition-colors cursor-pointer",
-                          stageFilter === s.id
-                            ? "bg-violet-600 text-white border-violet-600"
-                            : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
-                        )}
-                      >
-                        {s.name} ({cnt})
-                      </button>
-                    );
-                  })}
-                </>
-              )}
-              <span className="text-xs text-gray-400 ml-1">
-                {urgentDeals.length} affaire{urgentDeals.length !== 1 ? "s" : ""}
-              </span>
-            </div>
-            <div className="flex items-center gap-1 bg-gray-100 rounded-md p-0.5">
-              <button
-                onClick={() => setViewMode("list")}
-                className={cn(
-                  "p-1.5 rounded transition-colors cursor-pointer",
-                  viewMode === "list" ? "bg-white shadow-sm text-indigo-700" : "text-gray-400 hover:text-gray-600"
-                )}
-                title="Vue liste"
-              >
-                <List className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setViewMode("kanban")}
-                className={cn(
-                  "p-1.5 rounded transition-colors cursor-pointer",
-                  viewMode === "kanban" ? "bg-white shadow-sm text-indigo-700" : "text-gray-400 hover:text-gray-600"
-                )}
-                title="Vue kanban"
-              >
-                <LayoutGrid className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-
-          {(loading || loadingDeals) && activities.length === 0 && deals.length === 0 ? (
-            <div className="flex items-center justify-center py-20">
-              <RefreshCw className="w-6 h-6 animate-spin text-gray-400" />
-            </div>
-          ) : urgentDeals.length === 0 ? (
-            <div className="text-center py-20 text-gray-400">
-              <CheckSquare className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p className="text-lg font-medium">Aucune urgence</p>
-              <p className="text-sm mt-1">Toutes les affaires et tâches sont à jour !</p>
-            </div>
-          ) : viewMode === "list" ? (
-            <div className="space-y-2">
-              {urgentDeals.map((deal) => (
-                <DealRow
-                  key={deal.id}
-                  deal={deal}
-                  dealActivities={activitiesByDeal.get(deal.id) || []}
-                  onTaskCreated={handleTaskCreated}
-                  onMarkDone={markDone}
-                  onArchive={openArchiveModal}
-                  onWon={markWon}
-                  onActivityUpdated={handleActivityUpdated}
-                  selected={selectedDeals.has(deal.id)}
-                  onToggleSelect={toggleDealSelection}
-                  onDealUpdated={handleDealFieldUpdated}
-                  initialExpanded={highlightDealId === deal.id}
-                />
-              ))}
-            </div>
-          ) : (
-            <KanbanView
-              deals={urgentDeals}
-              activitiesByDeal={activitiesByDeal}
-              pipelineFilter={pipelineFilter}
-              onDealMoved={syncBackground}
-            />
+            </>
           )}
-        </>
-      )}
+          <span className="text-xs text-gray-400 ml-1">
+            {sortedDeals.length} affaire{sortedDeals.length !== 1 ? "s" : ""}
+          </span>
+        </div>
+        <div className="flex items-center gap-1 bg-gray-100 rounded-md p-0.5">
+          <button
+            onClick={() => setViewMode("list")}
+            className={cn(
+              "p-1.5 rounded transition-colors cursor-pointer",
+              viewMode === "list" ? "bg-white shadow-sm text-indigo-700" : "text-gray-400 hover:text-gray-600"
+            )}
+            title="Vue liste"
+          >
+            <List className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setViewMode("kanban")}
+            className={cn(
+              "p-1.5 rounded transition-colors cursor-pointer",
+              viewMode === "kanban" ? "bg-white shadow-sm text-indigo-700" : "text-gray-400 hover:text-gray-600"
+            )}
+            title="Vue kanban"
+          >
+            <LayoutGrid className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
 
-      {/* ─── TAB À TRAITER ─── */}
-      {tab === "traiter" && (
-        <>
-          {/* Barre de filtres + vue toggle */}
-          <div className="flex items-center justify-between mb-4 bg-white rounded-lg border border-gray-200 p-2.5">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <Filter className="w-4 h-4 text-gray-400 flex-shrink-0" />
+      {/* Contenu principal */}
+      {(loading || loadingDeals) && activities.length === 0 && deals.length === 0 ? (
+        <div className="flex items-center justify-center py-20">
+          <RefreshCw className="w-6 h-6 animate-spin text-gray-400" />
+        </div>
+      ) : sortedDeals.length === 0 ? (
+        <div className="text-center py-20 text-gray-400">
+          <CheckSquare className="w-12 h-12 mx-auto mb-4 opacity-50" />
+          <p className="text-lg font-medium">Aucune affaire</p>
+          <p className="text-sm mt-1">Aucune affaire ne correspond aux filtres sélectionnés.</p>
+        </div>
+      ) : viewMode === "list" ? (
+        <div className="space-y-2">
+          {/* Toolbar : sélection + enrichissement batch */}
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
               <button
-                onClick={() => { setPipelineFilter("all"); setStageFilter("all"); }}
-                className={cn(
-                  "px-2.5 py-1 text-xs font-medium rounded-full border transition-colors cursor-pointer",
-                  pipelineFilter === "all"
-                    ? "bg-indigo-600 text-white border-indigo-600"
-                    : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
-                )}
+                onClick={() => selectAllDeals(sortedDeals)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 bg-white hover:bg-gray-50 transition-colors cursor-pointer"
               >
-                Tous ({deals.length})
+                <Users className="w-3.5 h-3.5" />
+                {selectedDeals.size === sortedDeals.filter((d: Deal) => d.person_id).length && selectedDeals.size > 0
+                  ? "Tout désélectionner"
+                  : "Tout sélectionner"}
               </button>
-              {PIPELINES.map((p) => {
-                const cnt = dealCountByPipeline.get(p.id) || 0;
-                return (
-                  <button
-                    key={p.id}
-                    onClick={() => { setPipelineFilter(p.id); setStageFilter("all"); }}
-                    className={cn(
-                      "px-2.5 py-1 text-xs font-medium rounded-full border transition-colors cursor-pointer",
-                      pipelineFilter === p.id
-                        ? "bg-indigo-600 text-white border-indigo-600"
-                        : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
-                    )}
-                  >
-                    {p.name} ({cnt})
-                  </button>
-                );
-              })}
-              {pipelineFilter !== "all" && availableStages.length > 0 && (
-                <>
-                  <span className="text-gray-300 mx-0.5">|</span>
-                  {availableStages.map((s) => {
-                    const cnt = deals.filter((d) => d.stage_id === s.id).length;
-                    return (
-                      <button
-                        key={s.id}
-                        onClick={() => setStageFilter(stageFilter === s.id ? "all" : s.id)}
-                        className={cn(
-                          "px-2 py-0.5 text-[11px] font-medium rounded-full border transition-colors cursor-pointer",
-                          stageFilter === s.id
-                            ? "bg-violet-600 text-white border-violet-600"
-                            : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
-                        )}
-                      >
-                        {s.name} ({cnt})
-                      </button>
-                    );
-                  })}
-                </>
+              {selectedDeals.size > 0 && (
+                <span className="text-xs font-medium text-indigo-600">
+                  {selectedDeals.size} sélectionnée{selectedDeals.size > 1 ? "s" : ""}
+                </span>
               )}
-              <span className="text-xs text-gray-400 ml-1">
-                {okDeals.length} affaire{okDeals.length !== 1 ? "s" : ""}
-              </span>
             </div>
-            <div className="flex items-center gap-1 bg-gray-100 rounded-md p-0.5">
+            {selectedDeals.size > 0 && (
               <button
-                onClick={() => setViewMode("list")}
-                className={cn(
-                  "p-1.5 rounded transition-colors cursor-pointer",
-                  viewMode === "list" ? "bg-white shadow-sm text-indigo-700" : "text-gray-400 hover:text-gray-600"
-                )}
-                title="Vue liste"
+                onClick={batchEnrich}
+                disabled={batchEnriching}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
               >
-                <List className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setViewMode("kanban")}
-                className={cn(
-                  "p-1.5 rounded transition-colors cursor-pointer",
-                  viewMode === "kanban" ? "bg-white shadow-sm text-indigo-700" : "text-gray-400 hover:text-gray-600"
+                {batchEnriching ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Search className="w-4 h-4" />
                 )}
-                title="Vue kanban"
-              >
-                <LayoutGrid className="w-4 h-4" />
+                {batchEnriching ? batchProgress : `Enrichir ${selectedDeals.size} contact${selectedDeals.size > 1 ? "s" : ""} (Dropcontact)`}
               </button>
-            </div>
+            )}
           </div>
 
-          {loadingDeals && deals.length === 0 ? (
-            <div className="flex items-center justify-center py-20">
-              <RefreshCw className="w-6 h-6 animate-spin text-gray-400" />
-            </div>
-          ) : okDeals.length === 0 ? (
-            <div className="text-center py-20 text-gray-400">
-              <Briefcase className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p className="text-lg font-medium">Aucune affaire à suivre</p>
-              <p className="text-sm mt-1">Toutes les affaires actives sont en retard ou urgentes</p>
-            </div>
-          ) : viewMode === "list" ? (
-            <div className="space-y-2">
-              {/* Toolbar : sélection + enrichissement batch */}
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => selectAllDeals(okDeals)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 bg-white hover:bg-gray-50 transition-colors cursor-pointer"
-                  >
-                    <Users className="w-3.5 h-3.5" />
-                    {selectedDeals.size === okDeals.filter((d) => d.person_id).length && selectedDeals.size > 0
-                      ? "Tout désélectionner"
-                      : "Tout sélectionner"}
-                  </button>
-                  {selectedDeals.size > 0 && (
-                    <span className="text-xs font-medium text-indigo-600">
-                      {selectedDeals.size} sélectionnée{selectedDeals.size > 1 ? "s" : ""}
-                    </span>
-                  )}
-                </div>
-                {selectedDeals.size > 0 && (
-                  <button
-                    onClick={batchEnrich}
-                    disabled={batchEnriching}
-                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
-                  >
-                    {batchEnriching ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Search className="w-4 h-4" />
-                    )}
-                    {batchEnriching ? batchProgress : `Enrichir ${selectedDeals.size} contact${selectedDeals.size > 1 ? "s" : ""} (Dropcontact)`}
-                  </button>
-                )}
+          {/* Bannière résultats batch */}
+          {batchResults && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-blue-800 flex items-center gap-2">
+                  <Search className="w-4 h-4" />
+                  Résultats enrichissement ({batchResults.length} contact{batchResults.length > 1 ? "s" : ""})
+                </h3>
+                <button
+                  onClick={() => setBatchResults(null)}
+                  className="text-blue-400 hover:text-blue-600 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-
-              {/* Bannière résultats batch */}
-              {batchResults && (
-                <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 mb-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-sm font-semibold text-blue-800 flex items-center gap-2">
-                      <Search className="w-4 h-4" />
-                      Résultats enrichissement ({batchResults.length} contact{batchResults.length > 1 ? "s" : ""})
-                    </h3>
-                    <button
-                      onClick={() => setBatchResults(null)}
-                      className="text-blue-400 hover:text-blue-600 cursor-pointer"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
+              <div className="space-y-1">
+                {batchResults.map((r) => (
+                  <div key={r.personId} className="flex items-center gap-2 text-xs">
+                    <span className={cn(
+                      "w-2 h-2 rounded-full flex-shrink-0",
+                      r.status === "enriched" ? "bg-green-500" : r.status === "error" ? "bg-red-500" : "bg-gray-400"
+                    )} />
+                    <span className="font-medium text-gray-800">{r.personName}</span>
+                    {r.status === "enriched" && r.enriched && (
+                      <span className="text-green-700">
+                        — {[r.enriched.email && "email", r.enriched.phone && "tél", r.enriched.job_title && "poste", r.enriched.linkedin && "LinkedIn"].filter(Boolean).join(", ")}
+                      </span>
+                    )}
+                    {r.status === "no_result" && <span className="text-gray-500">— aucun résultat</span>}
+                    {r.status === "no_person" && <span className="text-gray-500">— contact introuvable</span>}
+                    {r.status === "error" && <span className="text-red-600">— erreur</span>}
                   </div>
-                  <div className="space-y-1">
-                    {batchResults.map((r) => (
-                      <div key={r.personId} className="flex items-center gap-2 text-xs">
-                        <span className={cn(
-                          "w-2 h-2 rounded-full flex-shrink-0",
-                          r.status === "enriched" ? "bg-green-500" : r.status === "error" ? "bg-red-500" : "bg-gray-400"
-                        )} />
-                        <span className="font-medium text-gray-800">{r.personName}</span>
-                        {r.status === "enriched" && r.enriched && (
-                          <span className="text-green-700">
-                            — {[r.enriched.email && "email", r.enriched.phone && "tél", r.enriched.job_title && "poste", r.enriched.linkedin && "LinkedIn"].filter(Boolean).join(", ")}
-                          </span>
-                        )}
-                        {r.status === "no_result" && <span className="text-gray-500">— aucun résultat</span>}
-                        {r.status === "no_person" && <span className="text-gray-500">— contact introuvable</span>}
-                        {r.status === "error" && <span className="text-red-600">— erreur</span>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Bannière loading batch */}
-              {batchEnriching && (
-                <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 mb-4 flex items-center gap-3">
-                  <Loader2 className="w-5 h-5 animate-spin text-blue-600" />
-                  <p className="text-sm font-medium text-blue-800">{batchProgress}</p>
-                  <p className="text-xs text-blue-500">Cela peut prendre quelques minutes...</p>
-                </div>
-              )}
-
-              {okDeals.map((deal) => (
-                <DealRow
-                  key={deal.id}
-                  deal={deal}
-                  dealActivities={activitiesByDeal.get(deal.id) || []}
-                  onTaskCreated={handleTaskCreated}
-                  onMarkDone={markDone}
-                  onArchive={openArchiveModal}
-                  onWon={markWon}
-                  onActivityUpdated={handleActivityUpdated}
-                  selected={selectedDeals.has(deal.id)}
-                  onToggleSelect={toggleDealSelection}
-                  onDealUpdated={handleDealFieldUpdated}
-                  initialExpanded={highlightDealId === deal.id}
-                />
-              ))}
+                ))}
+              </div>
             </div>
-          ) : (
-            /* ─── VUE KANBAN ─── */
-            <KanbanView
-              deals={okDeals}
-              activitiesByDeal={activitiesByDeal}
-              pipelineFilter={pipelineFilter}
-              onDealMoved={syncBackground}
-            />
           )}
-        </>
+
+          {/* Bannière loading batch */}
+          {batchEnriching && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 mb-4 flex items-center gap-3">
+              <Loader2 className="w-5 h-5 animate-spin text-blue-600" />
+              <p className="text-sm font-medium text-blue-800">{batchProgress}</p>
+              <p className="text-xs text-blue-500">Cela peut prendre quelques minutes...</p>
+            </div>
+          )}
+
+          {sortedDeals.map((deal: Deal) => (
+            <DealRow
+              key={deal.id}
+              deal={deal}
+              dealActivities={activitiesByDeal.get(deal.id) || []}
+              onTaskCreated={handleTaskCreated}
+              onMarkDone={markDone}
+              onArchive={openArchiveModal}
+              onWon={markWon}
+              onActivityUpdated={handleActivityUpdated}
+              selected={selectedDeals.has(deal.id)}
+              onToggleSelect={toggleDealSelection}
+              onDealUpdated={handleDealFieldUpdated}
+              initialExpanded={highlightDealId === deal.id}
+            />
+          ))}
+        </div>
+      ) : (
+        <KanbanView
+          deals={sortedDeals}
+          activitiesByDeal={activitiesByDeal}
+          pipelineFilter={pipelineFilter}
+          onDealMoved={syncBackground}
+        />
       )}
 
       {/* Modal nouvelle affaire */}
@@ -973,7 +869,7 @@ function ActivitySection({
   icon,
   activities,
   onMarkDone,
-  onArchive,
+  onDelete,
   onSelect,
   selectedId,
   variant,
@@ -982,7 +878,7 @@ function ActivitySection({
   icon: React.ReactNode;
   activities: Activity[];
   onMarkDone: (id: number) => void;
-  onArchive: (activityId: number, dealId: number | null, contactName: string) => void;
+  onDelete: (id: number) => void;
   onSelect: (activity: Activity) => void;
   selectedId: number | null;
   variant: "urgent" | "upcoming" | "later";
@@ -1006,7 +902,7 @@ function ActivitySection({
             <ActivityRow
               activity={activity}
               onMarkDone={onMarkDone}
-              onArchive={onArchive}
+              onDelete={onDelete}
               onSelect={onSelect}
               isSelected={selectedId === activity.id}
               className={borderColor}
@@ -1024,20 +920,20 @@ function ActivitySection({
 function ActivityRow({
   activity,
   onMarkDone,
-  onArchive,
+  onDelete,
   onSelect,
   isSelected,
   className,
 }: {
   activity: Activity;
   onMarkDone: (id: number) => void;
-  onArchive: (activityId: number, dealId: number | null, contactName: string) => void;
+  onDelete: (id: number) => void;
   onSelect: (activity: Activity) => void;
   isSelected: boolean;
   className?: string;
 }) {
   const [markingDone, setMarkingDone] = useState(false);
-  const [archiving, setArchiving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const detectedType = detectActivityType(activity.subject);
   const IconComponent = TYPE_ICONS[detectedType] || CheckSquare;
 
@@ -1047,9 +943,10 @@ function ActivityRow({
     await onMarkDone(activity.id);
   };
 
-  const handleArchive = (e: React.MouseEvent) => {
+  const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
-    onArchive(activity.id, activity.deal_id, activity.person_name || activity.deal_title || activity.subject);
+    setDeleting(true);
+    onDelete(activity.id);
   };
 
   const handleClick = () => {
@@ -1114,7 +1011,7 @@ function ActivityRow({
       <div className="flex items-center gap-1 flex-shrink-0">
         <button
           onClick={handleDone}
-          disabled={markingDone || archiving}
+          disabled={markingDone || deleting}
           title="Marquer comme fait"
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-green-200 text-green-700 bg-green-50 hover:bg-green-100 hover:border-green-300 transition-colors cursor-pointer disabled:opacity-50"
         >
@@ -1126,17 +1023,16 @@ function ActivityRow({
           Done
         </button>
         <button
-          onClick={handleArchive}
-          disabled={archiving || markingDone}
-          title="Archiver – pas de potentiel (deal → perdu)"
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-orange-200 text-orange-700 bg-orange-50 hover:bg-orange-100 hover:border-orange-300 transition-colors cursor-pointer disabled:opacity-50"
+          onClick={handleDelete}
+          disabled={deleting || markingDone}
+          title="Supprimer cette tâche"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 hover:border-red-300 transition-colors cursor-pointer disabled:opacity-50"
         >
-          {archiving ? (
+          {deleting ? (
             <RefreshCw className="w-3.5 h-3.5 animate-spin" />
           ) : (
-            <Archive className="w-3.5 h-3.5" />
+            <Trash2 className="w-3.5 h-3.5" />
           )}
-          Archiver
         </button>
       </div>
     </div>
