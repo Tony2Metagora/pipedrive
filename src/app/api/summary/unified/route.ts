@@ -89,7 +89,7 @@ export async function POST(request: Request) {
       });
     }
 
-    // Fetch full details and filter: only keep emails where contact is directly in From or To (not just CC)
+    // Fetch full details for all messages
     const allDetails = await Promise.all(
       messages.map(async (msg: GmailMessage) => {
         const detailRes = await fetch(
@@ -103,24 +103,25 @@ export async function POST(request: Request) {
           headers.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value || "";
         const from = getHeader("From");
         const to = getHeader("To");
-        // Only keep if contact email is in From or To (not just CC/BCC)
-        const inFrom = from.toLowerCase().includes(emailLower);
-        const inTo = to.toLowerCase().includes(emailLower);
-        if (!inFrom && !inTo) return null;
         const textBody = extractTextBody(detail.payload);
         const truncatedBody = textBody.length > 1500 ? textBody.slice(0, 1500) + "..." : textBody;
+        const inFrom = from.toLowerCase().includes(emailLower);
+        const inTo = to.toLowerCase().includes(emailLower);
         return {
           from,
           to,
           subject: getHeader("Subject"),
           date: getHeader("Date"),
           body: truncatedBody || detail.snippet,
+          direct: inFrom || inTo,
         };
       })
     );
 
-    // Take only the 2 most recent direct emails with this contact
-    const validEmails = allDetails.filter(Boolean).slice(0, 2);
+    const allValid = allDetails.filter(Boolean) as (NonNullable<typeof allDetails[number]>)[];
+    // Prefer emails where contact is directly in From/To; fall back to all emails if none match
+    const directEmails = allValid.filter((e) => e.direct);
+    const validEmails = (directEmails.length > 0 ? directEmails : allValid).slice(0, 2);
 
     if (validEmails.length === 0) {
       return NextResponse.json({
