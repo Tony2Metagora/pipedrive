@@ -201,6 +201,11 @@ function DashboardContent() {
     setTimeout(syncBackground, 5000);
   }, [syncBackground]);
 
+  // Optimistic deal field update: update deals state directly
+  const handleDealFieldUpdated = useCallback((dealId: number, fields: Partial<Deal>) => {
+    setDeals((prev) => prev.map((d) => d.id === dealId ? { ...d, ...fields } : d));
+  }, []);
+
   const openArchiveModal = (activityId: number | null, dealId: number | null, contactName: string) => {
     setArchiveTarget({ activityId, dealId, contactName });
   };
@@ -512,6 +517,7 @@ function DashboardContent() {
                   onActivityUpdated={handleActivityUpdated}
                   selected={selectedDeals.has(deal.id)}
                   onToggleSelect={toggleDealSelection}
+                  onDealUpdated={handleDealFieldUpdated}
                   initialExpanded={highlightDealId === deal.id}
                 />
               ))}
@@ -716,6 +722,7 @@ function DashboardContent() {
                   onActivityUpdated={handleActivityUpdated}
                   selected={selectedDeals.has(deal.id)}
                   onToggleSelect={toggleDealSelection}
+                  onDealUpdated={handleDealFieldUpdated}
                   initialExpanded={highlightDealId === deal.id}
                 />
               ))}
@@ -1160,7 +1167,7 @@ function DealRow({
   onActivityUpdated: (id: number, data: Partial<Activity>) => void;
   selected: boolean;
   onToggleSelect: (dealId: number) => void;
-  onDealUpdated?: () => void;
+  onDealUpdated?: (dealId: number, fields: Partial<Deal>) => void;
   initialExpanded?: boolean;
 }) {
   const [expanded, setExpanded] = useState(initialExpanded || false);
@@ -1196,15 +1203,14 @@ function DealRow({
     const trimmed = titleInput.trim();
     if (!trimmed || trimmed === deal.title) { setEditingTitle(false); setTitleInput(deal.title); return; }
     setSavingTitle(true);
-    // Optimistic: update deal title locally
-    deal.title = trimmed;
+    // Optimistic: update deal title in parent state
+    onDealUpdated?.(deal.id, { title: trimmed });
     try {
       await fetch(`/api/deals/${deal.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: trimmed }),
       });
-      onDealUpdated?.();
     } catch (err) {
       console.error("Erreur modification titre:", err);
     } finally {
@@ -1255,10 +1261,8 @@ function DealRow({
         body: JSON.stringify(payload),
       });
       if (res.ok) {
-        deal.pipeline_id = selectedPipelineId;
-        deal.stage_id = selectedStageId;
+        onDealUpdated?.(deal.id, { pipeline_id: selectedPipelineId, stage_id: selectedStageId });
         setEditingPipeline(false);
-        onDealUpdated?.();
       }
     } catch (err) {
       console.error("Erreur mise à jour pipeline/stage:", err);
@@ -1280,10 +1284,8 @@ function DealRow({
       if (!res.ok) {
         console.error("Erreur API mise à jour valeur:", json);
       } else {
-        deal.value = newValue;
-        deal.currency = deal.currency || "EUR";
+        onDealUpdated?.(deal.id, { value: newValue, currency: deal.currency || "EUR" });
         setEditingValue(false);
-        onDealUpdated?.();
       }
     } catch (err) {
       console.error("Erreur mise à jour valeur:", err);
@@ -1739,9 +1741,7 @@ function DealRow({
                         setParticipants((prev) =>
                           prev.map((pp) => ({ ...pp, primary: pp.id === p.id }))
                         );
-                        deal.person_id = p.id;
-                        deal.person_name = p.name;
-                        onDealUpdated?.();
+                        onDealUpdated?.(deal.id, { person_id: p.id, person_name: p.name });
                       } catch (err) {
                         console.error("Erreur changement contact principal:", err);
                       }
@@ -1800,9 +1800,7 @@ function DealRow({
                                 setParticipants((prev) =>
                                   prev.map((pp) => ({ ...pp, primary: pp.id === p.id }))
                                 );
-                                deal.person_id = p.id;
-                                deal.person_name = p.name;
-                                onDealUpdated?.();
+                                onDealUpdated?.(deal.id, { person_id: p.id, person_name: p.name });
                               } catch (err) {
                                 console.error("Erreur changement contact principal:", err);
                               }
