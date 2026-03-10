@@ -1449,6 +1449,12 @@ function DealRow({
       </div>
 
       {/* Inline activities for this deal */}
+      {dealActivities && dealActivities.length === 0 && (
+        <div className="border-t border-gray-100 bg-red-50/60 px-4 py-2.5 flex items-center gap-2 text-xs text-red-500 font-medium">
+          <AlertTriangle className="w-3.5 h-3.5" />
+          Aucune tâche à faire
+        </div>
+      )}
       {dealActivities && dealActivities.length > 0 && (
         <div className="border-t border-gray-100 bg-amber-50/40 px-4 py-2 space-y-1">
           {dealActivities
@@ -1712,6 +1718,7 @@ function DealRow({
             personName={deal.person_name}
             orgName={deal.org_name}
             onActivityChanged={onTaskCreated}
+            onMarkDone={onMarkDone}
             refreshKey={contextRefreshKey}
           />
         </div>

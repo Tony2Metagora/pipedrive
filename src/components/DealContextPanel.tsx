@@ -126,10 +126,11 @@ interface Props {
   orgName?: string;
   deals?: { id: number; title: string; pipeline_id: number; stage_id: number; value: number; status: string; currency: string }[];
   onActivityChanged?: () => void;
+  onMarkDone?: (activityId: number) => void;
   refreshKey?: number;
 }
 
-export default function DealContextPanel({ dealId, personId, orgId, personName, orgName, deals, onActivityChanged, refreshKey }: Props) {
+export default function DealContextPanel({ dealId, personId, orgId, personName, orgName, deals, onActivityChanged, onMarkDone, refreshKey }: Props) {
   const [ctx, setCtx] = useState<DealContext | null>(null);
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<string | null>(null);
@@ -225,26 +226,33 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
   };
 
   const markDone = async (activityId: number) => {
-    try {
-      await fetch(`/api/activities/${activityId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ done: 1 }),
-      });
-      setCtx((prev) => {
-        if (!prev) return prev;
-        const task = prev.activities.pending.find((t) => t.id === activityId);
-        return {
-          ...prev,
-          activities: {
-            pending: prev.activities.pending.filter((t) => t.id !== activityId),
-            done: task ? [{ ...task, done: true }, ...prev.activities.done] : prev.activities.done,
-          },
-        };
-      });
-      onActivityChanged?.();
-    } catch (err) {
-      console.error("Erreur marquer done:", err);
+    // Optimistic local update: move from pending to done
+    setCtx((prev) => {
+      if (!prev) return prev;
+      const task = prev.activities.pending.find((t) => t.id === activityId);
+      return {
+        ...prev,
+        activities: {
+          pending: prev.activities.pending.filter((t) => t.id !== activityId),
+          done: task ? [{ ...task, done: true }, ...prev.activities.done] : prev.activities.done,
+        },
+      };
+    });
+    // Notify parent to remove activity from dashboard state (updates pink header bar)
+    if (onMarkDone) {
+      onMarkDone(activityId);
+    } else {
+      // Fallback: call API directly if no parent handler
+      try {
+        await fetch(`/api/activities/${activityId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ done: 1 }),
+        });
+        onActivityChanged?.();
+      } catch (err) {
+        console.error("Erreur marquer done:", err);
+      }
     }
   };
 
@@ -477,7 +485,7 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
                   </button>
                   <button
                     onClick={() => markDone(a.id)}
-                    className="p-0.5 text-green-500 hover:text-green-700 cursor-pointer"
+                    className="p-0.5 text-green-500 hover:text-green-700 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                     title="Marquer comme effectué"
                   >
                     <CheckCheck className="w-3.5 h-3.5" />
