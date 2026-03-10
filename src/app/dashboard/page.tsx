@@ -688,7 +688,7 @@ function DashboardContent() {
           onClose={() => setShowNewDeal(false)}
           onCreated={(deal) => {
             setDeals((prev) => [...prev, deal]);
-            setTimeout(syncBackground, 2000);
+            setTimeout(syncBackground, 5000);
           }}
         />
       )}
@@ -702,14 +702,15 @@ function DashboardContent() {
           onClose={() => setArchiveTarget(null)}
           onArchived={() => {
             setArchiveTarget(null);
-            // Optimistic: remove the deal from local state if archived
+            // Optimistic: remove the deal and its activities from local state
             if (archiveTarget.dealId) {
               setDeals((prev) => prev.filter((d) => d.id !== archiveTarget.dealId));
+              setActivities((prev) => prev.filter((a) => a.deal_id !== archiveTarget.dealId));
             }
             if (archiveTarget.activityId) {
               setActivities((prev) => prev.filter((a) => a.id !== archiveTarget.activityId));
             }
-            setTimeout(syncBackground, 2000);
+            setTimeout(syncBackground, 5000);
           }}
         />
       )}
@@ -1136,6 +1137,30 @@ function DealRow({
   const [editActivityDate, setEditActivityDate] = useState("");
   const [savingActivity, setSavingActivity] = useState(false);
   const [contextRefreshKey, setContextRefreshKey] = useState(0);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleInput, setTitleInput] = useState(deal.title);
+  const [savingTitle, setSavingTitle] = useState(false);
+
+  const saveTitle = async () => {
+    const trimmed = titleInput.trim();
+    if (!trimmed || trimmed === deal.title) { setEditingTitle(false); setTitleInput(deal.title); return; }
+    setSavingTitle(true);
+    // Optimistic: update deal title locally
+    deal.title = trimmed;
+    try {
+      await fetch(`/api/deals/${deal.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: trimmed }),
+      });
+      onDealUpdated?.();
+    } catch (err) {
+      console.error("Erreur modification titre:", err);
+    } finally {
+      setSavingTitle(false);
+      setEditingTitle(false);
+    }
+  };
 
   const startEditActivity = (a: Activity) => {
     setEditingActivityId(a.id);
@@ -1313,7 +1338,35 @@ function DealRow({
         </div>
 
         <div className="flex-1 min-w-0">
-          <p className="font-medium text-gray-900 truncate">{deal.title}</p>
+          {editingTitle ? (
+            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+              <input
+                type="text"
+                value={titleInput}
+                onChange={(e) => setTitleInput(e.target.value)}
+                className="flex-1 px-2 py-0.5 text-sm font-medium border border-indigo-300 rounded-lg focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveTitle();
+                  if (e.key === "Escape") { setEditingTitle(false); setTitleInput(deal.title); }
+                }}
+              />
+              <button onClick={saveTitle} disabled={savingTitle} className="p-0.5 text-green-600 hover:text-green-700 disabled:opacity-40 cursor-pointer">
+                {savingTitle ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+              </button>
+              <button onClick={() => { setEditingTitle(false); setTitleInput(deal.title); }} className="p-0.5 text-gray-400 hover:text-gray-600 cursor-pointer">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <p
+              className="font-medium text-gray-900 truncate cursor-pointer hover:text-indigo-700"
+              onClick={(e) => { e.stopPropagation(); setEditingTitle(true); setTitleInput(deal.title); }}
+              title="Cliquer pour modifier le titre"
+            >
+              {deal.title}
+            </p>
+          )}
           <div className="flex items-center gap-3 mt-1 text-xs text-gray-500" onClick={(e) => e.stopPropagation()}>
             {editingPipeline ? (
               <div className="flex items-center gap-1.5">
