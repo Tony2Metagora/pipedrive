@@ -1134,6 +1134,7 @@ function DealRow({
   const [editActivitySubject, setEditActivitySubject] = useState("");
   const [editActivityDate, setEditActivityDate] = useState("");
   const [savingActivity, setSavingActivity] = useState(false);
+  const [contextRefreshKey, setContextRefreshKey] = useState(0);
 
   const startEditActivity = (a: Activity) => {
     setEditingActivityId(a.id);
@@ -1451,7 +1452,7 @@ function DealRow({
       {dealActivities && dealActivities.length > 0 && (
         <div className="border-t border-gray-100 bg-amber-50/40 px-4 py-2 space-y-1">
           {dealActivities
-            .sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())
+            .sort((a, b) => new Date(b.due_date).getTime() - new Date(a.due_date).getTime())
             .map((a) => {
               const detectedType = detectActivityType(a.subject);
               const IconComp = TYPE_ICONS[detectedType] || CheckSquare;
@@ -1510,7 +1511,7 @@ function DealRow({
                       </button>
                       {onMarkDone && (
                         <button
-                          onClick={(e) => { e.stopPropagation(); onMarkDone(a.id); }}
+                          onClick={(e) => { e.stopPropagation(); onMarkDone(a.id); setTimeout(() => setContextRefreshKey((k) => k + 1), 1500); }}
                           className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded border border-green-200 text-green-700 bg-green-50 hover:bg-green-100 cursor-pointer"
                         >
                           <Check className="w-3 h-3" />
@@ -1711,6 +1712,7 @@ function DealRow({
             personName={deal.person_name}
             orgName={deal.org_name}
             onActivityChanged={onTaskCreated}
+            refreshKey={contextRefreshKey}
           />
         </div>
       )}

@@ -126,9 +126,10 @@ interface Props {
   orgName?: string;
   deals?: { id: number; title: string; pipeline_id: number; stage_id: number; value: number; status: string; currency: string }[];
   onActivityChanged?: () => void;
+  refreshKey?: number;
 }
 
-export default function DealContextPanel({ dealId, personId, orgId, personName, orgName, deals, onActivityChanged }: Props) {
+export default function DealContextPanel({ dealId, personId, orgId, personName, orgName, deals, onActivityChanged, refreshKey }: Props) {
   const [ctx, setCtx] = useState<DealContext | null>(null);
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<string | null>(null);
@@ -153,7 +154,7 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
       })
       .catch((err) => console.error("Erreur chargement contexte deal:", err))
       .finally(() => setLoading(false));
-  }, [dealId]);
+  }, [dealId, refreshKey]);
 
   // Fetch person email for Gmail integration
   useEffect(() => {
@@ -415,7 +416,7 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
             {ctx.activities.pending.length === 0 && (
               <p className="text-[10px] text-gray-400">Aucune tâche en attente</p>
             )}
-            {ctx.activities.pending.map((a) => {
+            {[...ctx.activities.pending].sort((a, b) => b.due_date.localeCompare(a.due_date)).map((a) => {
               const TypeIcon = TYPE_ICONS[a.type] || CheckCircle;
 
               if (editingTaskId === a.id) {
@@ -476,7 +477,7 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
                   </button>
                   <button
                     onClick={() => markDone(a.id)}
-                    className="p-0.5 text-green-500 hover:text-green-700 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                    className="p-0.5 text-green-500 hover:text-green-700 cursor-pointer"
                     title="Marquer comme effectué"
                   >
                     <CheckCheck className="w-3.5 h-3.5" />
@@ -494,14 +495,14 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
           </div>
         </div>
 
-        {/* Historique — 3 derniers */}
+        {/* Historique */}
         <div className="bg-white rounded-lg border border-gray-200 p-3">
           <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
             <Clock className="w-3.5 h-3.5" />
             Historique ({ctx.activities.done.length})
           </h4>
-          <div className="space-y-1 max-h-32 overflow-y-auto">
-            {ctx.activities.done.slice(0, 3).map((a) => {
+          <div className="space-y-1 max-h-48 overflow-y-auto">
+            {[...ctx.activities.done].sort((a, b) => b.due_date.localeCompare(a.due_date)).map((a) => {
               const TypeIcon = TYPE_ICONS[a.type] || CheckCheck;
               return (
                 <div key={a.id} className="flex items-center gap-1.5 text-[10px] p-1.5 rounded bg-gray-50 border border-gray-100 text-gray-500">

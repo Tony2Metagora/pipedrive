@@ -127,15 +127,19 @@ export default function DealPage() {
   };
 
   const markActivityDone = async (id: number) => {
+    // Optimistic: move task from pending to done immediately
+    setActivities((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, done: true } : a))
+    );
     try {
       await fetch(`/api/activities/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ done: 1 }),
       });
-      fetchDeal();
     } catch (err) {
       console.error("Erreur marquage done:", err);
+      fetchDeal(); // revert on error
     }
   };
 
@@ -404,9 +408,10 @@ export default function DealPage() {
                 <p className="text-sm text-gray-400">Aucune activité</p>
               ) : (
                 <>
-                  {/* Non faites */}
+                  {/* Non faites — plus récentes en premier */}
                   {activities
                     .filter((a) => !a.done)
+                    .sort((a, b) => b.due_date.localeCompare(a.due_date))
                     .map((a) => (
                       <div
                         key={a.id}
@@ -434,6 +439,7 @@ export default function DealPage() {
                       <p className="text-xs text-gray-400 mb-2">Terminées</p>
                       {activities
                         .filter((a) => a.done)
+                        .sort((a, b) => b.due_date.localeCompare(a.due_date))
                         .map((a) => (
                           <div
                             key={a.id}
