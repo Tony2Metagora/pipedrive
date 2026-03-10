@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState, useCallback, useMemo } from "react";
+import { Suspense, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -106,12 +106,17 @@ function DashboardContent() {
   const [viewMode, setViewMode] = useState<"list" | "kanban">("list");
   const [showNewDeal, setShowNewDeal] = useState(false);
 
+  // Track IDs removed optimistically so background sync never brings them back
+  const hiddenDealIds = useRef(new Set<number>());
+  const hiddenActivityIds = useRef(new Set<number>());
+
   const fetchActivities = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
       const res = await fetch("/api/activities");
       const json = await res.json();
-      setActivities(json.data || []);
+      const data: Activity[] = json.data || [];
+      setActivities(data.filter((a) => !hiddenActivityIds.current.has(a.id)));
     } catch (err) {
       console.error("Erreur chargement activités:", err);
     } finally {
@@ -124,7 +129,12 @@ function DashboardContent() {
     try {
       const res = await fetch("/api/deals?status=open");
       const json = await res.json();
-      setDeals(json.data || []);
+      const data: Deal[] = json.data || [];
+      // If a hidden deal no longer appears in API results, it was persisted — clear it
+      for (const id of hiddenDealIds.current) {
+        if (!data.some((d) => d.id === id)) hiddenDealIds.current.delete(id);
+      }
+      setDeals(data.filter((d) => !hiddenDealIds.current.has(d.id)));
     } catch (err) {
       console.error("Erreur chargement deals:", err);
     } finally {
@@ -145,6 +155,7 @@ function DashboardContent() {
 
   // Optimistic markDone: remove activity from list immediately, delayed sync
   const markDone = async (id: number) => {
+    hiddenActivityIds.current.add(id);
     setActivities((prev) => prev.filter((a) => a.id !== id));
     try {
       const res = await fetch(`/api/activities/${id}`, {
@@ -176,6 +187,7 @@ function DashboardContent() {
 
   // Marquer une affaire comme gagnée
   const markWon = useCallback(async (dealId: number) => {
+    hiddenDealIds.current.add(dealId);
     setDeals((prev) => prev.filter((d) => d.id !== dealId));
     try {
       await fetch(`/api/deals/${dealId}`, {
@@ -742,6 +754,7 @@ function DashboardContent() {
             setArchiveTarget(null);
             // Optimistic: remove the deal and its activities from local state
             if (archiveTarget.dealId) {
+              hiddenDealIds.current.add(archiveTarget.dealId);
               setDeals((prev) => prev.filter((d) => d.id !== archiveTarget.dealId));
               setActivities((prev) => prev.filter((a) => a.deal_id !== archiveTarget.dealId));
             }
