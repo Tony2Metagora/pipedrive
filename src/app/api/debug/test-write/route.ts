@@ -6,14 +6,28 @@
 import { NextResponse } from "next/server";
 import { list, put } from "@vercel/blob";
 
-async function readDealsRaw(): Promise<{ deals: unknown[]; raw: string }> {
-  const listing = await list({ prefix: "deals.json" });
-  const blob = listing.blobs.find((b) => b.pathname === "deals.json");
-  if (!blob) return { deals: [], raw: "" };
-  const res = await fetch(blob.downloadUrl, { cache: "no-store" });
-  if (!res.ok) return { deals: [], raw: "" };
+// Find blob URL by scanning all blobs (no prefix filter issues)
+async function findBlobUrl(filename: string): Promise<string | null> {
+  let hasMore = true;
+  let cursor: string | undefined;
+  while (hasMore) {
+    const result = await list({ cursor });
+    for (const blob of result.blobs) {
+      if (blob.pathname === filename) return blob.downloadUrl;
+    }
+    hasMore = result.hasMore;
+    cursor = result.cursor;
+  }
+  return null;
+}
+
+async function readDealsRaw(urlOverride?: string): Promise<{ deals: unknown[]; raw: string; url: string }> {
+  const url = urlOverride || await findBlobUrl("deals.json");
+  if (!url) return { deals: [], raw: "no-url-found", url: "" };
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) return { deals: [], raw: `fetch-failed-${res.status}`, url };
   const text = await res.text();
-  return { deals: JSON.parse(text), raw: text.slice(0, 200) };
+  return { deals: JSON.parse(text), raw: text.slice(0, 200), url };
 }
 
 export async function GET() {
@@ -35,8 +49,8 @@ export async function GET() {
       cacheControlMaxAge: 0,
     });
 
-    // Step 3: Read back immediately
-    const after = await readDealsRaw();
+    // Step 3: Read back immediately using the URL returned by put() (bypasses CDN)
+    const after = await readDealsRaw(putResult.downloadUrl);
     const afterFirst = after.deals[0] as Record<string, unknown> | undefined;
 
     // Step 4: Clean up test marker

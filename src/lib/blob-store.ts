@@ -83,13 +83,32 @@ export function withLock<T>(filename: string, fn: () => Promise<T>): Promise<T> 
 
 // ─── Generic Blob helpers ────────────────────────────────
 
+// Cache blob URLs returned by put() so we can fetch them directly (bypassing CDN).
+const blobUrlCache = new Map<string, string>();
+
+async function resolveBlobUrl(filename: string): Promise<string | null> {
+  // Check in-memory cache first (populated by writeBlob)
+  const cached = blobUrlCache.get(filename);
+  if (cached) return cached;
+  // Fallback: scan all blobs to find the URL (only needed on cold start before any write)
+  let hasMore = true;
+  let cursor: string | undefined;
+  while (hasMore) {
+    const result = await list({ cursor });
+    for (const blob of result.blobs) {
+      blobUrlCache.set(blob.pathname, blob.downloadUrl);
+    }
+    hasMore = result.hasMore;
+    cursor = result.cursor;
+  }
+  return blobUrlCache.get(filename) ?? null;
+}
+
 async function readBlobStrict<T>(filename: string): Promise<T[]> {
-  // Use list() to get the blob URL, then fetch() with cache:"no-store" to bypass CDN cache.
-  // The SDK's get() passes through CDN which serves stale data even with cacheControlMaxAge:0.
-  const listing = await list({ prefix: filename });
-  const blob = listing.blobs.find((b) => b.pathname === filename);
-  if (!blob) return [];
-  const res = await fetch(blob.downloadUrl, { cache: "no-store" });
+  const url = await resolveBlobUrl(filename);
+  if (!url) return [];
+  // fetch with cache:"no-store" bypasses CDN — reads fresh data every time
+  const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) {
     throw new Error(`Blob read failed for ${filename}: status=${res.status}`);
   }
@@ -107,12 +126,14 @@ export async function readBlob<T>(filename: string): Promise<T[]> {
 }
 
 export async function writeBlob<T>(filename: string, data: T[]): Promise<void> {
-  await put(filename, JSON.stringify(data), {
+  const result = await put(filename, JSON.stringify(data), {
     access: "private",
     addRandomSuffix: false,
     allowOverwrite: true,
     cacheControlMaxAge: 0,
   });
+  // Cache the blob URL so subsequent reads bypass CDN
+  blobUrlCache.set(filename, result.downloadUrl);
 }
 
 async function mutateBlob<T>(filename: string, mutator: (data: T[]) => T[] | Promise<T[]>): Promise<T[]> {
@@ -132,10 +153,9 @@ async function mutateBlob<T>(filename: string, mutator: (data: T[]) => T[] | Pro
 
 async function readSingleBlob<T>(filename: string): Promise<T | null> {
   try {
-    const listing = await list({ prefix: filename });
-    const blob = listing.blobs.find((b) => b.pathname === filename);
-    if (!blob) return null;
-    const res = await fetch(blob.downloadUrl, { cache: "no-store" });
+    const url = await resolveBlobUrl(filename);
+    if (!url) return null;
+    const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) return null;
     const text = await res.text();
     return JSON.parse(text) as T;
