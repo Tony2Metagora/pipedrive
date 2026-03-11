@@ -84,26 +84,16 @@ export function withLock<T>(filename: string, fn: () => Promise<T>): Promise<T> 
 // ─── Generic Blob helpers ────────────────────────────────
 
 async function readBlobStrict<T>(filename: string): Promise<T[]> {
-  const result = await get(filename, { access: "private" });
-  if (result === null) return [];
-  if (result.statusCode !== 200 || !result.stream) {
-    throw new Error(`Blob read failed for ${filename}: status=${result.statusCode}`);
+  // Use list() to get the blob URL, then fetch() with cache:"no-store" to bypass CDN cache.
+  // The SDK's get() passes through CDN which serves stale data even with cacheControlMaxAge:0.
+  const listing = await list({ prefix: filename });
+  const blob = listing.blobs.find((b) => b.pathname === filename);
+  if (!blob) return [];
+  const res = await fetch(blob.downloadUrl, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`Blob read failed for ${filename}: status=${res.status}`);
   }
-  const chunks: Uint8Array[] = [];
-  const reader = result.stream.getReader();
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-  }
-  const text = new TextDecoder().decode(
-    chunks.reduce((acc, chunk) => {
-      const merged = new Uint8Array(acc.length + chunk.length);
-      merged.set(acc);
-      merged.set(chunk, acc.length);
-      return merged;
-    }, new Uint8Array())
-  );
+  const text = await res.text();
   return JSON.parse(text);
 }
 
@@ -142,24 +132,12 @@ async function mutateBlob<T>(filename: string, mutator: (data: T[]) => T[] | Pro
 
 async function readSingleBlob<T>(filename: string): Promise<T | null> {
   try {
-    const result = await get(filename, { access: "private" });
-    if (result === null) return null;
-    if (result.statusCode !== 200 || !result.stream) return null;
-    const chunks: Uint8Array[] = [];
-    const reader = result.stream.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-    }
-    const text = new TextDecoder().decode(
-      chunks.reduce((acc, chunk) => {
-        const merged = new Uint8Array(acc.length + chunk.length);
-        merged.set(acc);
-        merged.set(chunk, acc.length);
-        return merged;
-      }, new Uint8Array())
-    );
+    const listing = await list({ prefix: filename });
+    const blob = listing.blobs.find((b) => b.pathname === filename);
+    if (!blob) return null;
+    const res = await fetch(blob.downloadUrl, { cache: "no-store" });
+    if (!res.ok) return null;
+    const text = await res.text();
     return JSON.parse(text) as T;
   } catch {
     return null;

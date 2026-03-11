@@ -4,28 +4,15 @@
  * This is non-destructive: it writes a test field then removes it.
  */
 import { NextResponse } from "next/server";
-import { get, put } from "@vercel/blob";
+import { list, put } from "@vercel/blob";
 
 async function readDealsRaw(): Promise<{ deals: unknown[]; raw: string }> {
-  const result = await get("deals.json", { access: "private" });
-  if (!result || result.statusCode !== 200 || !result.stream) {
-    return { deals: [], raw: "" };
-  }
-  const chunks: Uint8Array[] = [];
-  const reader = result.stream.getReader();
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-  }
-  const text = new TextDecoder().decode(
-    chunks.reduce((acc, chunk) => {
-      const merged = new Uint8Array(acc.length + chunk.length);
-      merged.set(acc);
-      merged.set(chunk, acc.length);
-      return merged;
-    }, new Uint8Array())
-  );
+  const listing = await list({ prefix: "deals.json" });
+  const blob = listing.blobs.find((b) => b.pathname === "deals.json");
+  if (!blob) return { deals: [], raw: "" };
+  const res = await fetch(blob.downloadUrl, { cache: "no-store" });
+  if (!res.ok) return { deals: [], raw: "" };
+  const text = await res.text();
   return { deals: JSON.parse(text), raw: text.slice(0, 200) };
 }
 
