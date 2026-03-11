@@ -83,36 +83,27 @@ export function withLock<T>(filename: string, fn: () => Promise<T>): Promise<T> 
 
 // ─── Generic Blob helpers ────────────────────────────────
 
-// Cache blob URLs returned by put() so we can fetch them directly (bypassing CDN).
-const blobUrlCache = new Map<string, string>();
-
-async function resolveBlobUrl(filename: string): Promise<string | null> {
-  // Check in-memory cache first (populated by writeBlob)
-  const cached = blobUrlCache.get(filename);
-  if (cached) return cached;
-  // Fallback: scan all blobs to find the URL (only needed on cold start before any write)
-  let hasMore = true;
-  let cursor: string | undefined;
-  while (hasMore) {
-    const result = await list({ cursor });
-    for (const blob of result.blobs) {
-      blobUrlCache.set(blob.pathname, blob.downloadUrl);
-    }
-    hasMore = result.hasMore;
-    cursor = result.cursor;
-  }
-  return blobUrlCache.get(filename) ?? null;
-}
-
 async function readBlobStrict<T>(filename: string): Promise<T[]> {
-  const url = await resolveBlobUrl(filename);
-  if (!url) return [];
-  // fetch with cache:"no-store" bypasses CDN — reads fresh data every time
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) {
-    throw new Error(`Blob read failed for ${filename}: status=${res.status}`);
+  const result = await get(filename, { access: "private" });
+  if (result === null) return [];
+  if (result.statusCode !== 200 || !result.stream) {
+    throw new Error(`Blob read failed for ${filename}: status=${result.statusCode}`);
   }
-  const text = await res.text();
+  const chunks: Uint8Array[] = [];
+  const reader = result.stream.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  const text = new TextDecoder().decode(
+    chunks.reduce((acc, chunk) => {
+      const merged = new Uint8Array(acc.length + chunk.length);
+      merged.set(acc);
+      merged.set(chunk, acc.length);
+      return merged;
+    }, new Uint8Array())
+  );
   return JSON.parse(text);
 }
 
@@ -126,14 +117,12 @@ export async function readBlob<T>(filename: string): Promise<T[]> {
 }
 
 export async function writeBlob<T>(filename: string, data: T[]): Promise<void> {
-  const result = await put(filename, JSON.stringify(data), {
+  await put(filename, JSON.stringify(data), {
     access: "private",
     addRandomSuffix: false,
     allowOverwrite: true,
     cacheControlMaxAge: 0,
   });
-  // Cache the blob URL so subsequent reads bypass CDN
-  blobUrlCache.set(filename, result.downloadUrl);
 }
 
 async function mutateBlob<T>(filename: string, mutator: (data: T[]) => T[] | Promise<T[]>): Promise<T[]> {
@@ -153,11 +142,24 @@ async function mutateBlob<T>(filename: string, mutator: (data: T[]) => T[] | Pro
 
 async function readSingleBlob<T>(filename: string): Promise<T | null> {
   try {
-    const url = await resolveBlobUrl(filename);
-    if (!url) return null;
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) return null;
-    const text = await res.text();
+    const result = await get(filename, { access: "private" });
+    if (result === null) return null;
+    if (result.statusCode !== 200 || !result.stream) return null;
+    const chunks: Uint8Array[] = [];
+    const reader = result.stream.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+    const text = new TextDecoder().decode(
+      chunks.reduce((acc, chunk) => {
+        const merged = new Uint8Array(acc.length + chunk.length);
+        merged.set(acc);
+        merged.set(chunk, acc.length);
+        return merged;
+      }, new Uint8Array())
+    );
     return JSON.parse(text) as T;
   } catch {
     return null;
