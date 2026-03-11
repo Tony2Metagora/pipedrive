@@ -197,27 +197,9 @@ async function listBlobPathnames(prefix: string): Promise<string[]> {
 
 // ─── Deals (single deals.json with cacheControlMaxAge: 0) ─
 
-/** One-time reverse migration: if per-deal blobs exist, consolidate back to deals.json */
-let reverseMigrationDone = false;
+// Reverse migration disabled — already completed
 async function ensureDealsConsolidated(): Promise<void> {
-  if (reverseMigrationDone) return;
-  reverseMigrationDone = true;
-  try {
-    const pathnames = await listBlobPathnames("deals/d-");
-    if (pathnames.length === 0) return;
-    console.log(`[deals consolidation] Found ${pathnames.length} individual deal files, merging back to deals.json...`);
-    const deals = (await Promise.all(pathnames.map((p) => readSingleBlob<Deal>(p))))
-      .filter((d): d is Deal => d !== null);
-    if (deals.length > 0) {
-      await writeBlob("deals.json", deals);
-    }
-    // Clean up individual files + old index
-    await Promise.all(pathnames.map((p) => del(p)));
-    try { await del("deals-index.json"); } catch { /* may not exist */ }
-    console.log(`[deals consolidation] Done. ${deals.length} deals in deals.json.`);
-  } catch (err) {
-    console.warn("[deals consolidation] Error:", err);
-  }
+  // no-op: migration already ran, deals.json is the source of truth
 }
 
 export async function getDeals(): Promise<Deal[]> {
