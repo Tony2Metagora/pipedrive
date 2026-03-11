@@ -7,6 +7,7 @@
 import { NextResponse } from "next/server";
 import { readBlob, writeBlob } from "@/lib/blob-store";
 import type { Deal, Activity, Person, Organization, Note } from "@/lib/blob-store";
+// Now reads/writes from KV (new blob-store)
 
 interface ReconstructedDeal {
   id: number;

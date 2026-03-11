@@ -13,9 +13,9 @@ import {
   createPerson,
   updateDeal,
   addDealParticipant,
+  readBlob,
   type Person,
 } from "@/lib/blob-store";
-import { get } from "@vercel/blob";
 
 interface ProspectRow {
   id: string;
@@ -31,28 +31,7 @@ interface ProspectRow {
 }
 
 async function readProspects(): Promise<ProspectRow[]> {
-  try {
-    const result = await get("prospects.json", { access: "private" });
-    if (!result || result.statusCode !== 200 || !result.stream) return [];
-    const chunks: Uint8Array[] = [];
-    const reader = result.stream.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-    }
-    const text = new TextDecoder().decode(
-      chunks.reduce((acc, chunk) => {
-        const merged = new Uint8Array(acc.length + chunk.length);
-        merged.set(acc);
-        merged.set(chunk, acc.length);
-        return merged;
-      }, new Uint8Array())
-    );
-    return JSON.parse(text);
-  } catch {
-    return [];
-  }
+  return readBlob<ProspectRow>("prospects.json");
 }
 
 export async function POST(request: Request) {

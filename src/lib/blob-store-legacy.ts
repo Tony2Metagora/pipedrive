@@ -1,24 +1,16 @@
 /**
- * KV Store — couche de persistance JSON dans Upstash Redis (via Vercel KV).
+ * Blob Store — couche de persistance JSON dans Vercel Blob Storage.
  *
- * Drop-in replacement for blob-store.ts — same exports, same interface.
- * Redis has NO CDN cache: reads are always fresh.
- *
- * Données stockées (as Redis keys holding JSON arrays):
- * - deals      : Deal[]
- * - activities  : Activity[]
- * - notes       : Note[]
- * - persons     : Person[]
- * - orgs        : Organization[]
- * - prospects   : Prospect[] (kept in blob-store for now)
+ * Données stockées :
+ * - deals.json      : tableau de Deal
+ * - activities.json  : tableau d'Activity
+ * - notes.json       : tableau de Note
+ * - persons.json     : tableau de Person (contacts liés aux deals)
+ * - orgs.json        : tableau d'Organization
+ * - prospects.json   : tableau de Prospect (déjà existant)
  */
 
-import { Redis } from "@upstash/redis";
-
-const redis = new Redis({
-  url: process.env.KV_REST_API_URL!,
-  token: process.env.KV_REST_API_TOKEN!,
-});
+import { put, get, list, del } from "@vercel/blob";
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -78,55 +70,141 @@ export interface Note {
   org_id: number | null;
 }
 
-// ─── Per-key mutex to prevent read-modify-write race conditions ────
+// ─── Per-file mutex to prevent read-modify-write race conditions ────
 
 const locks = new Map<string, Promise<void>>();
 
-export function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
-  const prev = locks.get(key) ?? Promise.resolve();
-  const next = prev.then(fn, fn);
-  locks.set(key, next.then(() => {}, () => {}));
+export function withLock<T>(filename: string, fn: () => Promise<T>): Promise<T> {
+  const prev = locks.get(filename) ?? Promise.resolve();
+  const next = prev.then(fn, fn); // run fn after previous completes (even if it failed)
+  locks.set(filename, next.then(() => {}, () => {})); // swallow result, keep chain
   return next;
 }
 
-// ─── Generic KV helpers ────────────────────────────────
+// ─── Generic Blob helpers ────────────────────────────────
 
-async function readKV<T>(key: string): Promise<T[]> {
-  const data = await redis.get<T[]>(key);
-  return data ?? [];
+async function readBlobStrict<T>(filename: string): Promise<T[]> {
+  const result = await get(filename, { access: "private" });
+  if (result === null) return [];
+  if (result.statusCode !== 200 || !result.stream) {
+    throw new Error(`Blob read failed for ${filename}: status=${result.statusCode}`);
+  }
+  const chunks: Uint8Array[] = [];
+  const reader = result.stream.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  const text = new TextDecoder().decode(
+    chunks.reduce((acc, chunk) => {
+      const merged = new Uint8Array(acc.length + chunk.length);
+      merged.set(acc);
+      merged.set(chunk, acc.length);
+      return merged;
+    }, new Uint8Array())
+  );
+  return JSON.parse(text);
 }
 
-export async function readBlob<T>(key: string): Promise<T[]> {
-  // Named readBlob for backwards compatibility with API routes that import it
-  return readKV<T>(key.replace(".json", ""));
+export async function readBlob<T>(filename: string): Promise<T[]> {
+  try {
+    return await readBlobStrict<T>(filename);
+  } catch (err) {
+    console.warn(`[readBlob] Error reading ${filename}, returning []:`, err);
+    return [];
+  }
 }
 
-async function writeKV<T>(key: string, data: T[]): Promise<void> {
-  await redis.set(key, data);
+export async function writeBlob<T>(filename: string, data: T[]): Promise<void> {
+  await put(filename, JSON.stringify(data), {
+    access: "private",
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    cacheControlMaxAge: 0,
+  });
 }
 
-export async function writeBlob<T>(key: string, data: T[]): Promise<void> {
-  // Named writeBlob for backwards compatibility
-  await writeKV(key.replace(".json", ""), data);
-}
-
-async function mutateKV<T>(key: string, mutator: (data: T[]) => T[] | Promise<T[]>): Promise<T[]> {
-  return withLock(key, async () => {
-    const data = await readKV<T>(key);
+async function mutateBlob<T>(filename: string, mutator: (data: T[]) => T[] | Promise<T[]>): Promise<T[]> {
+  return withLock(filename, async () => {
+    const data = await readBlobStrict<T>(filename);
     const updated = await mutator(data);
     if (updated.length === 0 && data.length > 3) {
-      console.error(`[mutateKV] BLOCKED: ${key} would wipe ${data.length} items → refusing write`);
+      console.error(`[mutateBlob] BLOCKED: ${filename} would wipe ${data.length} items → refusing write`);
       return data;
     }
-    await writeKV(key, updated);
+    await writeBlob(filename, updated);
     return updated;
   });
 }
 
-// ─── Deals ──────────────────────────────────────────────
+// ─── Single-object blob helpers (for per-deal storage) ───
+
+async function readSingleBlob<T>(filename: string): Promise<T | null> {
+  try {
+    const result = await get(filename, { access: "private" });
+    if (result === null) return null;
+    if (result.statusCode !== 200 || !result.stream) return null;
+    const chunks: Uint8Array[] = [];
+    const reader = result.stream.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+    const text = new TextDecoder().decode(
+      chunks.reduce((acc, chunk) => {
+        const merged = new Uint8Array(acc.length + chunk.length);
+        merged.set(acc);
+        merged.set(chunk, acc.length);
+        return merged;
+      }, new Uint8Array())
+    );
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
+}
+
+async function writeSingleBlob<T>(filename: string, data: T): Promise<void> {
+  await put(filename, JSON.stringify(data), {
+    access: "private",
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    cacheControlMaxAge: 0,
+  });
+}
+
+async function deleteSingleBlob(filename: string): Promise<void> {
+  await del(filename);
+}
+
+/** List all blob pathnames matching a prefix */
+async function listBlobPathnames(prefix: string): Promise<string[]> {
+  const pathnames: string[] = [];
+  let hasMore = true;
+  let cursor: string | undefined;
+  while (hasMore) {
+    const result = await list({ prefix, cursor });
+    for (const blob of result.blobs) {
+      pathnames.push(blob.pathname);
+    }
+    hasMore = result.hasMore;
+    cursor = result.cursor;
+  }
+  return pathnames;
+}
+
+// ─── Deals (single deals.json with cacheControlMaxAge: 0) ─
+
+// Reverse migration disabled — already completed
+async function ensureDealsConsolidated(): Promise<void> {
+  // no-op: migration already ran, deals.json is the source of truth
+}
 
 export async function getDeals(): Promise<Deal[]> {
-  return readKV<Deal>("deals");
+  await ensureDealsConsolidated();
+  return readBlob<Deal>("deals.json");
 }
 
 export async function getDeal(id: number): Promise<Deal | null> {
@@ -135,8 +213,9 @@ export async function getDeal(id: number): Promise<Deal | null> {
 }
 
 export async function createDeal(data: Omit<Deal, "id">): Promise<Deal> {
+  await ensureDealsConsolidated();
   let created!: Deal;
-  await mutateKV<Deal>("deals", (deals) => {
+  await mutateBlob<Deal>("deals.json", (deals) => {
     const maxId = deals.reduce((max, d) => Math.max(max, d.id), 0);
     created = { ...data, id: maxId + 1 } as Deal;
     return [...deals, created];
@@ -145,8 +224,9 @@ export async function createDeal(data: Omit<Deal, "id">): Promise<Deal> {
 }
 
 export async function updateDeal(id: number, data: Partial<Deal>): Promise<Deal | null> {
+  await ensureDealsConsolidated();
   let result: Deal | null = null;
-  await mutateKV<Deal>("deals", (deals) => {
+  await mutateBlob<Deal>("deals.json", (deals) => {
     const idx = deals.findIndex((d) => d.id === id);
     if (idx === -1) return deals;
     deals[idx] = { ...deals[idx], ...data, id };
@@ -157,13 +237,14 @@ export async function updateDeal(id: number, data: Partial<Deal>): Promise<Deal 
 }
 
 export async function deleteDeal(id: number): Promise<void> {
-  await mutateKV<Deal>("deals", (deals) => deals.filter((d) => d.id !== id));
+  await ensureDealsConsolidated();
+  await mutateBlob<Deal>("deals.json", (deals) => deals.filter((d) => d.id !== id));
 }
 
 // ─── Persons ─────────────────────────────────────────────
 
 export async function getPersons(): Promise<Person[]> {
-  return readKV<Person>("persons");
+  return readBlob<Person>("persons.json");
 }
 
 export async function getPerson(id: number): Promise<Person | null> {
@@ -173,7 +254,7 @@ export async function getPerson(id: number): Promise<Person | null> {
 
 export async function createPerson(data: Omit<Person, "id">): Promise<Person> {
   let created!: Person;
-  await mutateKV<Person>("persons", (persons) => {
+  await mutateBlob<Person>("persons.json", (persons) => {
     const maxId = persons.reduce((max, p) => Math.max(max, p.id), 0);
     created = { ...data, id: maxId + 1 } as Person;
     return [...persons, created];
@@ -183,9 +264,10 @@ export async function createPerson(data: Omit<Person, "id">): Promise<Person> {
 
 export async function updatePerson(id: number, data: Partial<Person>): Promise<Person | null> {
   let result: Person | null = null;
-  await mutateKV<Person>("persons", (persons) => {
+  await mutateBlob<Person>("persons.json", (persons) => {
     const idx = persons.findIndex((p) => p.id === id);
     if (idx === -1) return persons;
+    // Handle email/phone as special fields (string → array)
     const update = { ...data };
     if (typeof update.email === "string") {
       (update as Person).email = [{ value: update.email as unknown as string, primary: true }];
@@ -203,7 +285,7 @@ export async function updatePerson(id: number, data: Partial<Person>): Promise<P
 // ─── Organizations ───────────────────────────────────────
 
 export async function getOrganizations(): Promise<Organization[]> {
-  return readKV<Organization>("orgs");
+  return readBlob<Organization>("orgs.json");
 }
 
 export async function getOrganization(id: number): Promise<Organization | null> {
@@ -213,7 +295,7 @@ export async function getOrganization(id: number): Promise<Organization | null> 
 
 export async function createOrganization(name: string): Promise<Organization> {
   let created!: Organization;
-  await mutateKV<Organization>("orgs", (orgs) => {
+  await mutateBlob<Organization>("orgs.json", (orgs) => {
     const maxId = orgs.reduce((max, o) => Math.max(max, o.id), 0);
     created = { id: maxId + 1, name };
     return [...orgs, created];
@@ -224,7 +306,7 @@ export async function createOrganization(name: string): Promise<Organization> {
 // ─── Activities ──────────────────────────────────────────
 
 export async function getActivities(): Promise<Activity[]> {
-  return readKV<Activity>("activities");
+  return readBlob<Activity>("activities.json");
 }
 
 export async function getActivity(id: number): Promise<Activity | null> {
@@ -234,7 +316,7 @@ export async function getActivity(id: number): Promise<Activity | null> {
 
 export async function createActivity(data: Omit<Activity, "id">): Promise<Activity> {
   let created!: Activity;
-  await mutateKV<Activity>("activities", (activities) => {
+  await mutateBlob<Activity>("activities.json", (activities) => {
     const maxId = activities.reduce((max, a) => Math.max(max, a.id), 0);
     created = { ...data, id: maxId + 1 } as Activity;
     return [...activities, created];
@@ -244,7 +326,7 @@ export async function createActivity(data: Omit<Activity, "id">): Promise<Activi
 
 export async function updateActivity(id: number, data: Partial<Activity>): Promise<Activity | null> {
   let result: Activity | null = null;
-  await mutateKV<Activity>("activities", (activities) => {
+  await mutateBlob<Activity>("activities.json", (activities) => {
     const idx = activities.findIndex((a) => a.id === id);
     if (idx === -1) return activities;
     activities[idx] = { ...activities[idx], ...data, id };
@@ -255,7 +337,7 @@ export async function updateActivity(id: number, data: Partial<Activity>): Promi
 }
 
 export async function deleteActivity(id: number): Promise<void> {
-  await mutateKV<Activity>("activities", (activities) => activities.filter((a) => a.id !== id));
+  await mutateBlob<Activity>("activities.json", (activities) => activities.filter((a) => a.id !== id));
 }
 
 export async function getActivitiesForDeal(dealId: number): Promise<Activity[]> {
@@ -271,12 +353,12 @@ export async function getActivitiesForPerson(personId: number): Promise<Activity
 // ─── Notes ───────────────────────────────────────────────
 
 export async function getNotes(): Promise<Note[]> {
-  return readKV<Note>("notes");
+  return readBlob<Note>("notes.json");
 }
 
 export async function createNote(data: Omit<Note, "id">): Promise<Note> {
   let created!: Note;
-  await mutateKV<Note>("notes", (notes) => {
+  await mutateBlob<Note>("notes.json", (notes) => {
     const maxId = notes.reduce((max, n) => Math.max(max, n.id), 0);
     created = { ...data, id: maxId + 1 } as Note;
     return [...notes, created];
@@ -307,7 +389,8 @@ export async function getDealParticipants(dealId: number): Promise<Person[]> {
 }
 
 export async function addDealParticipant(dealId: number, personId: number): Promise<void> {
-  await mutateKV<Deal>("deals", (deals) => {
+  await ensureDealsConsolidated();
+  await mutateBlob<Deal>("deals.json", (deals) => {
     const idx = deals.findIndex((d) => d.id === dealId);
     if (idx === -1) throw new Error("Deal not found");
     const deal = deals[idx];
@@ -321,21 +404,21 @@ export async function addDealParticipant(dealId: number, personId: number): Prom
 // ─── Bulk write (for migration) ──────────────────────────
 
 export async function bulkWriteDeals(deals: Deal[]): Promise<void> {
-  await writeKV("deals", deals);
+  await writeBlob("deals.json", deals);
 }
 
 export async function bulkWritePersons(persons: Person[]): Promise<void> {
-  await writeKV("persons", persons);
+  await writeBlob("persons.json", persons);
 }
 
 export async function bulkWriteOrganizations(orgs: Organization[]): Promise<void> {
-  await writeKV("orgs", orgs);
+  await writeBlob("orgs.json", orgs);
 }
 
 export async function bulkWriteActivities(activities: Activity[]): Promise<void> {
-  await writeKV("activities", activities);
+  await writeBlob("activities.json", activities);
 }
 
 export async function bulkWriteNotes(notes: Note[]): Promise<void> {
-  await writeKV("notes", notes);
+  await writeBlob("notes.json", notes);
 }

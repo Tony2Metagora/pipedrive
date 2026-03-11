@@ -4,6 +4,7 @@
  */
 import { NextResponse } from "next/server";
 import { readBlob, writeBlob } from "@/lib/blob-store";
+// Backup now reads from KV (the new blob-store) and writes backup to KV too
 
 const COLLECTIONS = [
   "deals.json",
