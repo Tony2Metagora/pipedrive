@@ -270,9 +270,10 @@ interface Props {
   onActivityChanged?: (newActivity?: any) => void;
   onMarkDone?: (activityId: number) => void;
   refreshKey?: number;
+  parentPendingIds?: number[];
 }
 
-export default function DealContextPanel({ dealId, personId, orgId, personName, orgName, deals, onActivityChanged, onMarkDone, refreshKey }: Props) {
+export default function DealContextPanel({ dealId, personId, orgId, personName, orgName, deals, onActivityChanged, onMarkDone, refreshKey, parentPendingIds }: Props) {
   const [ctx, setCtx] = useState<DealContext | null>(null);
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<string | null>(null);
@@ -290,17 +291,46 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
   const [refining, setRefining] = useState(false);
   const [creatingTask, setCreatingTask] = useState(false);
 
+  // Sync pending activities with parent state (handles Done/Delete from preview buttons)
+  useEffect(() => {
+    if (!ctx || !parentPendingIds) return;
+    const parentSet = new Set(parentPendingIds);
+    const currentPending = ctx.activities.pending;
+    // Find activities that were removed by the parent
+    const removed = currentPending.filter((a) => !parentSet.has(a.id));
+    if (removed.length > 0) {
+      setCtx((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          activities: {
+            pending: prev.activities.pending.filter((a) => parentSet.has(a.id)),
+            done: [...removed.map((a) => ({ ...a, done: true })), ...prev.activities.done],
+          },
+        };
+      });
+    }
+  }, [parentPendingIds, ctx]);
+
   useEffect(() => {
     // Only show loading spinner on initial load, not on refreshKey updates
     const isInitial = !ctx;
     if (isInitial) setLoading(true);
-    fetch(`/api/deals/${dealId}/context?t=${Date.now()}`)
-      .then((r) => r.json())
-      .then((json) => {
-        if (json.data) setCtx(json.data);
-      })
-      .catch((err) => console.error("Erreur chargement contexte deal:", err))
-      .finally(() => { if (isInitial) setLoading(false); });
+    const doFetch = () => {
+      fetch(`/api/deals/${dealId}/context?t=${Date.now()}`)
+        .then((r) => r.json())
+        .then((json) => {
+          if (json.data) setCtx(json.data);
+        })
+        .catch((err) => console.error("Erreur chargement contexte deal:", err))
+        .finally(() => { if (isInitial) setLoading(false); });
+    };
+    // On refresh (not initial), delay slightly to let blob writes propagate
+    if (!isInitial && refreshKey) {
+      const timer = setTimeout(doFetch, 800);
+      return () => clearTimeout(timer);
+    }
+    doFetch();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dealId, refreshKey]);
 

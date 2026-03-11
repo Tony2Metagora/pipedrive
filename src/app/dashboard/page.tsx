@@ -1764,6 +1764,7 @@ function DealRow({
             onActivityChanged={onTaskCreated}
             onMarkDone={onMarkDone}
             refreshKey={contextRefreshKey}
+            parentPendingIds={dealActivities?.map((a) => a.id)}
           />
         </div>
       )}
