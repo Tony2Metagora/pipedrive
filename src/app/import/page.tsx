@@ -20,6 +20,12 @@ import {
   AlertTriangle,
   CheckCircle2,
   XCircle,
+  Pencil,
+  Building2,
+  Merge,
+  Check,
+  X,
+  Filter,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useResizableColumns } from "@/hooks/useResizableColumns";
@@ -68,6 +74,8 @@ interface ImportList {
   count: number;
   companies?: string[];
   source?: "csv" | "search";
+  company_tag?: string;
+  enriched_at?: string;
 }
 
 interface ImportContact {
@@ -249,6 +257,18 @@ export default function ImportPage() {
   const [snProfiles, setSnProfiles] = useState<PhantomProfile[] | null>(null);
   const [snImporting, setSnImporting] = useState(false);
 
+  // List editing state
+  const [editingListId, setEditingListId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editCompanyTag, setEditCompanyTag] = useState("");
+
+  // Company filter & multi-select for merge
+  const [companyFilter, setCompanyFilter] = useState("");
+  const [selectedListIds, setSelectedListIds] = useState<Set<string>>(new Set());
+  const [merging, setMerging] = useState(false);
+  const [mergeName, setMergeName] = useState("");
+  const [showMergeDialog, setShowMergeDialog] = useState(false);
+
   // Column visibility
   const [visibleCols, setVisibleCols] = useState<Set<string>>(
     new Set(ALL_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key))
@@ -411,6 +431,74 @@ export default function ImportPage() {
       await fetchLists();
     } catch {
       alert("Erreur lors de la suppression");
+    }
+  };
+
+  // ── Edit list (rename / company tag) ──
+  const startEditing = (l: ImportList) => {
+    setEditingListId(l.id);
+    setEditName(l.name);
+    setEditCompanyTag(l.company_tag || "");
+  };
+
+  const saveEdit = async () => {
+    if (!editingListId) return;
+    try {
+      const res = await fetch(`/api/imports/${editingListId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: editName.trim(), company_tag: editCompanyTag.trim() }),
+      });
+      const json = await res.json();
+      if (json.data) {
+        setLists((prev) => prev.map((l) => l.id === editingListId ? { ...l, ...json.data } : l));
+      }
+    } catch {
+      alert("Erreur lors de la sauvegarde");
+    }
+    setEditingListId(null);
+  };
+
+  const cancelEdit = () => setEditingListId(null);
+
+  // ── Multi-select toggle ──
+  const toggleSelect = (id: string) => {
+    setSelectedListIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  // ── Merge lists ──
+  const mergeLists = async () => {
+    if (selectedListIds.size < 2 || !mergeName.trim()) return;
+    setMerging(true);
+    try {
+      // Determine common company tag
+      const selectedLists = lists.filter((l) => selectedListIds.has(l.id));
+      const tags = [...new Set(selectedLists.map((l) => l.company_tag).filter(Boolean))];
+      const companyTag = tags.length === 1 ? tags[0] : undefined;
+
+      const res = await fetch("/api/imports/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ listIds: [...selectedListIds], name: mergeName.trim(), companyTag }),
+      });
+      const json = await res.json();
+      if (json.error) {
+        alert(json.error);
+      } else if (json.data) {
+        setSelectedListIds(new Set());
+        setShowMergeDialog(false);
+        setMergeName("");
+        await fetchLists();
+        setSelectedListId(json.data.id);
+      }
+    } catch {
+      alert("Erreur lors de la fusion");
+    } finally {
+      setMerging(false);
     }
   };
 
@@ -601,6 +689,7 @@ export default function ImportPage() {
           } else {
             setEnrichMsg(`${pollJson.enriched}/${pollJson.total} enrichi${pollJson.enriched > 1 ? "s" : ""}`);
             await fetchContacts(selectedListId);
+            await fetchLists();
           }
           setTimeout(() => setEnrichMsg(null), 8000);
           setEnriching(false);
@@ -652,6 +741,38 @@ export default function ImportPage() {
   const selectedList = lists.find((l) => l.id === selectedListId);
   const enrichableCount = contacts.filter((c) => (!c.email || !c.phone || !c.linkedin) && !c.enriched).length;
   const snDuplicateCount = snProfiles?.filter((p) => p.isDuplicate).length ?? 0;
+
+  // Company tags for filter
+  const allCompanyTags = useMemo(() => {
+    const tags = lists.map((l) => l.company_tag).filter(Boolean) as string[];
+    return [...new Set(tags)].sort();
+  }, [lists]);
+
+  // Filtered lists by company
+  const filteredLists = useMemo(() => {
+    let arr = [...lists];
+    if (companyFilter) {
+      arr = arr.filter((l) => l.company_tag === companyFilter);
+    }
+    return arr.sort((a, b) => {
+      // Sort by company_tag first, then by date
+      const tagA = (a.company_tag || "zzz").toLowerCase();
+      const tagB = (b.company_tag || "zzz").toLowerCase();
+      if (tagA !== tagB) return tagA.localeCompare(tagB);
+      return b.created_at.localeCompare(a.created_at);
+    });
+  }, [lists, companyFilter]);
+
+  // Can merge? Need 2+ selected, all must be enriched
+  const canMerge = useMemo(() => {
+    if (selectedListIds.size < 2) return false;
+    return [...selectedListIds].every((id) => {
+      const l = lists.find((li) => li.id === id);
+      return l && l.enriched_at;
+    });
+  }, [selectedListIds, lists]);
+
+  const selectedMergeLists = lists.filter((l) => selectedListIds.has(l.id));
 
   return (
     <div className="space-y-6">
@@ -931,47 +1052,190 @@ export default function ImportPage() {
         </div>
 
         {/* Right: List selector */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h2 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-            <Users className="w-4 h-4" />
-            Listes ({lists.length})
-          </h2>
+        <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+              <Users className="w-4 h-4" />
+              Listes ({filteredLists.length}{companyFilter ? `/${lists.length}` : ""})
+            </h2>
+            {selectedListIds.size >= 2 && (
+              <button
+                onClick={() => { setMergeName(""); setShowMergeDialog(true); }}
+                disabled={!canMerge}
+                className={cn(
+                  "flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-md cursor-pointer transition-colors",
+                  canMerge
+                    ? "text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100"
+                    : "text-gray-400 bg-gray-50 border border-gray-200 cursor-not-allowed"
+                )}
+                title={canMerge ? "Fusionner les listes sélectionnées" : "Seules les listes enrichies peuvent être fusionnées"}
+              >
+                <Merge className="w-3 h-3" />
+                Fusionner ({selectedListIds.size})
+              </button>
+            )}
+          </div>
+
+          {/* Company filter */}
+          {allCompanyTags.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <Filter className="w-3 h-3 text-gray-400" />
+              <select
+                value={companyFilter}
+                onChange={(e) => setCompanyFilter(e.target.value)}
+                className="flex-1 text-[10px] px-2 py-1 border border-gray-200 rounded-md text-gray-600 bg-white focus:ring-1 focus:ring-indigo-400 outline-none"
+              >
+                <option value="">Toutes les entreprises</option>
+                {allCompanyTags.map((tag) => (
+                  <option key={tag} value={tag}>{tag}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Merge dialog */}
+          {showMergeDialog && (
+            <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-200 space-y-2">
+              <p className="text-[10px] font-medium text-indigo-700">
+                Fusionner {selectedMergeLists.length} listes ({selectedMergeLists.reduce((s, l) => s + l.count, 0)} contacts) :
+              </p>
+              <div className="text-[10px] text-indigo-600 space-y-0.5">
+                {selectedMergeLists.map((l) => (
+                  <div key={l.id}>• {l.name} ({l.count})</div>
+                ))}
+              </div>
+              <input
+                type="text"
+                value={mergeName}
+                onChange={(e) => setMergeName(e.target.value)}
+                placeholder="Nom de la liste fusionnée"
+                className="w-full px-2 py-1.5 text-xs border border-indigo-200 rounded-md focus:ring-1 focus:ring-indigo-400 outline-none"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={mergeLists}
+                  disabled={merging || !mergeName.trim()}
+                  className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-[10px] font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+                >
+                  {merging ? <Loader2 className="w-3 h-3 animate-spin" /> : <Merge className="w-3 h-3" />}
+                  Fusionner
+                </button>
+                <button
+                  onClick={() => setShowMergeDialog(false)}
+                  className="px-2 py-1.5 text-[10px] font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 cursor-pointer"
+                >
+                  Annuler
+                </button>
+              </div>
+            </div>
+          )}
+
           {loadingLists ? (
             <div className="flex items-center gap-2 text-xs text-gray-400 py-4">
               <Loader2 className="w-4 h-4 animate-spin" /> Chargement...
             </div>
-          ) : lists.length === 0 ? (
-            <p className="text-xs text-gray-400 py-4">Aucune liste importée</p>
+          ) : filteredLists.length === 0 ? (
+            <p className="text-xs text-gray-400 py-4">{companyFilter ? "Aucune liste pour cette entreprise" : "Aucune liste importée"}</p>
           ) : (
-            <div className="space-y-1.5 max-h-80 overflow-y-auto">
-              {[...lists].sort((a, b) => b.created_at.localeCompare(a.created_at)).map((l) => (
-                <div
-                  key={l.id}
-                  className={cn(
-                    "flex items-center justify-between px-3 py-2 rounded-lg text-xs cursor-pointer transition-colors group",
-                    selectedListId === l.id ? "bg-indigo-50 border border-indigo-200" : "hover:bg-gray-50 border border-transparent"
-                  )}
-                  onClick={() => setSelectedListId(l.id)}
-                >
-                  <div className="min-w-0 flex items-center gap-2">
-                    {l.source === "search" ? (
-                      <span title="PhantomBuster"><Globe className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" /></span>
-                    ) : (
-                      <span title="Import CSV"><FileSpreadsheet className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" /></span>
-                    )}
-                    <div className="min-w-0">
-                      <p className={cn("font-medium truncate", selectedListId === l.id ? "text-indigo-700" : "text-gray-700")}>{l.name}</p>
-                      <p className="text-gray-400 text-[10px]">
-                        {l.count} contacts{l.companies?.length ? ` · ${l.companies.length} entrep.` : ""} · {new Date(l.created_at).toLocaleDateString("fr-FR")}
-                      </p>
+            <div className="space-y-1 max-h-[500px] overflow-y-auto">
+              {filteredLists.map((l) => (
+                <div key={l.id}>
+                  {editingListId === l.id ? (
+                    /* Editing mode */
+                    <div className="px-3 py-2 rounded-lg border border-indigo-300 bg-indigo-50/50 space-y-1.5">
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        placeholder="Nom de la liste"
+                        className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-indigo-400 outline-none"
+                        autoFocus
+                        onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") cancelEdit(); }}
+                      />
+                      <div className="flex items-center gap-1.5">
+                        <Building2 className="w-3 h-3 text-gray-400" />
+                        <input
+                          type="text"
+                          value={editCompanyTag}
+                          onChange={(e) => setEditCompanyTag(e.target.value)}
+                          placeholder="Entreprise associée"
+                          className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-indigo-400 outline-none"
+                          list="company-tags-datalist"
+                          onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") cancelEdit(); }}
+                        />
+                        <datalist id="company-tags-datalist">
+                          {allCompanyTags.map((t) => <option key={t} value={t} />)}
+                        </datalist>
+                      </div>
+                      <div className="flex gap-1">
+                        <button onClick={saveEdit} className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 cursor-pointer">
+                          <Check className="w-3 h-3" /> Sauver
+                        </button>
+                        <button onClick={cancelEdit} className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200 cursor-pointer">
+                          <X className="w-3 h-3" /> Annuler
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); deleteList(l.id); }}
-                    className="p-1 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  ) : (
+                    /* Normal display mode */
+                    <div
+                      className={cn(
+                        "flex items-center gap-2 px-3 py-2 rounded-lg text-xs cursor-pointer transition-colors group",
+                        selectedListId === l.id ? "bg-indigo-50 border border-indigo-200" : "hover:bg-gray-50 border border-transparent",
+                        selectedListIds.has(l.id) && "ring-2 ring-indigo-300"
+                      )}
+                      onClick={() => setSelectedListId(l.id)}
+                    >
+                      {/* Checkbox for multi-select */}
+                      <input
+                        type="checkbox"
+                        checked={selectedListIds.has(l.id)}
+                        onChange={(e) => { e.stopPropagation(); toggleSelect(l.id); }}
+                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 flex-shrink-0 cursor-pointer"
+                        title={l.enriched_at ? "Sélectionner pour fusionner" : "Enrichir d'abord pour fusionner"}
+                      />
+
+                      {/* Source + enriched icon */}
+                      {l.enriched_at ? (
+                        <span title={`Enrichi le ${new Date(l.enriched_at).toLocaleDateString("fr-FR")}`}>
+                          <Sparkles className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
+                        </span>
+                      ) : l.source === "search" ? (
+                        <span title="PhantomBuster"><Globe className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" /></span>
+                      ) : (
+                        <span title="Import CSV"><FileSpreadsheet className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" /></span>
+                      )}
+
+                      {/* Info */}
+                      <div className="min-w-0 flex-1">
+                        <p className={cn("font-medium truncate", selectedListId === l.id ? "text-indigo-700" : "text-gray-700")}>{l.name}</p>
+                        <p className="text-gray-400 text-[10px] truncate">
+                          {l.count} contacts
+                          {l.company_tag && <span className="text-blue-500"> · {l.company_tag}</span>}
+                          {l.companies?.length ? ` · ${l.companies.length} entrep.` : ""}
+                          {" · "}{new Date(l.created_at).toLocaleDateString("fr-FR")}
+                        </p>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); startEditing(l); }}
+                          className="p-1 text-gray-300 hover:text-indigo-500 cursor-pointer"
+                          title="Modifier"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); deleteList(l.id); }}
+                          className="p-1 text-gray-300 hover:text-red-500 cursor-pointer"
+                          title="Supprimer"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

@@ -6,7 +6,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { getImportContacts, writeImportContacts } from "@/lib/import-store";
+import { getImportContacts, writeImportContacts, updateListMeta } from "@/lib/import-store";
 import { submitBatchEnrich, pollBatchEnrich, type DropcontactResult } from "@/lib/dropcontact";
 
 export const dynamic = "force-dynamic";
@@ -194,6 +194,11 @@ export async function GET(
     await writeImportContacts(listId, contacts);
 
     const enrichedCount = results.filter((r) => r.status === "enriched").length;
+
+    // Mark list as enriched
+    if (enrichedCount > 0) {
+      await updateListMeta(listId, { enriched_at: new Date().toISOString() });
+    }
 
     return NextResponse.json({
       done: true,

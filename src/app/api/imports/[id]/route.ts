@@ -5,7 +5,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { getImportContacts, deleteImportList } from "@/lib/import-store";
+import { getImportContacts, deleteImportList, updateListMeta } from "@/lib/import-store";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +19,29 @@ export async function GET(
     return NextResponse.json({ data: contacts });
   } catch (error) {
     console.error("GET /api/imports/[id] error:", error);
+    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  }
+}
+
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const body = await request.json();
+    const updates: { name?: string; company_tag?: string; enriched_at?: string } = {};
+    if (body.name !== undefined) updates.name = String(body.name).trim();
+    if (body.company_tag !== undefined) updates.company_tag = String(body.company_tag).trim();
+    if (body.enriched_at !== undefined) updates.enriched_at = body.enriched_at;
+
+    const updated = await updateListMeta(id, updates);
+    if (!updated) {
+      return NextResponse.json({ error: "Liste introuvable" }, { status: 404 });
+    }
+    return NextResponse.json({ data: updated });
+  } catch (error) {
+    console.error("PATCH /api/imports/[id] error:", error);
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
   }
 }

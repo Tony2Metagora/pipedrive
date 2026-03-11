@@ -44,6 +44,8 @@ export interface ImportList {
   count: number;
   companies: string[];
   source: "csv" | "search";
+  company_tag?: string;
+  enriched_at?: string;
 }
 
 // ─── CSV column names (mandatory header names) ──────────
@@ -92,6 +94,22 @@ export async function updateIndexCount(id: string, count: number): Promise<void>
       entry.count = count;
       await writeBlob(INDEX_FILE, index);
     }
+  });
+}
+
+export async function updateListMeta(
+  id: string,
+  updates: { name?: string; company_tag?: string; enriched_at?: string }
+): Promise<ImportList | null> {
+  return withLock(INDEX_FILE, async () => {
+    const index = await readBlob<ImportList>(INDEX_FILE);
+    const entry = index.find((e) => e.id === id);
+    if (!entry) return null;
+    if (updates.name !== undefined) entry.name = updates.name;
+    if (updates.company_tag !== undefined) entry.company_tag = updates.company_tag;
+    if (updates.enriched_at !== undefined) entry.enriched_at = updates.enriched_at;
+    await writeBlob(INDEX_FILE, index);
+    return entry;
   });
 }
 
@@ -149,4 +167,42 @@ export async function getAllImportContacts(): Promise<{ listId: string; listName
 export async function deleteImportList(id: string): Promise<void> {
   await writeBlob(listFile(id), []);
   await removeFromIndex(id);
+}
+
+export async function mergeImportLists(
+  listIds: string[],
+  newName: string,
+  companyTag?: string
+): Promise<ImportList> {
+  // Collect all contacts from source lists, dedup by first+last+company
+  const seen = new Set<string>();
+  const allContacts: ImportContact[] = [];
+  for (const lid of listIds) {
+    const contacts = await getImportContacts(lid);
+    for (const c of contacts) {
+      const key = `${(c.first_name || "").trim().toLowerCase()}|${(c.last_name || "").trim().toLowerCase()}|${(c.company || "").trim().toLowerCase()}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        allContacts.push({ ...c, id: `c_${Date.now()}_${Math.random().toString(36).slice(2, 10)}` });
+      }
+    }
+  }
+
+  const id = `imp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const companies = [...new Set(
+    allContacts.map((c) => c.company?.trim().toLowerCase()).filter(Boolean)
+  )].sort();
+  const entry: ImportList = {
+    id,
+    name: newName,
+    created_at: new Date().toISOString(),
+    count: allContacts.length,
+    companies,
+    source: "csv",
+    company_tag: companyTag,
+    enriched_at: new Date().toISOString(),
+  };
+  await writeImportContacts(id, allContacts);
+  await addToIndex(entry);
+  return entry;
 }
