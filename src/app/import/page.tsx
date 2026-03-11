@@ -23,6 +23,41 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useResizableColumns } from "@/hooks/useResizableColumns";
+import * as XLSX from "xlsx";
+
+// ─── Column mapping aliases ─────────────────────────────
+
+const COLUMN_ALIASES: Record<string, string> = {
+  // first_name
+  first_name: "first_name", firstname: "first_name", "first name": "first_name", prénom: "first_name", prenom: "first_name",
+  // last_name
+  last_name: "last_name", lastname: "last_name", "last name": "last_name", nom: "last_name",
+  // email
+  email: "email", "e-mail": "email", mail: "email", courriel: "email",
+  // company
+  company: "company", companyname: "company", "company name": "company", entreprise: "company", société: "company", societe: "company",
+  // job
+  job: "job", title: "job", jobtitle: "job", "job title": "job", poste: "job", fonction: "job",
+  // phone
+  phone: "phone", telephone: "phone", téléphone: "phone", tel: "phone", "phone number": "phone",
+  // linkedin
+  linkedin: "linkedin", linkedinurl: "linkedin", linkedinprofileurl: "linkedin", "linkedin url": "linkedin",
+  "linkedin profile": "linkedin", defaultprofileurl: "linkedin", profileurl: "linkedin",
+};
+
+function mapColumnName(header: string): string | null {
+  const normalized = header.trim().toLowerCase().replace(/[_\-]/g, "").replace(/\s+/g, " ");
+  // Direct match
+  if (COLUMN_ALIASES[normalized]) return COLUMN_ALIASES[normalized];
+  // Try without accents
+  const noAccents = normalized.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (COLUMN_ALIASES[noAccents]) return COLUMN_ALIASES[noAccents];
+  // Partial match (header contains alias key)
+  for (const [alias, mapped] of Object.entries(COLUMN_ALIASES)) {
+    if (normalized.includes(alias) || alias.includes(normalized)) return mapped;
+  }
+  return null;
+}
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -104,25 +139,87 @@ const ALL_COLUMNS: ColumnDef[] = [
   { key: "enriched", label: "Enrichi", defaultVisible: true, defaultWidth: 52, minWidth: 36 },
 ];
 
-const EXPECTED_CSV_COLUMNS = ["first_name", "last_name", "email", "company", "job", "phone", "linkedin"];
+const MAPPED_COLUMNS = ["first_name", "last_name", "email", "company", "job", "phone", "linkedin"];
 
-// ─── CSV parser (;-separated) ────────────────────────────
+// ─── Smart CSV parser (auto-detect delimiter, RFC 4180) ──
 
-function parseCsv(text: string): { headers: string[]; rows: Record<string, string>[] } {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim());
-  if (lines.length === 0) return { headers: [], rows: [] };
+function smartParseCsv(text: string): { headers: string[]; rows: Record<string, string>[] } {
+  // Auto-detect delimiter from first line
+  const firstLine = text.split(/\r?\n/)[0] || "";
+  const semicolons = (firstLine.match(/;/g) || []).length;
+  const commas = (firstLine.match(/,/g) || []).length;
+  const delimiter = semicolons > commas ? ";" : ",";
 
-  const headers = lines[0].split(";").map((h) => h.trim().replace(/^["']|["']$/g, ""));
-  const rows = lines.slice(1).map((line) => {
-    const values = line.split(";").map((v) => v.trim().replace(/^["']|["']$/g, ""));
-    const row: Record<string, string> = {};
-    headers.forEach((h, i) => {
-      row[h] = values[i] || "";
-    });
-    return row;
-  });
+  // RFC 4180 parser — handles newlines inside quoted fields
+  const records: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else {
+        field += ch;
+      }
+    } else {
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === delimiter) {
+        row.push(field); field = "";
+      } else if (ch === "\r") {
+        // skip \r
+      } else if (ch === "\n") {
+        row.push(field); field = "";
+        if (row.some((v) => v.trim())) records.push(row);
+        row = [];
+      } else {
+        field += ch;
+      }
+    }
+  }
+  row.push(field);
+  if (row.some((v) => v.trim())) records.push(row);
+
+  if (records.length === 0) return { headers: [], rows: [] };
+
+  const headers = records[0].map((h) => h.trim());
+  const rows = records.slice(1).map((values) => {
+    const r: Record<string, string> = {};
+    headers.forEach((h, j) => { r[h] = (values[j] || "").trim(); });
+    return r;
+  }).filter((r) => Object.values(r).some((v) => v.trim()));
 
   return { headers, rows };
+}
+
+// ─── Map raw rows to standard column names ───────────────
+
+function mapRows(headers: string[], rows: Record<string, string>[]): { mapped: Record<string, string>[]; mappingInfo: Record<string, string> } {
+  const mappingInfo: Record<string, string> = {};
+  const headerMap: Record<string, string> = {};
+  for (const h of headers) {
+    const target = mapColumnName(h);
+    if (target) {
+      headerMap[h] = target;
+      mappingInfo[h] = target;
+    }
+  }
+  const mapped = rows.map((r) => {
+    const out: Record<string, string> = {};
+    for (const col of MAPPED_COLUMNS) out[col] = "";
+    for (const [origCol, val] of Object.entries(r)) {
+      const target = headerMap[origCol];
+      if (target && val.trim()) {
+        // Keep first non-empty match for this target field
+        if (!out[target]) out[target] = val.trim();
+      }
+    }
+    return out;
+  }).filter((r) => r.first_name || r.last_name);
+  return { mapped, mappingInfo };
 }
 
 // ─── Main Component ──────────────────────────────────────
@@ -207,43 +304,72 @@ export default function ImportPage() {
     else setContacts([]);
   }, [selectedListId, fetchContacts]);
 
-  // ── CSV file handler ──
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // ── CSV / Excel file handler ──
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
     setCsvError(null);
     setParsedRows(null);
 
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const text = ev.target?.result as string;
-      const { headers, rows } = parseCsv(text);
+    try {
+      let headers: string[];
+      let rawRows: Record<string, string>[];
 
-      const missing = EXPECTED_CSV_COLUMNS.filter((c) => !headers.includes(c));
-      const extra = headers.filter((h) => !EXPECTED_CSV_COLUMNS.includes(h));
+      const isExcel = /\.(xlsx?|xls)$/i.test(f.name);
+      if (isExcel) {
+        const buffer = await f.arrayBuffer();
+        const wb = XLSX.read(buffer, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" });
+        if (json.length === 0) { setCsvError("Le fichier est vide."); return; }
+        headers = Object.keys(json[0]);
+        rawRows = json.map((r) => {
+          const row: Record<string, string> = {};
+          for (const [k, v] of Object.entries(r)) row[k] = String(v || "").trim();
+          return row;
+        });
+      } else {
+        const text = await f.text();
+        const parsed = smartParseCsv(text);
+        headers = parsed.headers;
+        rawRows = parsed.rows;
+      }
 
-      if (missing.length > 0) {
-        setCsvError(`Colonnes manquantes : ${missing.join(", ")}. Colonnes attendues : ${EXPECTED_CSV_COLUMNS.join(", ")}`);
-        return;
-      }
-      if (extra.length > 0) {
-        setCsvError(`Colonnes non reconnues : ${extra.join(", ")}. Colonnes attendues : ${EXPECTED_CSV_COLUMNS.join(", ")}`);
-        return;
-      }
-      if (rows.length === 0) {
+      if (rawRows.length === 0) {
         setCsvError("Le fichier ne contient aucune ligne de données.");
         return;
       }
-      if (rows.length > 100) {
-        setCsvError(`Le fichier contient ${rows.length} lignes. Maximum autorisé : 100.`);
+
+      // Map columns flexibly
+      const { mapped, mappingInfo } = mapRows(headers, rawRows);
+      const mappedFields = Object.values(mappingInfo);
+      const unmapped = headers.filter((h) => !mapColumnName(h));
+
+      if (!mappedFields.includes("first_name") && !mappedFields.includes("last_name")) {
+        setCsvError(`Impossible de détecter les colonnes prénom/nom. Colonnes trouvées : ${headers.join(", ")}. Essayez avec des en-têtes comme : first_name, last_name, email, company, job, phone, linkedin.`);
         return;
       }
 
-      setParsedRows(rows);
+      if (mapped.length === 0) {
+        setCsvError("Aucun contact valide trouvé (prénom ou nom requis).");
+        return;
+      }
+
+      // Show mapping info
+      const infoLines: string[] = [];
+      for (const [orig, target] of Object.entries(mappingInfo)) {
+        if (orig.toLowerCase() !== target.toLowerCase()) infoLines.push(`${orig} → ${target}`);
+      }
+      if (unmapped.length > 0) infoLines.push(`Colonnes ignorées : ${unmapped.join(", ")}`);
+      if (infoLines.length > 0) setCsvError(`ℹ️ Mapping automatique : ${infoLines.join(" · ")}`);
+
+      setParsedRows(mapped);
       const baseName = f.name.replace(/\.(csv|xlsx?)$/i, "").replace(/[_-]/g, " ");
       setListName(baseName);
-    };
-    reader.readAsText(f, "UTF-8");
+    } catch (err) {
+      console.error("File parse error:", err);
+      setCsvError("Erreur lors de la lecture du fichier.");
+    }
   };
 
   // ── Create list (CSV) ──
@@ -588,14 +714,14 @@ export default function ImportPage() {
                   ) : (
                     <>
                       <Upload className="w-6 h-6" />
-                      <span className="text-sm font-medium">Glisser un fichier CSV ou cliquer ici</span>
+                      <span className="text-sm font-medium">Glisser un fichier CSV / Excel ou cliquer ici</span>
                       <span className="text-[10px] text-gray-400">
-                        Colonnes : {EXPECTED_CSV_COLUMNS.join(" ; ")}
+                        Colonnes détectées auto : prénom, nom, email, entreprise, poste, téléphone, linkedin
                       </span>
                     </>
                   )}
                 </div>
-                <input type="file" className="hidden" accept=".csv" onChange={handleFileChange} />
+                <input type="file" className="hidden" accept=".csv,.xlsx,.xls" onChange={handleFileChange} />
               </label>
 
               {csvError && (
@@ -865,7 +991,7 @@ export default function ImportPage() {
             <table className="w-full text-xs">
               <thead className="bg-gray-50 text-gray-500 text-[10px] uppercase">
                 <tr>
-                  {EXPECTED_CSV_COLUMNS.map((col) => (
+                  {MAPPED_COLUMNS.map((col) => (
                     <th key={col} className="px-3 py-2.5 text-left">{col}</th>
                   ))}
                 </tr>
@@ -873,7 +999,7 @@ export default function ImportPage() {
               <tbody className="divide-y divide-gray-100">
                 {parsedRows.slice(0, 20).map((row, i) => (
                   <tr key={i} className="hover:bg-gray-50">
-                    {EXPECTED_CSV_COLUMNS.map((col) => (
+                    {MAPPED_COLUMNS.map((col) => (
                       <td key={col} className="px-3 py-2 text-gray-700 max-w-[180px] truncate">
                         {row[col] || <span className="text-gray-300">—</span>}
                       </td>
@@ -882,7 +1008,7 @@ export default function ImportPage() {
                 ))}
                 {parsedRows.length > 20 && (
                   <tr>
-                    <td colSpan={EXPECTED_CSV_COLUMNS.length} className="px-4 py-2 text-center text-gray-400 text-[10px]">
+                    <td colSpan={MAPPED_COLUMNS.length} className="px-4 py-2 text-center text-gray-400 text-[10px]">
                       ... et {parsedRows.length - 20} de plus
                     </td>
                   </tr>

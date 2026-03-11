@@ -8,9 +8,7 @@ import { NextResponse } from "next/server";
 import {
   getImportIndex,
   createImportList,
-  CSV_COLUMNS,
   type ImportContact,
-  type CsvColumnName,
 } from "@/lib/import-store";
 
 export const dynamic = "force-dynamic";
@@ -36,17 +34,8 @@ export async function POST(request: Request) {
     if (!rows?.length) {
       return NextResponse.json({ error: "Aucune ligne de données" }, { status: 400 });
     }
-    if (rows.length > 100) {
-      return NextResponse.json({ error: "Maximum 100 contacts par import" }, { status: 400 });
-    }
-
-    // Validate column names
-    const headerKeys = Object.keys(rows[0]);
-    const invalidCols = headerKeys.filter((k) => !CSV_COLUMNS.includes(k as CsvColumnName));
-    if (invalidCols.length > 0) {
-      return NextResponse.json({
-        error: `Colonnes invalides : ${invalidCols.join(", ")}. Colonnes attendues : ${CSV_COLUMNS.join(", ")}`,
-      }, { status: 400 });
+    if (rows.length > 500) {
+      return NextResponse.json({ error: "Maximum 500 contacts par import" }, { status: 400 });
     }
 
     // Build contacts
