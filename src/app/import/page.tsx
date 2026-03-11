@@ -299,39 +299,55 @@ export default function ImportPage() {
 
     try {
       const text = await f.text();
-      const lines = text.split(/\r?\n/).filter((l) => l.trim());
-      if (lines.length < 2) {
+
+      // RFC 4180 CSV parser — handles newlines inside quoted fields
+      const parseRfc4180 = (csv: string): string[][] => {
+        const records: string[][] = [];
+        let row: string[] = [];
+        let field = "";
+        let inQuotes = false;
+        for (let i = 0; i < csv.length; i++) {
+          const ch = csv[i];
+          if (inQuotes) {
+            if (ch === '"') {
+              if (csv[i + 1] === '"') { field += '"'; i++; }
+              else inQuotes = false;
+            } else {
+              field += ch;
+            }
+          } else {
+            if (ch === '"') {
+              inQuotes = true;
+            } else if (ch === ",") {
+              row.push(field); field = "";
+            } else if (ch === "\r") {
+              // skip \r (handle \r\n)
+            } else if (ch === "\n") {
+              row.push(field); field = "";
+              if (row.some((v) => v.trim())) records.push(row);
+              row = [];
+            } else {
+              field += ch;
+            }
+          }
+        }
+        // Last field / row
+        row.push(field);
+        if (row.some((v) => v.trim())) records.push(row);
+        return records;
+      };
+
+      const allRows = parseRfc4180(text);
+      if (allRows.length < 2) {
         setSnError("Le fichier CSV est vide ou ne contient qu'un en-tête.");
         setSnLoading(false);
         return;
       }
 
-      // Parse CSV (comma-separated, handle quoted fields)
-      const parseLine = (line: string): string[] => {
-        const result: string[] = [];
-        let current = "";
-        let inQuotes = false;
-        for (let i = 0; i < line.length; i++) {
-          const ch = line[i];
-          if (ch === '"') {
-            if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
-            else inQuotes = !inQuotes;
-          } else if (ch === "," && !inQuotes) {
-            result.push(current.trim());
-            current = "";
-          } else {
-            current += ch;
-          }
-        }
-        result.push(current.trim());
-        return result;
-      };
-
-      const headers = parseLine(lines[0]).map((h) => h.replace(/^["']|["']$/g, ""));
-      const rows = lines.slice(1).map((line) => {
-        const values = parseLine(line);
+      const headers = allRows[0].map((h) => h.trim());
+      const rows = allRows.slice(1).map((values) => {
         const row: Record<string, string> = {};
-        headers.forEach((h, i) => { row[h] = (values[i] || "").replace(/^["']|["']$/g, ""); });
+        headers.forEach((h, i) => { row[h] = (values[i] || "").trim(); });
         return row;
       }).filter((r) => Object.values(r).some((v) => v.trim()));
 
@@ -349,7 +365,7 @@ export default function ImportPage() {
         companyName: r.companyName || r.company || r["Company"] || "",
         linkedinUrl: r.linkedInProfileUrl || r.linkedinUrl || r.profileUrl || r.defaultProfileUrl || r.linkedin || r["LinkedIn URL"] || "",
         location: r.location || r.city || "",
-      }));
+      })).filter((p) => p.firstName.trim() || p.lastName.trim());
 
       // Deduplicate via API
       const dedupeRes = await fetch("/api/search/dedupe", {
