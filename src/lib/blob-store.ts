@@ -10,7 +10,7 @@
  * - prospects.json   : tableau de Prospect (déjà existant)
  */
 
-import { put, get, BlobPreconditionFailedError } from "@vercel/blob";
+import { put, get, list, del } from "@vercel/blob";
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -83,11 +83,9 @@ export function withLock<T>(filename: string, fn: () => Promise<T>): Promise<T> 
 
 // ─── Generic Blob helpers ────────────────────────────────
 
-/** Read a blob, parse as JSON, and return data + ETag. Returns empty array + null etag if blob doesn't exist. Throws on transient errors. */
-async function readBlobWithEtag<T>(filename: string): Promise<{ data: T[]; etag: string | null }> {
+async function readBlobStrict<T>(filename: string): Promise<T[]> {
   const result = await get(filename, { access: "private" });
-  // Blob doesn't exist yet → genuinely empty
-  if (result === null) return { data: [], etag: null };
+  if (result === null) return [];
   if (result.statusCode !== 200 || !result.stream) {
     throw new Error(`Blob read failed for ${filename}: status=${result.statusCode}`);
   }
@@ -106,91 +104,158 @@ async function readBlobWithEtag<T>(filename: string): Promise<{ data: T[]; etag:
       return merged;
     }, new Uint8Array())
   );
-  return { data: JSON.parse(text), etag: result.blob?.etag ?? null };
+  return JSON.parse(text);
 }
 
 export async function readBlob<T>(filename: string): Promise<T[]> {
   try {
-    const { data } = await readBlobWithEtag<T>(filename);
-    return data;
+    return await readBlobStrict<T>(filename);
   } catch (err) {
     console.warn(`[readBlob] Error reading ${filename}, returning []:`, err);
     return [];
   }
 }
 
-export async function writeBlob<T>(filename: string, data: T[], ifMatch?: string): Promise<void> {
+export async function writeBlob<T>(filename: string, data: T[]): Promise<void> {
   await put(filename, JSON.stringify(data), {
     access: "private",
     addRandomSuffix: false,
     allowOverwrite: true,
-    ...(ifMatch ? { ifMatch } : {}),
   });
 }
-
-const MAX_RETRIES = 5;
 
 async function mutateBlob<T>(filename: string, mutator: (data: T[]) => T[] | Promise<T[]>): Promise<T[]> {
   return withLock(filename, async () => {
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      const { data, etag } = await readBlobWithEtag<T>(filename);
-      const updated = await mutator(data);
-      // Safety: refuse to wipe a large dataset
-      if (updated.length === 0 && data.length > 3) {
-        console.error(`[mutateBlob] BLOCKED: ${filename} would wipe ${data.length} items → refusing write`);
-        return data;
-      }
-      try {
-        // Use ETag conditional write if we have one — prevents race conditions across serverless instances
-        await writeBlob(filename, updated, etag ?? undefined);
-        return updated;
-      } catch (err) {
-        if (err instanceof BlobPreconditionFailedError && attempt < MAX_RETRIES - 1) {
-          console.warn(`[mutateBlob] ${filename}: ETag conflict (attempt ${attempt + 1}/${MAX_RETRIES}), retrying...`);
-          continue;
-        }
-        throw err;
-      }
+    const data = await readBlobStrict<T>(filename);
+    const updated = await mutator(data);
+    if (updated.length === 0 && data.length > 3) {
+      console.error(`[mutateBlob] BLOCKED: ${filename} would wipe ${data.length} items → refusing write`);
+      return data;
     }
-    throw new Error(`[mutateBlob] ${filename}: failed after ${MAX_RETRIES} retries`);
+    await writeBlob(filename, updated);
+    return updated;
   });
 }
 
-// ─── Deals ───────────────────────────────────────────────
+// ─── Single-object blob helpers (for per-deal storage) ───
+
+async function readSingleBlob<T>(filename: string): Promise<T | null> {
+  try {
+    const result = await get(filename, { access: "private" });
+    if (result === null) return null;
+    if (result.statusCode !== 200 || !result.stream) return null;
+    const chunks: Uint8Array[] = [];
+    const reader = result.stream.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+    const text = new TextDecoder().decode(
+      chunks.reduce((acc, chunk) => {
+        const merged = new Uint8Array(acc.length + chunk.length);
+        merged.set(acc);
+        merged.set(chunk, acc.length);
+        return merged;
+      }, new Uint8Array())
+    );
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
+}
+
+async function writeSingleBlob<T>(filename: string, data: T): Promise<void> {
+  await put(filename, JSON.stringify(data), {
+    access: "private",
+    addRandomSuffix: false,
+    allowOverwrite: true,
+  });
+}
+
+async function deleteSingleBlob(filename: string): Promise<void> {
+  await del(filename);
+}
+
+/** List all blob pathnames matching a prefix */
+async function listBlobPathnames(prefix: string): Promise<string[]> {
+  const pathnames: string[] = [];
+  let hasMore = true;
+  let cursor: string | undefined;
+  while (hasMore) {
+    const result = await list({ prefix, cursor });
+    for (const blob of result.blobs) {
+      pathnames.push(blob.pathname);
+    }
+    hasMore = result.hasMore;
+    cursor = result.cursor;
+  }
+  return pathnames;
+}
+
+// ─── Deals (per-deal blob: deals/d-{id}.json) ───────────
+
+const DEAL_PREFIX = "deals/d-";
+function dealPath(id: number) { return `${DEAL_PREFIX}${id}.json`; }
+
+/** One-time migration: if old deals.json exists, split into individual files and delete it */
+let migrationDone = false;
+async function ensureDealsMigrated(): Promise<void> {
+  if (migrationDone) return;
+  migrationDone = true;
+  try {
+    const oldDeals = await readBlobStrict<Deal>("deals.json");
+    if (oldDeals.length === 0) return; // no old data
+    console.log(`[deals migration] Migrating ${oldDeals.length} deals from deals.json to individual blobs...`);
+    await Promise.all(oldDeals.map((deal) => writeSingleBlob(dealPath(deal.id), deal)));
+    await del("deals.json");
+    console.log(`[deals migration] Done. Deleted deals.json.`);
+  } catch {
+    // deals.json doesn't exist or is empty — nothing to migrate
+  }
+}
 
 export async function getDeals(): Promise<Deal[]> {
-  return readBlob<Deal>("deals.json");
+  await ensureDealsMigrated();
+  const pathnames = await listBlobPathnames(DEAL_PREFIX);
+  if (pathnames.length === 0) return [];
+  const deals = await Promise.all(
+    pathnames.map((p) => readSingleBlob<Deal>(p))
+  );
+  return deals.filter((d): d is Deal => d !== null);
 }
 
 export async function getDeal(id: number): Promise<Deal | null> {
-  const deals = await getDeals();
-  return deals.find((d) => d.id === id) ?? null;
+  await ensureDealsMigrated();
+  return readSingleBlob<Deal>(dealPath(id));
 }
 
 export async function createDeal(data: Omit<Deal, "id">): Promise<Deal> {
-  let created!: Deal;
-  await mutateBlob<Deal>("deals.json", (deals) => {
-    const maxId = deals.reduce((max, d) => Math.max(max, d.id), 0);
-    created = { ...data, id: maxId + 1 } as Deal;
-    return [...deals, created];
-  });
+  await ensureDealsMigrated();
+  // Get next ID by scanning existing deal files
+  const pathnames = await listBlobPathnames(DEAL_PREFIX);
+  let maxId = 0;
+  for (const p of pathnames) {
+    const match = p.match(/d-(\d+)\.json$/);
+    if (match) maxId = Math.max(maxId, Number(match[1]));
+  }
+  const created = { ...data, id: maxId + 1 } as Deal;
+  await writeSingleBlob(dealPath(created.id), created);
   return created;
 }
 
 export async function updateDeal(id: number, data: Partial<Deal>): Promise<Deal | null> {
-  let result: Deal | null = null;
-  await mutateBlob<Deal>("deals.json", (deals) => {
-    const idx = deals.findIndex((d) => d.id === id);
-    if (idx === -1) return deals;
-    deals[idx] = { ...deals[idx], ...data, id };
-    result = deals[idx];
-    return deals;
-  });
-  return result;
+  await ensureDealsMigrated();
+  const deal = await readSingleBlob<Deal>(dealPath(id));
+  if (!deal) return null;
+  const updated = { ...deal, ...data, id };
+  await writeSingleBlob(dealPath(id), updated);
+  return updated;
 }
 
 export async function deleteDeal(id: number): Promise<void> {
-  await mutateBlob<Deal>("deals.json", (deals) => deals.filter((d) => d.id !== id));
+  await ensureDealsMigrated();
+  await deleteSingleBlob(dealPath(id));
 }
 
 // ─── Persons ─────────────────────────────────────────────
@@ -341,21 +406,21 @@ export async function getDealParticipants(dealId: number): Promise<Person[]> {
 }
 
 export async function addDealParticipant(dealId: number, personId: number): Promise<void> {
-  await mutateBlob<Deal>("deals.json", (deals) => {
-    const idx = deals.findIndex((d) => d.id === dealId);
-    if (idx === -1) throw new Error("Deal not found");
-    const deal = deals[idx];
-    const current = deal.participants || (deal.person_id ? [deal.person_id] : []);
-    if (current.includes(personId)) return deals; // already a participant
-    deals[idx] = { ...deal, participants: [...current, personId] };
-    return deals;
-  });
+  await ensureDealsMigrated();
+  const deal = await readSingleBlob<Deal>(dealPath(dealId));
+  if (!deal) throw new Error("Deal not found");
+  const current = deal.participants || (deal.person_id ? [deal.person_id] : []);
+  if (current.includes(personId)) return;
+  await writeSingleBlob(dealPath(dealId), { ...deal, participants: [...current, personId] });
 }
 
 // ─── Bulk write (for migration) ──────────────────────────
 
 export async function bulkWriteDeals(deals: Deal[]): Promise<void> {
-  await writeBlob("deals.json", deals);
+  // Write each deal individually + clean up old deals.json if present
+  await Promise.all(deals.map((deal) => writeSingleBlob(dealPath(deal.id), deal)));
+  try { await del("deals.json"); } catch { /* already gone */ }
+  migrationDone = true;
 }
 
 export async function bulkWritePersons(persons: Person[]): Promise<void> {
