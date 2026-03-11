@@ -619,6 +619,7 @@ function DashboardContent() {
               onArchive={openArchiveModal}
               onWon={markWon}
               onActivityUpdated={handleActivityUpdated}
+              onDeleteActivity={deleteActivityById}
               selected={selectedDeals.has(deal.id)}
               onToggleSelect={toggleDealSelection}
               onDealUpdated={handleDealFieldUpdated}
@@ -1049,6 +1050,7 @@ function DealRow({
   onArchive,
   onWon,
   onActivityUpdated,
+  onDeleteActivity,
   selected,
   onToggleSelect,
   onDealUpdated,
@@ -1061,6 +1063,7 @@ function DealRow({
   onArchive: (activityId: number | null, dealId: number | null, contactName: string) => void;
   onWon: (dealId: number) => void;
   onActivityUpdated: (id: number, data: Partial<Activity>) => void;
+  onDeleteActivity?: (id: number) => void;
   selected: boolean;
   onToggleSelect: (dealId: number) => void;
   onDealUpdated?: (dealId: number, fields: Partial<Deal>) => void;
@@ -1566,12 +1569,15 @@ function DealRow({
                           Done
                         </button>
                       )}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onArchive(a.id, deal.id, a.person_name || deal.title); }}
-                        className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded border border-orange-200 text-orange-700 bg-orange-50 hover:bg-orange-100 cursor-pointer"
-                      >
-                        <Archive className="w-3 h-3" />
-                      </button>
+                      {onDeleteActivity && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onDeleteActivity(a.id); setContextRefreshKey((k) => k + 1); }}
+                          title="Supprimer cette tâche"
+                          className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 cursor-pointer"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
                     </>
                   )}
                 </div>
