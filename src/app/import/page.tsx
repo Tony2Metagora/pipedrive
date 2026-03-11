@@ -144,17 +144,13 @@ export default function ImportPage() {
   const [listName, setListName] = useState("");
   const [creating, setCreating] = useState(false);
 
-  // Sales Navigator search state
-  const [snUrl, setSnUrl] = useState("");
+  // PhantomBuster CSV state
   const [snListName, setSnListName] = useState("");
-  const [snCount, setSnCount] = useState(100);
-  const [snLaunching, setSnLaunching] = useState(false);
-  const [snPolling, setSnPolling] = useState(false);
+  const [snLoading, setSnLoading] = useState(false);
   const [snMsg, setSnMsg] = useState<string | null>(null);
   const [snError, setSnError] = useState<string | null>(null);
   const [snProfiles, setSnProfiles] = useState<PhantomProfile[] | null>(null);
   const [snImporting, setSnImporting] = useState(false);
-  const [snQuota, setSnQuota] = useState<{ used: number; max: number } | null>(null);
 
   // Column visibility
   const [visibleCols, setVisibleCols] = useState<Set<string>>(
@@ -191,13 +187,6 @@ export default function ImportPage() {
     fetchLists();
   }, [fetchLists]);
 
-  // ── Fetch quota ──
-  useEffect(() => {
-    fetch("/api/search/launch")
-      .then((r) => r.json())
-      .then((j) => { if (j.quota !== undefined) setSnQuota({ used: j.quota, max: j.max }); })
-      .catch(() => {});
-  }, []);
 
   // ── Fetch contacts for selected list ──
   const fetchContacts = useCallback(async (listId: string) => {
@@ -299,81 +288,104 @@ export default function ImportPage() {
     }
   };
 
-  // ── Sales Navigator: Launch extraction ──
-  const launchExtraction = async () => {
-    if (!snUrl.trim() || !snListName.trim()) return;
-    setSnLaunching(true);
+  // ── PhantomBuster CSV handler ──
+  const handlePbCsvChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
     setSnError(null);
     setSnMsg(null);
     setSnProfiles(null);
+    setSnLoading(true);
 
     try {
-      const res = await fetch("/api/search/launch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ salesNavUrl: snUrl.trim(), numberOfProfiles: snCount, listName: snListName.trim() }),
-      });
-      const json = await res.json();
-
-      if (json.error) {
-        setSnError(json.error);
-        setSnLaunching(false);
+      const text = await f.text();
+      const lines = text.split(/\r?\n/).filter((l) => l.trim());
+      if (lines.length < 2) {
+        setSnError("Le fichier CSV est vide ou ne contient qu'un en-tête.");
+        setSnLoading(false);
         return;
       }
 
-      if (json.quotaUsed !== undefined) {
-        setSnQuota({ used: json.quotaUsed, max: json.quotaMax });
-      }
-
-      setSnMsg("Extraction lancée... PhantomBuster travaille (~3-5 min)");
-      setSnLaunching(false);
-      setSnPolling(true);
-
-      // Poll for results
-      for (let attempt = 0; attempt < 60; attempt++) {
-        await new Promise((r) => setTimeout(r, 5000));
-        setSnMsg(`Extraction en cours... (${(attempt + 1) * 5}s)`);
-
-        try {
-          const pollRes = await fetch("/api/search/status");
-          const pollJson = await pollRes.json();
-
-          if (pollJson.status === "error") {
-            setSnError(pollJson.error || "Erreur lors de l'extraction");
-            setSnPolling(false);
-            setSnMsg(null);
-            return;
+      // Parse CSV (comma-separated, handle quoted fields)
+      const parseLine = (line: string): string[] => {
+        const result: string[] = [];
+        let current = "";
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (ch === '"') {
+            if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
+            else inQuotes = !inQuotes;
+          } else if (ch === "," && !inQuotes) {
+            result.push(current.trim());
+            current = "";
+          } else {
+            current += ch;
           }
-
-          if (pollJson.status === "finished") {
-            setSnProfiles(pollJson.profiles || []);
-            setSnMsg(`${pollJson.total} profils extraits${pollJson.duplicateCount > 0 ? ` (${pollJson.duplicateCount} doublons)` : ""}`);
-            setSnPolling(false);
-            return;
-          }
-        } catch {
-          // Continue polling on network errors
         }
+        result.push(current.trim());
+        return result;
+      };
+
+      const headers = parseLine(lines[0]).map((h) => h.replace(/^["']|["']$/g, ""));
+      const rows = lines.slice(1).map((line) => {
+        const values = parseLine(line);
+        const row: Record<string, string> = {};
+        headers.forEach((h, i) => { row[h] = (values[i] || "").replace(/^["']|["']$/g, ""); });
+        return row;
+      }).filter((r) => Object.values(r).some((v) => v.trim()));
+
+      if (rows.length === 0) {
+        setSnError("Aucun profil trouvé dans le fichier.");
+        setSnLoading(false);
+        return;
       }
 
-      setSnError("Timeout — l'extraction n'a pas terminé en 5 min");
-      setSnPolling(false);
-      setSnMsg(null);
+      // Map PhantomBuster CSV columns to our PhantomProfile format
+      const profiles = rows.map((r) => ({
+        firstName: r.firstName || r.first_name || r["First Name"] || "",
+        lastName: r.lastName || r.last_name || r["Last Name"] || "",
+        title: r.title || r.jobTitle || r["Job Title"] || "",
+        companyName: r.companyName || r.company || r["Company"] || "",
+        linkedinUrl: r.linkedInProfileUrl || r.linkedinUrl || r.profileUrl || r.defaultProfileUrl || r.linkedin || r["LinkedIn URL"] || "",
+        location: r.location || r.city || "",
+      }));
+
+      // Deduplicate via API
+      const dedupeRes = await fetch("/api/search/dedupe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profiles }),
+      });
+      const dedupeJson = await dedupeRes.json();
+
+      if (dedupeJson.error) {
+        setSnError(dedupeJson.error);
+      } else {
+        setSnProfiles(dedupeJson.profiles || profiles);
+        setSnMsg(`${dedupeJson.total || profiles.length} profils chargés${dedupeJson.duplicateCount > 0 ? ` (${dedupeJson.duplicateCount} doublons)` : ""}`);
+      }
+
+      // Auto-fill list name from file name
+      if (!snListName.trim()) {
+        const baseName = f.name.replace(/\.(csv|xlsx?)$/i, "").replace(/[_-]/g, " ");
+        setSnListName(baseName);
+      }
     } catch (err) {
-      console.error("Launch error:", err);
-      setSnError("Erreur réseau lors du lancement");
-      setSnLaunching(false);
-      setSnPolling(false);
+      console.error("PB CSV parse error:", err);
+      setSnError("Erreur lors de la lecture du fichier CSV.");
+    } finally {
+      setSnLoading(false);
     }
   };
 
-  // ── Sales Navigator: Remove duplicates from results ──
+  // ── PhantomBuster: Remove duplicates from results ──
   const removeDuplicates = () => {
     if (!snProfiles) return;
     setSnProfiles(snProfiles.filter((p) => !p.isDuplicate));
   };
 
-  // ── Sales Navigator: Import profiles into a list ──
+  // ── PhantomBuster: Import profiles into a list ──
   const importProfiles = async () => {
     if (!snProfiles || snProfiles.length === 0 || !snListName.trim()) return;
     setSnImporting(true);
@@ -387,7 +399,6 @@ export default function ImportPage() {
       if (json.data) {
         setSnMsg(`✓ ${json.count} contacts importés dans "${snListName}"`);
         setSnProfiles(null);
-        setSnUrl("");
         setSnListName("");
         await fetchLists();
         setSelectedListId(json.data.id);
@@ -510,14 +521,9 @@ export default function ImportPage() {
             Import &amp; Recherche
           </h1>
           <p className="text-sm text-gray-500 mt-1">
-            Importez des contacts via CSV ou Sales Navigator, enrichissez et exportez.
+            Importez des contacts via CSV ou PhantomBuster, enrichissez et exportez.
           </p>
         </div>
-        {snQuota && (
-          <div className="text-right text-xs text-gray-400">
-            <span className="font-medium text-gray-600">{snQuota.used}</span> / {snQuota.max} extractions ce mois
-          </div>
-        )}
       </div>
 
       {/* Tabs + Content */}
@@ -544,7 +550,7 @@ export default function ImportPage() {
               )}
             >
               <Globe className="w-4 h-4" />
-              Sales Navigator
+              PhantomBuster
             </button>
           </div>
 
@@ -605,69 +611,60 @@ export default function ImportPage() {
             </div>
           )}
 
-          {/* Sales Navigator Tab */}
+          {/* PhantomBuster Tab */}
           {activeTab === "search" && (
             <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
               <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                <Search className="w-4 h-4" />
-                Extraction Sales Navigator
+                <Globe className="w-4 h-4" />
+                Import CSV PhantomBuster
               </h2>
               <p className="text-xs text-gray-400">
-                Faites votre recherche dans Sales Navigator, copiez l&apos;URL de résultats et collez-la ci-dessous.
-                PhantomBuster extraira les profils automatiquement.
+                Exportez vos résultats depuis PhantomBuster au format CSV, puis importez-les ici.
+                Les doublons avec vos listes existantes seront détectés automatiquement.
               </p>
 
-              <div className="space-y-3">
+              <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition-colors">
+                <div className="flex flex-col items-center gap-1.5 text-gray-500">
+                  {snLoading ? (
+                    <>
+                      <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
+                      <span className="text-sm font-medium text-gray-700">Analyse en cours...</span>
+                    </>
+                  ) : snProfiles ? (
+                    <>
+                      <FileSpreadsheet className="w-6 h-6 text-blue-500" />
+                      <span className="text-sm font-medium text-gray-700">{snProfiles.length} profils chargés</span>
+                      <span className="text-xs text-gray-400">Cliquer pour changer de fichier</span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-6 h-6" />
+                      <span className="text-sm font-medium">Glisser un CSV PhantomBuster ou cliquer ici</span>
+                      <span className="text-[10px] text-gray-400">
+                        Colonnes attendues : firstName, lastName, title, companyName, linkedInProfileUrl...
+                      </span>
+                    </>
+                  )}
+                </div>
+                <input type="file" className="hidden" accept=".csv" onChange={handlePbCsvChange} disabled={snLoading} />
+              </label>
+
+              {!snProfiles && !snLoading && (
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">URL de recherche Sales Navigator</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Nom de la liste</label>
                   <input
-                    type="url"
-                    value={snUrl}
-                    onChange={(e) => setSnUrl(e.target.value)}
-                    placeholder="https://www.linkedin.com/sales/search/people?query=..."
+                    type="text"
+                    value={snListName}
+                    onChange={(e) => setSnListName(e.target.value)}
+                    placeholder="Ex: CTO France Tech"
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
-                    disabled={snPolling}
                   />
                 </div>
-                <div className="flex gap-3">
-                  <div className="flex-1">
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Nom de la liste</label>
-                    <input
-                      type="text"
-                      value={snListName}
-                      onChange={(e) => setSnListName(e.target.value)}
-                      placeholder="Ex: CTO France Tech"
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
-                      disabled={snPolling}
-                    />
-                  </div>
-                  <div className="w-32">
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Profils (max 100)</label>
-                    <input
-                      type="number"
-                      value={snCount}
-                      onChange={(e) => setSnCount(Math.min(100, Math.max(1, Number(e.target.value) || 1)))}
-                      min={1}
-                      max={100}
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-400 outline-none"
-                      disabled={snPolling}
-                    />
-                  </div>
-                </div>
-
-                <button
-                  onClick={launchExtraction}
-                  disabled={snLaunching || snPolling || !snUrl.trim() || !snListName.trim()}
-                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
-                >
-                  {(snLaunching || snPolling) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                  {snPolling ? "Extraction en cours..." : "Lancer l'extraction"}
-                </button>
-              </div>
+              )}
 
               {snMsg && (
                 <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-700 flex items-center gap-2">
-                  {snPolling ? <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" /> : <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />}
+                  <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
                   {snMsg}
                 </div>
               )}
@@ -769,9 +766,22 @@ export default function ImportPage() {
                 </div>
               )}
 
+              {snProfiles && !snLoading && snProfiles.length > 0 && !snListName.trim() && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Nom de la liste</label>
+                  <input
+                    type="text"
+                    value={snListName}
+                    onChange={(e) => setSnListName(e.target.value)}
+                    placeholder="Ex: CTO France Tech"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+                  />
+                </div>
+              )}
+
               {snProfiles && snProfiles.length === 0 && (
                 <div className="p-4 text-center text-sm text-gray-400">
-                  Aucun profil extrait. Vérifiez l&apos;URL de recherche Sales Navigator.
+                  Aucun profil trouvé dans le fichier CSV.
                 </div>
               )}
             </div>
@@ -803,7 +813,7 @@ export default function ImportPage() {
                 >
                   <div className="min-w-0 flex items-center gap-2">
                     {l.source === "search" ? (
-                      <span title="Sales Navigator"><Globe className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" /></span>
+                      <span title="PhantomBuster"><Globe className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" /></span>
                     ) : (
                       <span title="Import CSV"><FileSpreadsheet className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" /></span>
                     )}
