@@ -15,6 +15,11 @@ import {
   ChevronDown,
   Users,
   Plus,
+  Search,
+  Globe,
+  AlertTriangle,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useResizableColumns } from "@/hooks/useResizableColumns";
@@ -26,6 +31,8 @@ interface ImportList {
   name: string;
   created_at: string;
   count: number;
+  companies?: string[];
+  source?: "csv" | "search";
 }
 
 interface ImportContact {
@@ -53,6 +60,19 @@ interface ImportContact {
   email_qualification?: string;
   enriched?: boolean;
 }
+
+interface PhantomProfile {
+  firstName: string;
+  lastName: string;
+  title: string;
+  companyName: string;
+  linkedinUrl: string;
+  location?: string;
+  isDuplicate?: boolean;
+  duplicateListName?: string;
+}
+
+type TabKey = "csv" | "search";
 
 // ─── Column definitions ──────────────────────────────────
 
@@ -108,6 +128,9 @@ function parseCsv(text: string): { headers: string[]; rows: Record<string, strin
 // ─── Main Component ──────────────────────────────────────
 
 export default function ImportPage() {
+  // Tab
+  const [activeTab, setActiveTab] = useState<TabKey>("csv");
+
   // Lists state
   const [lists, setLists] = useState<ImportList[]>([]);
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
@@ -115,11 +138,23 @@ export default function ImportPage() {
   const [loadingLists, setLoadingLists] = useState(true);
   const [loadingContacts, setLoadingContacts] = useState(false);
 
-  // Upload state
+  // CSV Upload state
   const [csvError, setCsvError] = useState<string | null>(null);
   const [parsedRows, setParsedRows] = useState<Record<string, string>[] | null>(null);
   const [listName, setListName] = useState("");
   const [creating, setCreating] = useState(false);
+
+  // Sales Navigator search state
+  const [snUrl, setSnUrl] = useState("");
+  const [snListName, setSnListName] = useState("");
+  const [snCount, setSnCount] = useState(100);
+  const [snLaunching, setSnLaunching] = useState(false);
+  const [snPolling, setSnPolling] = useState(false);
+  const [snMsg, setSnMsg] = useState<string | null>(null);
+  const [snError, setSnError] = useState<string | null>(null);
+  const [snProfiles, setSnProfiles] = useState<PhantomProfile[] | null>(null);
+  const [snImporting, setSnImporting] = useState(false);
+  const [snQuota, setSnQuota] = useState<{ used: number; max: number } | null>(null);
 
   // Column visibility
   const [visibleCols, setVisibleCols] = useState<Set<string>>(
@@ -131,7 +166,7 @@ export default function ImportPage() {
   const [enriching, setEnriching] = useState(false);
   const [enrichMsg, setEnrichMsg] = useState<string | null>(null);
 
-  // Search
+  // Search (table filter)
   const [search, setSearch] = useState("");
 
   // Resizable columns
@@ -155,6 +190,14 @@ export default function ImportPage() {
   useEffect(() => {
     fetchLists();
   }, [fetchLists]);
+
+  // ── Fetch quota ──
+  useEffect(() => {
+    fetch("/api/search/launch")
+      .then((r) => r.json())
+      .then((j) => { if (j.quota !== undefined) setSnQuota({ used: j.quota, max: j.max }); })
+      .catch(() => {});
+  }, []);
 
   // ── Fetch contacts for selected list ──
   const fetchContacts = useCallback(async (listId: string) => {
@@ -187,7 +230,6 @@ export default function ImportPage() {
       const text = ev.target?.result as string;
       const { headers, rows } = parseCsv(text);
 
-      // Validate headers
       const missing = EXPECTED_CSV_COLUMNS.filter((c) => !headers.includes(c));
       const extra = headers.filter((h) => !EXPECTED_CSV_COLUMNS.includes(h));
 
@@ -209,14 +251,13 @@ export default function ImportPage() {
       }
 
       setParsedRows(rows);
-      // Auto-generate list name from filename
       const baseName = f.name.replace(/\.(csv|xlsx?)$/i, "").replace(/[_-]/g, " ");
       setListName(baseName);
     };
     reader.readAsText(f, "UTF-8");
   };
 
-  // ── Create list ──
+  // ── Create list (CSV) ──
   const createList = async () => {
     if (!parsedRows || !listName.trim()) return;
     setCreating(true);
@@ -258,6 +299,108 @@ export default function ImportPage() {
     }
   };
 
+  // ── Sales Navigator: Launch extraction ──
+  const launchExtraction = async () => {
+    if (!snUrl.trim() || !snListName.trim()) return;
+    setSnLaunching(true);
+    setSnError(null);
+    setSnMsg(null);
+    setSnProfiles(null);
+
+    try {
+      const res = await fetch("/api/search/launch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ salesNavUrl: snUrl.trim(), numberOfProfiles: snCount, listName: snListName.trim() }),
+      });
+      const json = await res.json();
+
+      if (json.error) {
+        setSnError(json.error);
+        setSnLaunching(false);
+        return;
+      }
+
+      if (json.quotaUsed !== undefined) {
+        setSnQuota({ used: json.quotaUsed, max: json.quotaMax });
+      }
+
+      setSnMsg("Extraction lancée... PhantomBuster travaille (~3-5 min)");
+      setSnLaunching(false);
+      setSnPolling(true);
+
+      // Poll for results
+      for (let attempt = 0; attempt < 60; attempt++) {
+        await new Promise((r) => setTimeout(r, 5000));
+        setSnMsg(`Extraction en cours... (${(attempt + 1) * 5}s)`);
+
+        try {
+          const pollRes = await fetch("/api/search/status");
+          const pollJson = await pollRes.json();
+
+          if (pollJson.status === "error") {
+            setSnError(pollJson.error || "Erreur lors de l'extraction");
+            setSnPolling(false);
+            setSnMsg(null);
+            return;
+          }
+
+          if (pollJson.status === "finished") {
+            setSnProfiles(pollJson.profiles || []);
+            setSnMsg(`${pollJson.total} profils extraits${pollJson.duplicateCount > 0 ? ` (${pollJson.duplicateCount} doublons)` : ""}`);
+            setSnPolling(false);
+            return;
+          }
+        } catch {
+          // Continue polling on network errors
+        }
+      }
+
+      setSnError("Timeout — l'extraction n'a pas terminé en 5 min");
+      setSnPolling(false);
+      setSnMsg(null);
+    } catch (err) {
+      console.error("Launch error:", err);
+      setSnError("Erreur réseau lors du lancement");
+      setSnLaunching(false);
+      setSnPolling(false);
+    }
+  };
+
+  // ── Sales Navigator: Remove duplicates from results ──
+  const removeDuplicates = () => {
+    if (!snProfiles) return;
+    setSnProfiles(snProfiles.filter((p) => !p.isDuplicate));
+  };
+
+  // ── Sales Navigator: Import profiles into a list ──
+  const importProfiles = async () => {
+    if (!snProfiles || snProfiles.length === 0 || !snListName.trim()) return;
+    setSnImporting(true);
+    try {
+      const res = await fetch("/api/search/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profiles: snProfiles, listName: snListName.trim() }),
+      });
+      const json = await res.json();
+      if (json.data) {
+        setSnMsg(`✓ ${json.count} contacts importés dans "${snListName}"`);
+        setSnProfiles(null);
+        setSnUrl("");
+        setSnListName("");
+        await fetchLists();
+        setSelectedListId(json.data.id);
+      } else {
+        setSnError(json.error || "Erreur lors de l'import");
+      }
+    } catch {
+      setSnError("Erreur réseau lors de l'import");
+    } finally {
+      setSnImporting(false);
+    }
+  };
+
   // ── Enrich via Dropcontact ──
   const enrichList = async () => {
     if (!selectedListId) return;
@@ -273,7 +416,6 @@ export default function ImportPage() {
     setEnrichMsg("Envoi à Dropcontact...");
 
     try {
-      // Step 1: Submit
       const submitRes = await fetch(`/api/imports/${selectedListId}/enrich`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -291,7 +433,6 @@ export default function ImportPage() {
       const { requestId, contactIds } = submitJson;
       setEnrichMsg(`Dropcontact traite ${submitJson.count} contacts...`);
 
-      // Step 2: Poll (every 5s, max 2 min)
       for (let attempt = 0; attempt < 24; attempt++) {
         await new Promise((r) => setTimeout(r, 5000));
         setEnrichMsg(`Enrichissement en cours... (${(attempt + 1) * 5}s)`);
@@ -357,6 +498,7 @@ export default function ImportPage() {
   const visibleColumns = ALL_COLUMNS.filter((c) => visibleCols.has(c.key));
   const selectedList = lists.find((l) => l.id === selectedListId);
   const enrichableCount = contacts.filter((c) => (!c.email || !c.phone || !c.linkedin) && !c.enriched).length;
+  const snDuplicateCount = snProfiles?.filter((p) => p.isDuplicate).length ?? 0;
 
   return (
     <div className="space-y-6">
@@ -365,72 +507,278 @@ export default function ImportPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-3">
             <Upload className="w-7 h-7 text-indigo-600" />
-            Import CSV
+            Import &amp; Recherche
           </h1>
           <p className="text-sm text-gray-500 mt-1">
-            Importez une liste de contacts, enrichissez avec Dropcontact, exportez le CSV enrichi.
+            Importez des contacts via CSV ou Sales Navigator, enrichissez et exportez.
           </p>
         </div>
+        {snQuota && (
+          <div className="text-right text-xs text-gray-400">
+            <span className="font-medium text-gray-600">{snQuota.used}</span> / {snQuota.max} extractions ce mois
+          </div>
+        )}
       </div>
 
-      {/* Upload zone + list selector */}
+      {/* Tabs + Content */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Upload */}
-        <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-5">
-          <h2 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-            <Plus className="w-4 h-4" />
-            Nouvelle liste
-          </h2>
-          <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/50 transition-colors">
-            <div className="flex flex-col items-center gap-1.5 text-gray-500">
-              {parsedRows ? (
-                <>
-                  <FileSpreadsheet className="w-6 h-6 text-indigo-500" />
-                  <span className="text-sm font-medium text-gray-700">{parsedRows.length} contacts détectés</span>
-                  <span className="text-xs text-gray-400">Cliquer pour changer de fichier</span>
-                </>
-              ) : (
-                <>
-                  <Upload className="w-6 h-6" />
-                  <span className="text-sm font-medium">Glisser un fichier CSV ou cliquer ici</span>
-                  <span className="text-[10px] text-gray-400">
-                    Colonnes : {EXPECTED_CSV_COLUMNS.join(" ; ")}
-                  </span>
-                </>
+        {/* Left: Tab content */}
+        <div className="lg:col-span-2 space-y-4">
+          {/* Tab switcher */}
+          <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+            <button
+              onClick={() => setActiveTab("csv")}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors cursor-pointer",
+                activeTab === "csv" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
               )}
-            </div>
-            <input type="file" className="hidden" accept=".csv" onChange={handleFileChange} />
-          </label>
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              Import CSV
+            </button>
+            <button
+              onClick={() => setActiveTab("search")}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors cursor-pointer",
+                activeTab === "search" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
+              )}
+            >
+              <Globe className="w-4 h-4" />
+              Sales Navigator
+            </button>
+          </div>
 
-          {csvError && (
-            <div className="mt-3 p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-              {csvError}
+          {/* CSV Tab */}
+          {activeTab === "csv" && (
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <h2 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                <Plus className="w-4 h-4" />
+                Nouvelle liste CSV
+              </h2>
+              <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/50 transition-colors">
+                <div className="flex flex-col items-center gap-1.5 text-gray-500">
+                  {parsedRows ? (
+                    <>
+                      <FileSpreadsheet className="w-6 h-6 text-indigo-500" />
+                      <span className="text-sm font-medium text-gray-700">{parsedRows.length} contacts détectés</span>
+                      <span className="text-xs text-gray-400">Cliquer pour changer de fichier</span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-6 h-6" />
+                      <span className="text-sm font-medium">Glisser un fichier CSV ou cliquer ici</span>
+                      <span className="text-[10px] text-gray-400">
+                        Colonnes : {EXPECTED_CSV_COLUMNS.join(" ; ")}
+                      </span>
+                    </>
+                  )}
+                </div>
+                <input type="file" className="hidden" accept=".csv" onChange={handleFileChange} />
+              </label>
+
+              {csvError && (
+                <div className="mt-3 p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  {csvError}
+                </div>
+              )}
+
+              {parsedRows && (
+                <div className="mt-3 flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={listName}
+                    onChange={(e) => setListName(e.target.value)}
+                    placeholder="Nom de la liste (ex: Salon VivaTech 2026)"
+                    className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+                  />
+                  <button
+                    onClick={createList}
+                    disabled={creating || !listName.trim()}
+                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+                  >
+                    {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                    Importer
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
-          {parsedRows && (
-            <div className="mt-3 flex items-center gap-2">
-              <input
-                type="text"
-                value={listName}
-                onChange={(e) => setListName(e.target.value)}
-                placeholder="Nom de la liste (ex: Salon VivaTech 2026)"
-                className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
-              />
-              <button
-                onClick={createList}
-                disabled={creating || !listName.trim()}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
-              >
-                {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                Importer
-              </button>
+          {/* Sales Navigator Tab */}
+          {activeTab === "search" && (
+            <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+              <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                <Search className="w-4 h-4" />
+                Extraction Sales Navigator
+              </h2>
+              <p className="text-xs text-gray-400">
+                Faites votre recherche dans Sales Navigator, copiez l&apos;URL de résultats et collez-la ci-dessous.
+                PhantomBuster extraira les profils automatiquement.
+              </p>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">URL de recherche Sales Navigator</label>
+                  <input
+                    type="url"
+                    value={snUrl}
+                    onChange={(e) => setSnUrl(e.target.value)}
+                    placeholder="https://www.linkedin.com/sales/search/people?query=..."
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+                    disabled={snPolling}
+                  />
+                </div>
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Nom de la liste</label>
+                    <input
+                      type="text"
+                      value={snListName}
+                      onChange={(e) => setSnListName(e.target.value)}
+                      placeholder="Ex: CTO France Tech"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+                      disabled={snPolling}
+                    />
+                  </div>
+                  <div className="w-32">
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Profils (max 100)</label>
+                    <input
+                      type="number"
+                      value={snCount}
+                      onChange={(e) => setSnCount(Math.min(100, Math.max(1, Number(e.target.value) || 1)))}
+                      min={1}
+                      max={100}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-400 outline-none"
+                      disabled={snPolling}
+                    />
+                  </div>
+                </div>
+
+                <button
+                  onClick={launchExtraction}
+                  disabled={snLaunching || snPolling || !snUrl.trim() || !snListName.trim()}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
+                >
+                  {(snLaunching || snPolling) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                  {snPolling ? "Extraction en cours..." : "Lancer l'extraction"}
+                </button>
+              </div>
+
+              {snMsg && (
+                <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-700 flex items-center gap-2">
+                  {snPolling ? <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" /> : <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />}
+                  {snMsg}
+                </div>
+              )}
+
+              {snError && (
+                <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 flex items-center gap-2">
+                  <XCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                  {snError}
+                </div>
+              )}
+
+              {/* Results preview */}
+              {snProfiles && snProfiles.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-semibold text-gray-700">
+                      {snProfiles.length} profils extraits
+                    </h3>
+                    <div className="flex items-center gap-2">
+                      {snDuplicateCount > 0 && (
+                        <button
+                          onClick={removeDuplicates}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 cursor-pointer"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          Supprimer {snDuplicateCount} doublon{snDuplicateCount > 1 ? "s" : ""}
+                        </button>
+                      )}
+                      <button
+                        onClick={importProfiles}
+                        disabled={snImporting}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+                      >
+                        {snImporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                        Importer dans la liste
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto rounded-lg border border-gray-200">
+                    <table className="w-full text-xs">
+                      <thead className="bg-gray-50 text-gray-500 text-[10px] uppercase">
+                        <tr>
+                          <th className="px-3 py-2 text-left w-8"></th>
+                          <th className="px-3 py-2 text-left">Prénom</th>
+                          <th className="px-3 py-2 text-left">Nom</th>
+                          <th className="px-3 py-2 text-left">Poste</th>
+                          <th className="px-3 py-2 text-left">Entreprise</th>
+                          <th className="px-3 py-2 text-left w-8">LI</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {snProfiles.slice(0, 50).map((p, i) => (
+                          <tr key={i} className={cn("hover:bg-gray-50/50", p.isDuplicate && "bg-orange-50/50")}>
+                            <td className="px-3 py-1.5">
+                              {p.isDuplicate ? (
+                                <span title={`Doublon : ${p.duplicateListName}`}><AlertTriangle className="w-3.5 h-3.5 text-orange-500" /></span>
+                              ) : (
+                                <CheckCircle2 className="w-3.5 h-3.5 text-green-400" />
+                              )}
+                            </td>
+                            <td className="px-3 py-1.5 text-gray-800">{p.firstName}</td>
+                            <td className="px-3 py-1.5 text-gray-800">{p.lastName}</td>
+                            <td className="px-3 py-1.5 text-gray-600 max-w-[200px] truncate">{p.title}</td>
+                            <td className="px-3 py-1.5 text-gray-600">{p.companyName}</td>
+                            <td className="px-3 py-1.5">
+                              {p.linkedinUrl ? (
+                                <a href={p.linkedinUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800">
+                                  <Linkedin className="w-3.5 h-3.5" />
+                                </a>
+                              ) : (
+                                <span className="text-gray-200"><Linkedin className="w-3.5 h-3.5" /></span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {snProfiles.length > 50 && (
+                      <div className="px-3 py-2 text-center text-[10px] text-gray-400 bg-gray-50 border-t border-gray-100">
+                        ... et {snProfiles.length - 50} de plus
+                      </div>
+                    )}
+                  </div>
+
+                  {snDuplicateCount > 0 && (
+                    <div className="p-3 rounded-lg bg-orange-50 border border-orange-200 text-xs text-orange-700 flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <strong>{snDuplicateCount} doublon{snDuplicateCount > 1 ? "s" : ""}</strong> détecté{snDuplicateCount > 1 ? "s" : ""} (même nom + prénom + entreprise).
+                        {snProfiles.filter((p) => p.isDuplicate).slice(0, 5).map((p, i) => (
+                          <div key={i} className="mt-0.5 text-[10px] text-orange-600">
+                            {p.firstName} {p.lastName} · {p.companyName} — déjà dans &quot;{p.duplicateListName}&quot;
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {snProfiles && snProfiles.length === 0 && (
+                <div className="p-4 text-center text-sm text-gray-400">
+                  Aucun profil extrait. Vérifiez l&apos;URL de recherche Sales Navigator.
+                </div>
+              )}
             </div>
           )}
         </div>
 
-        {/* List selector */}
+        {/* Right: List selector */}
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <h2 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
             <Users className="w-4 h-4" />
@@ -443,8 +791,8 @@ export default function ImportPage() {
           ) : lists.length === 0 ? (
             <p className="text-xs text-gray-400 py-4">Aucune liste importée</p>
           ) : (
-            <div className="space-y-1.5 max-h-64 overflow-y-auto">
-              {lists.sort((a, b) => b.created_at.localeCompare(a.created_at)).map((l) => (
+            <div className="space-y-1.5 max-h-80 overflow-y-auto">
+              {[...lists].sort((a, b) => b.created_at.localeCompare(a.created_at)).map((l) => (
                 <div
                   key={l.id}
                   className={cn(
@@ -453,11 +801,18 @@ export default function ImportPage() {
                   )}
                   onClick={() => setSelectedListId(l.id)}
                 >
-                  <div className="min-w-0">
-                    <p className={cn("font-medium truncate", selectedListId === l.id ? "text-indigo-700" : "text-gray-700")}>{l.name}</p>
-                    <p className="text-gray-400 text-[10px]">
-                      {l.count} contacts · {new Date(l.created_at).toLocaleDateString("fr-FR")}
-                    </p>
+                  <div className="min-w-0 flex items-center gap-2">
+                    {l.source === "search" ? (
+                      <span title="Sales Navigator"><Globe className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" /></span>
+                    ) : (
+                      <span title="Import CSV"><FileSpreadsheet className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" /></span>
+                    )}
+                    <div className="min-w-0">
+                      <p className={cn("font-medium truncate", selectedListId === l.id ? "text-indigo-700" : "text-gray-700")}>{l.name}</p>
+                      <p className="text-gray-400 text-[10px]">
+                        {l.count} contacts{l.companies?.length ? ` · ${l.companies.length} entrep.` : ""} · {new Date(l.created_at).toLocaleDateString("fr-FR")}
+                      </p>
+                    </div>
                   </div>
                   <button
                     onClick={(e) => { e.stopPropagation(); deleteList(l.id); }}
@@ -472,17 +827,66 @@ export default function ImportPage() {
         </div>
       </div>
 
+      {/* CSV Preview table */}
+      {activeTab === "csv" && parsedRows && parsedRows.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="p-4 border-b border-gray-100">
+            <h2 className="text-sm font-semibold text-gray-700">
+              Prévisualisation — {parsedRows.length} contact{parsedRows.length > 1 ? "s" : ""}
+            </h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-gray-50 text-gray-500 text-[10px] uppercase">
+                <tr>
+                  {EXPECTED_CSV_COLUMNS.map((col) => (
+                    <th key={col} className="px-3 py-2.5 text-left">{col}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {parsedRows.slice(0, 20).map((row, i) => (
+                  <tr key={i} className="hover:bg-gray-50">
+                    {EXPECTED_CSV_COLUMNS.map((col) => (
+                      <td key={col} className="px-3 py-2 text-gray-700 max-w-[180px] truncate">
+                        {row[col] || <span className="text-gray-300">—</span>}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+                {parsedRows.length > 20 && (
+                  <tr>
+                    <td colSpan={EXPECTED_CSV_COLUMNS.length} className="px-4 py-2 text-center text-gray-400 text-[10px]">
+                      ... et {parsedRows.length - 20} de plus
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Selected list content */}
       {selectedListId && selectedList && (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           {/* Toolbar */}
           <div className="p-4 border-b border-gray-100 flex flex-wrap items-center gap-3">
-            <div className="flex-1 min-w-0">
-              <h2 className="text-sm font-semibold text-gray-700 truncate">{selectedList.name}</h2>
-              <p className="text-xs text-gray-400">{contacts.length} contacts{enrichableCount > 0 ? ` · ${enrichableCount} à enrichir` : ""}</p>
+            <div className="flex-1 min-w-0 flex items-center gap-2">
+              {selectedList.source === "search" ? (
+                <Globe className="w-4 h-4 text-blue-500 flex-shrink-0" />
+              ) : (
+                <FileSpreadsheet className="w-4 h-4 text-gray-400 flex-shrink-0" />
+              )}
+              <div className="min-w-0">
+                <h2 className="text-sm font-semibold text-gray-700 truncate">{selectedList.name}</h2>
+                <p className="text-xs text-gray-400">
+                  {contacts.length} contacts{selectedList.companies?.length ? ` · ${selectedList.companies.length} entreprises` : ""}
+                  {enrichableCount > 0 ? ` · ${enrichableCount} à enrichir` : ""}
+                </p>
+              </div>
             </div>
 
-            {/* Search */}
             <input
               type="text"
               value={search}
@@ -495,7 +899,6 @@ export default function ImportPage() {
               <span className="text-xs font-medium px-2 py-1 rounded bg-green-50 text-green-700">{enrichMsg}</span>
             )}
 
-            {/* Column picker */}
             <div className="relative">
               <button
                 onClick={() => setShowColPicker(!showColPicker)}
@@ -525,7 +928,6 @@ export default function ImportPage() {
               )}
             </div>
 
-            {/* Enrich button */}
             <button
               onClick={enrichList}
               disabled={enriching || enrichableCount === 0}
@@ -535,7 +937,6 @@ export default function ImportPage() {
               Enrichir ({enrichableCount})
             </button>
 
-            {/* Download button */}
             <button
               onClick={downloadCsv}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 cursor-pointer"
@@ -615,46 +1016,6 @@ export default function ImportPage() {
               </table>
             </div>
           )}
-        </div>
-      )}
-
-      {/* Preview table for CSV before import */}
-      {parsedRows && parsedRows.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="p-4 border-b border-gray-100">
-            <h2 className="text-sm font-semibold text-gray-700">
-              Prévisualisation — {parsedRows.length} contact{parsedRows.length > 1 ? "s" : ""}
-            </h2>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead className="bg-gray-50 text-gray-500 text-[10px] uppercase">
-                <tr>
-                  {EXPECTED_CSV_COLUMNS.map((col) => (
-                    <th key={col} className="px-3 py-2.5 text-left">{col}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {parsedRows.slice(0, 20).map((row, i) => (
-                  <tr key={i} className="hover:bg-gray-50">
-                    {EXPECTED_CSV_COLUMNS.map((col) => (
-                      <td key={col} className="px-3 py-2 text-gray-700 max-w-[180px] truncate">
-                        {row[col] || <span className="text-gray-300">—</span>}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-                {parsedRows.length > 20 && (
-                  <tr>
-                    <td colSpan={EXPECTED_CSV_COLUMNS.length} className="px-4 py-2 text-center text-gray-400 text-[10px]">
-                      ... et {parsedRows.length - 20} de plus
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
         </div>
       )}
     </div>

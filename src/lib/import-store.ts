@@ -42,6 +42,8 @@ export interface ImportList {
   name: string;
   created_at: string;
   count: number;
+  companies: string[];
+  source: "csv" | "search";
 }
 
 // ─── CSV column names (mandatory header names) ──────────
@@ -107,17 +109,41 @@ export async function writeImportContacts(listId: string, contacts: ImportContac
   await writeBlob(listFile(listId), contacts);
 }
 
-export async function createImportList(name: string, contacts: ImportContact[]): Promise<ImportList> {
+export async function createImportList(
+  name: string,
+  contacts: ImportContact[],
+  source: "csv" | "search" = "csv"
+): Promise<ImportList> {
   const id = `imp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const companies = [...new Set(
+    contacts.map((c) => c.company?.trim().toLowerCase()).filter(Boolean)
+  )].sort();
   const entry: ImportList = {
     id,
     name,
     created_at: new Date().toISOString(),
     count: contacts.length,
+    companies,
+    source,
   };
   await writeImportContacts(id, contacts);
   await addToIndex(entry);
   return entry;
+}
+
+/**
+ * Load all contacts from all import lists (for cross-list deduplication).
+ */
+export async function getAllImportContacts(): Promise<{ listId: string; listName: string; contact: ImportContact }[]> {
+  const index = await getImportIndex();
+  const all: { listId: string; listName: string; contact: ImportContact }[] = [];
+  for (const list of index) {
+    const contacts = await getImportContacts(list.id);
+    for (const c of contacts) {
+      all.push({ listId: list.id, listName: list.name, contact: c });
+    }
+  }
+  return all;
 }
 
 export async function deleteImportList(id: string): Promise<void> {
