@@ -193,36 +193,70 @@ async function listBlobPathnames(prefix: string): Promise<string[]> {
   return pathnames;
 }
 
-// ─── Deals (per-deal blob: deals/d-{id}.json) ───────────
+// ─── Deals (hybrid: per-deal files for writes, index for fast reads) ─
 
 const DEAL_PREFIX = "deals/d-";
+const DEALS_INDEX = "deals-index.json";
 function dealPath(id: number) { return `${DEAL_PREFIX}${id}.json`; }
 
-/** One-time migration: if old deals.json exists, split into individual files and delete it */
+/** Rebuild the index from individual deal files (slow, used as fallback) */
+async function rebuildDealsIndex(): Promise<Deal[]> {
+  const pathnames = await listBlobPathnames(DEAL_PREFIX);
+  if (pathnames.length === 0) return [];
+  const deals = (await Promise.all(pathnames.map((p) => readSingleBlob<Deal>(p))))
+    .filter((d): d is Deal => d !== null);
+  await writeBlob(DEALS_INDEX, deals);
+  console.log(`[deals] Rebuilt index: ${deals.length} deals`);
+  return deals;
+}
+
+/** Update the index after a single deal write — read index, patch it, write back */
+async function patchIndex(deal: Deal, mode: "upsert" | "delete"): Promise<void> {
+  try {
+    const all = await readBlob<Deal>(DEALS_INDEX);
+    let updated: Deal[];
+    if (mode === "delete") {
+      updated = all.filter((d) => d.id !== deal.id);
+    } else {
+      const idx = all.findIndex((d) => d.id === deal.id);
+      if (idx === -1) {
+        updated = [...all, deal];
+      } else {
+        updated = [...all];
+        updated[idx] = deal;
+      }
+    }
+    await writeBlob(DEALS_INDEX, updated);
+  } catch (err) {
+    console.warn("[patchIndex] Failed, index will self-heal on next full read:", err);
+  }
+}
+
+/** One-time migration from old deals.json to per-deal files + index */
 let migrationDone = false;
 async function ensureDealsMigrated(): Promise<void> {
   if (migrationDone) return;
   migrationDone = true;
   try {
     const oldDeals = await readBlobStrict<Deal>("deals.json");
-    if (oldDeals.length === 0) return; // no old data
-    console.log(`[deals migration] Migrating ${oldDeals.length} deals from deals.json to individual blobs...`);
+    if (oldDeals.length === 0) return;
+    console.log(`[deals migration] Migrating ${oldDeals.length} deals...`);
     await Promise.all(oldDeals.map((deal) => writeSingleBlob(dealPath(deal.id), deal)));
+    await writeBlob(DEALS_INDEX, oldDeals);
     await del("deals.json");
-    console.log(`[deals migration] Done. Deleted deals.json.`);
+    console.log(`[deals migration] Done.`);
   } catch {
-    // deals.json doesn't exist or is empty — nothing to migrate
+    // deals.json doesn't exist — nothing to migrate
   }
 }
 
 export async function getDeals(): Promise<Deal[]> {
   await ensureDealsMigrated();
-  const pathnames = await listBlobPathnames(DEAL_PREFIX);
-  if (pathnames.length === 0) return [];
-  const deals = await Promise.all(
-    pathnames.map((p) => readSingleBlob<Deal>(p))
-  );
-  return deals.filter((d): d is Deal => d !== null);
+  // Fast path: read the index
+  const indexed = await readBlob<Deal>(DEALS_INDEX);
+  if (indexed.length > 0) return indexed;
+  // Fallback: rebuild from individual files
+  return rebuildDealsIndex();
 }
 
 export async function getDeal(id: number): Promise<Deal | null> {
@@ -232,39 +266,30 @@ export async function getDeal(id: number): Promise<Deal | null> {
 
 export async function createDeal(data: Omit<Deal, "id">): Promise<Deal> {
   await ensureDealsMigrated();
-  // Get next ID by scanning existing deal files
-  const pathnames = await listBlobPathnames(DEAL_PREFIX);
-  let maxId = 0;
-  for (const p of pathnames) {
-    const match = p.match(/d-(\d+)\.json$/);
-    if (match) maxId = Math.max(maxId, Number(match[1]));
-  }
+  // Get next ID from index (fast)
+  const all = await readBlob<Deal>(DEALS_INDEX);
+  const maxId = all.reduce((max, d) => Math.max(max, d.id), 0);
   const created = { ...data, id: maxId + 1 } as Deal;
   await writeSingleBlob(dealPath(created.id), created);
+  await patchIndex(created, "upsert");
   return created;
 }
 
 export async function updateDeal(id: number, data: Partial<Deal>): Promise<Deal | null> {
   await ensureDealsMigrated();
-  const path = dealPath(id);
-  console.log(`[updateDeal] Reading ${path}...`);
-  const deal = await readSingleBlob<Deal>(path);
-  if (!deal) {
-    console.warn(`[updateDeal] Deal ${id} not found at ${path}`);
-    return null;
-  }
+  const deal = await readSingleBlob<Deal>(dealPath(id));
+  if (!deal) return null;
   const updated = { ...deal, ...data, id };
-  console.log(`[updateDeal] Writing ${path}, changes:`, JSON.stringify(data));
-  await writeSingleBlob(path, updated);
-  // Verify write succeeded
-  const verify = await readSingleBlob<Deal>(path);
-  console.log(`[updateDeal] Verify ${path}:`, verify ? `pipeline=${verify.pipeline_id}, stage=${verify.stage_id}, status=${verify.status}` : "null!");
+  await writeSingleBlob(dealPath(id), updated);
+  await patchIndex(updated, "upsert");
   return updated;
 }
 
 export async function deleteDeal(id: number): Promise<void> {
   await ensureDealsMigrated();
+  const deal = await readSingleBlob<Deal>(dealPath(id));
   await deleteSingleBlob(dealPath(id));
+  if (deal) await patchIndex(deal, "delete");
 }
 
 // ─── Persons ─────────────────────────────────────────────
@@ -420,14 +445,16 @@ export async function addDealParticipant(dealId: number, personId: number): Prom
   if (!deal) throw new Error("Deal not found");
   const current = deal.participants || (deal.person_id ? [deal.person_id] : []);
   if (current.includes(personId)) return;
-  await writeSingleBlob(dealPath(dealId), { ...deal, participants: [...current, personId] });
+  const updated = { ...deal, participants: [...current, personId] };
+  await writeSingleBlob(dealPath(dealId), updated);
+  await patchIndex(updated, "upsert");
 }
 
 // ─── Bulk write (for migration) ──────────────────────────
 
 export async function bulkWriteDeals(deals: Deal[]): Promise<void> {
-  // Write each deal individually + clean up old deals.json if present
   await Promise.all(deals.map((deal) => writeSingleBlob(dealPath(deal.id), deal)));
+  await writeBlob(DEALS_INDEX, deals);
   try { await del("deals.json"); } catch { /* already gone */ }
   migrationDone = true;
 }
