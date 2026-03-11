@@ -32,52 +32,31 @@ async function readDealsRaw(urlOverride?: string): Promise<{ deals: unknown[]; r
 
 export async function GET() {
   try {
-    // Step 1: Read current state
-    const before = await readDealsRaw();
-    const beforeCount = before.deals.length;
-    const beforeFirst = before.deals[0] as Record<string, unknown> | undefined;
-
-    // Step 2: Write with a test marker
-    const deals = before.deals as Record<string, unknown>[];
-    if (deals.length > 0) {
-      deals[0]._test_marker = Date.now();
+    // READ-ONLY: just check if we can find and read deals.json
+    const url = await findBlobUrl("deals.json");
+    if (!url) {
+      return NextResponse.json({ error: "deals.json not found via list()", allBlobs: await listAll() });
     }
-    const putResult = await put("deals.json", JSON.stringify(deals), {
-      access: "private",
-      addRandomSuffix: false,
-      allowOverwrite: true,
-      cacheControlMaxAge: 0,
-    });
-
-    // Step 3: Read back immediately using the URL returned by put() (bypasses CDN)
-    const after = await readDealsRaw(putResult.downloadUrl);
-    const afterFirst = after.deals[0] as Record<string, unknown> | undefined;
-
-    // Step 4: Clean up test marker
-    if (deals.length > 0) {
-      delete deals[0]._test_marker;
-    }
-    await put("deals.json", JSON.stringify(deals), {
-      access: "private",
-      addRandomSuffix: false,
-      allowOverwrite: true,
-      cacheControlMaxAge: 0,
-    });
-
+    const data = await readDealsRaw(url);
     return NextResponse.json({
-      beforeCount,
-      beforeFirstTitle: beforeFirst?.title,
-      beforeMarker: beforeFirst?._test_marker ?? "none",
-      putUrl: putResult.url,
-      afterCount: after.deals.length,
-      afterFirstTitle: afterFirst?.title,
-      afterMarker: afterFirst?._test_marker ?? "none",
-      markerMatch: afterFirst?._test_marker === deals[0]?._test_marker || afterFirst?._test_marker !== "none",
-      conclusion: afterFirst?._test_marker !== undefined && afterFirst?._test_marker !== "none"
-        ? "WRITE+READ works — blob is fresh"
-        : "STALE READ — CDN cache still serving old version",
+      url,
+      count: data.deals.length,
+      raw: data.raw,
     });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }
+}
+
+async function listAll() {
+  const names: string[] = [];
+  let hasMore = true;
+  let cursor: string | undefined;
+  while (hasMore) {
+    const result = await list({ cursor });
+    for (const b of result.blobs) names.push(b.pathname);
+    hasMore = result.hasMore;
+    cursor = result.cursor;
+  }
+  return names;
 }
