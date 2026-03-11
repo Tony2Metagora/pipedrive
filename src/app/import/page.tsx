@@ -17,6 +17,7 @@ import {
   Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useResizableColumns } from "@/hooks/useResizableColumns";
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -60,25 +61,27 @@ interface ColumnDef {
   label: string;
   defaultVisible: boolean;
   enrichedOnly?: boolean;
+  defaultWidth: number;
+  minWidth: number;
 }
 
 const ALL_COLUMNS: ColumnDef[] = [
-  { key: "first_name", label: "Prénom", defaultVisible: true },
-  { key: "last_name", label: "Nom", defaultVisible: true },
-  { key: "email", label: "Email", defaultVisible: true },
-  { key: "company", label: "Entreprise", defaultVisible: true },
-  { key: "job", label: "Poste", defaultVisible: true },
-  { key: "phone", label: "Téléphone", defaultVisible: true },
-  { key: "linkedin", label: "LinkedIn", defaultVisible: true },
-  { key: "mobile_phone", label: "Mobile", defaultVisible: false, enrichedOnly: true },
-  { key: "website", label: "Site web", defaultVisible: false, enrichedOnly: true },
-  { key: "naf_code", label: "NAF", defaultVisible: false, enrichedOnly: true },
-  { key: "naf_label", label: "Libellé NAF", defaultVisible: false, enrichedOnly: true },
-  { key: "nb_employees", label: "Effectifs", defaultVisible: false, enrichedOnly: true },
-  { key: "siren", label: "SIREN", defaultVisible: false, enrichedOnly: true },
-  { key: "siret", label: "SIRET", defaultVisible: false, enrichedOnly: true },
-  { key: "email_qualification", label: "Qualité email", defaultVisible: false, enrichedOnly: true },
-  { key: "enriched", label: "Enrichi", defaultVisible: true },
+  { key: "first_name", label: "Prénom", defaultVisible: true, defaultWidth: 80, minWidth: 40 },
+  { key: "last_name", label: "Nom", defaultVisible: true, defaultWidth: 80, minWidth: 40 },
+  { key: "email", label: "Email", defaultVisible: true, defaultWidth: 170, minWidth: 60 },
+  { key: "company", label: "Entreprise", defaultVisible: true, defaultWidth: 110, minWidth: 50 },
+  { key: "job", label: "Poste", defaultVisible: true, defaultWidth: 90, minWidth: 40 },
+  { key: "phone", label: "Téléphone", defaultVisible: true, defaultWidth: 90, minWidth: 40 },
+  { key: "linkedin", label: "LinkedIn", defaultVisible: true, defaultWidth: 36, minWidth: 28 },
+  { key: "mobile_phone", label: "Mobile", defaultVisible: false, enrichedOnly: true, defaultWidth: 90, minWidth: 40 },
+  { key: "website", label: "Site web", defaultVisible: false, enrichedOnly: true, defaultWidth: 120, minWidth: 50 },
+  { key: "naf_code", label: "NAF", defaultVisible: false, enrichedOnly: true, defaultWidth: 60, minWidth: 30 },
+  { key: "naf_label", label: "Libellé NAF", defaultVisible: false, enrichedOnly: true, defaultWidth: 100, minWidth: 40 },
+  { key: "nb_employees", label: "Effectifs", defaultVisible: false, enrichedOnly: true, defaultWidth: 60, minWidth: 30 },
+  { key: "siren", label: "SIREN", defaultVisible: false, enrichedOnly: true, defaultWidth: 80, minWidth: 40 },
+  { key: "siret", label: "SIRET", defaultVisible: false, enrichedOnly: true, defaultWidth: 90, minWidth: 40 },
+  { key: "email_qualification", label: "Qualité email", defaultVisible: false, enrichedOnly: true, defaultWidth: 80, minWidth: 40 },
+  { key: "enriched", label: "Enrichi", defaultVisible: true, defaultWidth: 52, minWidth: 36 },
 ];
 
 const EXPECTED_CSV_COLUMNS = ["first_name", "last_name", "email", "company", "job", "phone", "linkedin"];
@@ -130,6 +133,11 @@ export default function ImportPage() {
 
   // Search
   const [search, setSearch] = useState("");
+
+  // Resizable columns
+  const { widths: colWidths, onMouseDown: onColResize } = useResizableColumns(
+    ALL_COLUMNS.map((c) => ({ key: c.key, minWidth: c.minWidth, defaultWidth: c.defaultWidth }))
+  );
 
   // ── Fetch lists ──
   const fetchLists = useCallback(async () => {
@@ -544,12 +552,20 @@ export default function ImportPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-xs">
+              <table className="text-xs" style={{ tableLayout: "fixed" }}>
                 <thead className="bg-gray-50 text-gray-500 text-[10px] uppercase sticky top-0">
                   <tr>
                     {visibleColumns.map((col) => (
-                      <th key={col.key} className="px-3 py-2.5 text-left whitespace-nowrap font-semibold">
+                      <th
+                        key={col.key}
+                        className="relative px-2 py-2.5 text-left whitespace-nowrap font-semibold select-none"
+                        style={{ width: colWidths[col.key], minWidth: col.minWidth, maxWidth: colWidths[col.key] }}
+                      >
                         {col.label}
+                        <span
+                          onMouseDown={(e) => onColResize(col.key, e)}
+                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-indigo-400/40 transition-colors"
+                        />
                       </th>
                     ))}
                   </tr>
@@ -559,10 +575,10 @@ export default function ImportPage() {
                     <tr key={c.id} className="hover:bg-gray-50/50">
                       {visibleColumns.map((col) => {
                         const val = c[col.key];
-                        // Special rendering for some columns
+                        const cellStyle = { width: colWidths[col.key], maxWidth: colWidths[col.key] };
                         if (col.key === "linkedin" && val) {
                           return (
-                            <td key={col.key} className="px-3 py-2">
+                            <td key={col.key} className="px-2 py-2 overflow-hidden" style={cellStyle}>
                               <a href={String(val)} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800">
                                 <Linkedin className="w-3.5 h-3.5" />
                               </a>
@@ -571,7 +587,7 @@ export default function ImportPage() {
                         }
                         if (col.key === "enriched") {
                           return (
-                            <td key={col.key} className="px-3 py-2">
+                            <td key={col.key} className="px-2 py-2 overflow-hidden" style={cellStyle}>
                               {val ? (
                                 <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-green-100 text-green-700">Oui</span>
                               ) : (
@@ -580,15 +596,8 @@ export default function ImportPage() {
                             </td>
                           );
                         }
-                        if (col.key === "email" && val) {
-                          return (
-                            <td key={col.key} className="px-3 py-2 text-gray-600 max-w-[200px] truncate">
-                              {String(val)}
-                            </td>
-                          );
-                        }
                         return (
-                          <td key={col.key} className="px-3 py-2 text-gray-700 max-w-[180px] truncate">
+                          <td key={col.key} className="px-2 py-2 text-gray-700 truncate overflow-hidden" style={cellStyle}>
                             {val ? String(val) : <span className="text-gray-300">—</span>}
                           </td>
                         );

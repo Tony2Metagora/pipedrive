@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import NewProspectModal from "@/components/NewProspectModal";
+import { useResizableColumns } from "@/hooks/useResizableColumns";
 
 interface Prospect {
   id: string;
@@ -52,21 +53,21 @@ interface Prospect {
 
 type StatusKey = "en cours" | "perdu" | "archivé";
 
-// Column definitions for visibility toggle
+// Column definitions for visibility toggle + resizable widths
 const PROSPECT_COLUMNS = [
-  { key: "prenom", label: "Prénom", defaultVisible: true },
-  { key: "nom", label: "Nom", defaultVisible: true },
-  { key: "email", label: "Email", defaultVisible: true },
-  { key: "telephone", label: "Tél.", defaultVisible: true },
-  { key: "poste", label: "Poste", defaultVisible: true },
-  { key: "entreprise", label: "Entreprise", defaultVisible: true },
-  { key: "statut", label: "Statut", defaultVisible: true },
-  { key: "affaire", label: "Affaire", defaultVisible: true },
-  { key: "score_entreprise", label: "Score Ent.", defaultVisible: true },
-  { key: "score_job", label: "Score Job", defaultVisible: true },
-  { key: "linkedin", label: "LinkedIn", defaultVisible: true },
-  { key: "naf_code", label: "NAF", defaultVisible: true },
-  { key: "effectifs", label: "Eff.", defaultVisible: true },
+  { key: "prenom", label: "Prénom", defaultVisible: true, defaultWidth: 72, minWidth: 40 },
+  { key: "nom", label: "Nom", defaultVisible: true, defaultWidth: 72, minWidth: 40 },
+  { key: "email", label: "Email", defaultVisible: true, defaultWidth: 150, minWidth: 60 },
+  { key: "telephone", label: "Tél.", defaultVisible: true, defaultWidth: 80, minWidth: 40 },
+  { key: "poste", label: "Poste", defaultVisible: true, defaultWidth: 75, minWidth: 40 },
+  { key: "entreprise", label: "Entreprise", defaultVisible: true, defaultWidth: 90, minWidth: 40 },
+  { key: "statut", label: "Statut", defaultVisible: true, defaultWidth: 58, minWidth: 40 },
+  { key: "affaire", label: "Affaire", defaultVisible: true, defaultWidth: 110, minWidth: 50 },
+  { key: "score_entreprise", label: "Score Ent.", defaultVisible: true, defaultWidth: 72, minWidth: 50 },
+  { key: "score_job", label: "Score Job", defaultVisible: true, defaultWidth: 72, minWidth: 50 },
+  { key: "linkedin", label: "LinkedIn", defaultVisible: true, defaultWidth: 32, minWidth: 28 },
+  { key: "naf_code", label: "NAF", defaultVisible: true, defaultWidth: 55, minWidth: 30 },
+  { key: "effectifs", label: "Eff.", defaultVisible: true, defaultWidth: 45, minWidth: 30 },
 ] as const;
 
 function ScoreStars({ value, onChange }: { value: number; onChange?: (v: number) => void }) {
@@ -133,6 +134,9 @@ export default function ProspectsPage() {
   );
   const [showColPicker, setShowColPicker] = useState(false);
   const colVisible = (key: string) => visibleCols.has(key);
+  const { widths: colWidths, onMouseDown: onColResize } = useResizableColumns(
+    PROSPECT_COLUMNS.map((c) => ({ key: c.key, minWidth: c.minWidth, defaultWidth: c.defaultWidth }))
+  );
 
   const fetchProspects = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -676,7 +680,7 @@ export default function ProspectsPage() {
       ) : (
         <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="text-sm" style={{ tableLayout: "fixed" }}>
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="text-center pl-3 pr-0 py-2.5 w-[36px]">
@@ -688,20 +692,23 @@ export default function ProspectsPage() {
                       className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                     />
                   </th>
-                  {colVisible("prenom") && <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[72px]">Prénom</th>}
-                  {colVisible("nom") && <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[72px]">Nom</th>}
-                  {colVisible("email") && <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[160px]">Email</th>}
-                  {colVisible("telephone") && <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[90px]">Tél.</th>}
-                  {colVisible("poste") && <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[90px]">Poste</th>}
-                  {colVisible("entreprise") && <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[100px]">Entreprise</th>}
-                  {colVisible("statut") && <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[62px]">Statut</th>}
-                  {colVisible("affaire") && <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[120px]">Affaire</th>}
-                  {colVisible("score_entreprise") && <th className="text-center px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[80px]">Score Ent.</th>}
-                  {colVisible("score_job") && <th className="text-center px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[80px]">Score Job</th>}
-                  {colVisible("linkedin") && <th className="text-center px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[30px]" title="LinkedIn"><Linkedin className="w-3 h-3 mx-auto text-gray-500" /></th>}
-                  {colVisible("naf_code") && <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[70px]">NAF</th>}
-                  {colVisible("effectifs") && <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[55px]">Eff.</th>}
-                  <th className="text-center pr-3 pl-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[60px]"></th>
+                  {PROSPECT_COLUMNS.filter((c) => colVisible(c.key)).map((col) => (
+                    <th
+                      key={col.key}
+                      className={cn(
+                        "relative px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide select-none",
+                        ["score_entreprise", "score_job", "linkedin"].includes(col.key) ? "text-center" : "text-left"
+                      )}
+                      style={{ width: colWidths[col.key], minWidth: col.minWidth, maxWidth: colWidths[col.key] }}
+                    >
+                      {col.key === "linkedin" ? <Linkedin className="w-3 h-3 mx-auto text-gray-500" /> : col.label}
+                      <span
+                        onMouseDown={(e) => onColResize(col.key, e)}
+                        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-indigo-400/40 transition-colors"
+                      />
+                    </th>
+                  ))}
+                  <th className="text-center pr-3 pl-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide" style={{ width: 50, minWidth: 50 }}></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -723,7 +730,7 @@ export default function ProspectsPage() {
                           className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                         />
                       </td>
-                      {colVisible("prenom") && <td className="px-1 py-1.5 truncate">
+                      {colVisible("prenom") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["prenom"], maxWidth: colWidths["prenom"] }}>
                         {isEditing ? (
                           <input
                             type="text"
@@ -735,7 +742,7 @@ export default function ProspectsPage() {
                           <span className="font-medium text-gray-900 text-[11px]">{p.prenom}</span>
                         )}
                       </td>}
-                      {colVisible("nom") && <td className="px-1 py-1.5 truncate">
+                      {colVisible("nom") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["nom"], maxWidth: colWidths["nom"] }}>
                         {isEditing ? (
                           <input
                             type="text"
@@ -747,7 +754,7 @@ export default function ProspectsPage() {
                           <span className="text-gray-700 text-[11px]">{p.nom}</span>
                         )}
                       </td>}
-                      {colVisible("email") && <td className="px-1 py-1.5 truncate">
+                      {colVisible("email") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["email"], maxWidth: colWidths["email"] }}>
                         {isEditing ? (
                           <input
                             type="email"
@@ -759,7 +766,7 @@ export default function ProspectsPage() {
                           <span className="text-gray-600 text-[10px]" title={p.email}>{p.email}</span>
                         )}
                       </td>}
-                      {colVisible("telephone") && <td className="px-1 py-1.5 truncate">
+                      {colVisible("telephone") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["telephone"], maxWidth: colWidths["telephone"] }}>
                         {isEditing ? (
                           <input
                             type="text"
@@ -771,7 +778,7 @@ export default function ProspectsPage() {
                           <span className="text-gray-600 text-[10px]">{p.telephone}</span>
                         )}
                       </td>}
-                      {colVisible("poste") && <td className="px-1 py-1.5 truncate">
+                      {colVisible("poste") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["poste"], maxWidth: colWidths["poste"] }}>
                         {isEditing ? (
                           <input
                             type="text"
@@ -783,7 +790,7 @@ export default function ProspectsPage() {
                           <span className="text-gray-600 text-[10px]" title={p.poste}>{p.poste}</span>
                         )}
                       </td>}
-                      {colVisible("entreprise") && <td className="px-1 py-1.5 truncate">
+                      {colVisible("entreprise") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["entreprise"], maxWidth: colWidths["entreprise"] }}>
                         {isEditing ? (
                           <input
                             type="text"
@@ -795,10 +802,10 @@ export default function ProspectsPage() {
                           <span className="text-gray-700 text-[10px] font-medium" title={p.entreprise}>{p.entreprise}</span>
                         )}
                       </td>}
-                      {colVisible("statut") && <td className="px-1 py-1.5">
+                      {colVisible("statut") && <td className="px-1 py-1.5" style={{ width: colWidths["statut"], maxWidth: colWidths["statut"] }}>
                         <StatusBadge statut={statut} />
                       </td>}
-                      {colVisible("affaire") && <td className="px-1 py-1.5">
+                      {colVisible("affaire") && <td className="px-1 py-1.5 overflow-hidden" style={{ width: colWidths["affaire"], maxWidth: colWidths["affaire"] }}>
                         {p.deal_id ? (
                           <Link
                             href={`/dashboard?deal=${p.deal_id}`}
@@ -834,7 +841,7 @@ export default function ProspectsPage() {
                           </button>
                         )}
                       </td>}
-                      {colVisible("score_entreprise") && <td className="px-1 py-1.5 text-center">
+                      {colVisible("score_entreprise") && <td className="px-1 py-1.5 text-center" style={{ width: colWidths["score_entreprise"], maxWidth: colWidths["score_entreprise"] }}>
                         {isEditing ? (
                           <ScoreStars
                             value={parseInt(editData.score_entreprise || "0") || 0}
@@ -844,7 +851,7 @@ export default function ProspectsPage() {
                           <ScoreStars value={scoreEnt} />
                         )}
                       </td>}
-                      {colVisible("score_job") && <td className="px-1 py-1.5 text-center">
+                      {colVisible("score_job") && <td className="px-1 py-1.5 text-center" style={{ width: colWidths["score_job"], maxWidth: colWidths["score_job"] }}>
                         {isEditing ? (
                           <ScoreStars
                             value={parseInt(editData.score_job || "0") || 0}
@@ -854,7 +861,7 @@ export default function ProspectsPage() {
                           <ScoreStars value={scoreJob} />
                         )}
                       </td>}
-                      {colVisible("linkedin") && <td className="px-1 py-1.5 text-center">
+                      {colVisible("linkedin") && <td className="px-1 py-1.5 text-center" style={{ width: colWidths["linkedin"], maxWidth: colWidths["linkedin"] }}>
                         {p.linkedin ? (
                           <a href={p.linkedin.startsWith("http") ? p.linkedin : `https://${p.linkedin}`} target="_blank" rel="noopener noreferrer" className="text-[#0077B5] hover:text-[#005885]" title={p.linkedin}>
                             <Linkedin className="w-3.5 h-3.5 mx-auto" />
@@ -863,10 +870,10 @@ export default function ProspectsPage() {
                           <span className="text-gray-200"><Linkedin className="w-3.5 h-3.5 mx-auto" /></span>
                         )}
                       </td>}
-                      {colVisible("naf_code") && <td className="px-1 py-1.5 truncate">
+                      {colVisible("naf_code") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["naf_code"], maxWidth: colWidths["naf_code"] }}>
                         <span className="text-gray-600 text-[9px]" title={p.naf_code}>{p.naf_code}</span>
                       </td>}
-                      {colVisible("effectifs") && <td className="px-1 py-1.5 truncate">
+                      {colVisible("effectifs") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["effectifs"], maxWidth: colWidths["effectifs"] }}>
                         <span className="text-gray-600 text-[9px]">{p.effectifs}</span>
                       </td>}
                       <td className="pr-3 pl-1 py-1.5 text-center">
