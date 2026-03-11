@@ -271,7 +271,7 @@ export async function createDeal(data: Omit<Deal, "id">): Promise<Deal> {
   const maxId = all.reduce((max, d) => Math.max(max, d.id), 0);
   const created = { ...data, id: maxId + 1 } as Deal;
   await writeSingleBlob(dealPath(created.id), created);
-  await patchIndex(created, "upsert");
+  patchIndex(created, "upsert");
   return created;
 }
 
@@ -281,7 +281,8 @@ export async function updateDeal(id: number, data: Partial<Deal>): Promise<Deal 
   if (!deal) return null;
   const updated = { ...deal, ...data, id };
   await writeSingleBlob(dealPath(id), updated);
-  await patchIndex(updated, "upsert");
+  // Fire-and-forget: index is a cache, don't block the response
+  patchIndex(updated, "upsert");
   return updated;
 }
 
@@ -289,7 +290,7 @@ export async function deleteDeal(id: number): Promise<void> {
   await ensureDealsMigrated();
   const deal = await readSingleBlob<Deal>(dealPath(id));
   await deleteSingleBlob(dealPath(id));
-  if (deal) await patchIndex(deal, "delete");
+  if (deal) patchIndex(deal, "delete");
 }
 
 // ─── Persons ─────────────────────────────────────────────
@@ -447,7 +448,7 @@ export async function addDealParticipant(dealId: number, personId: number): Prom
   if (current.includes(personId)) return;
   const updated = { ...deal, participants: [...current, personId] };
   await writeSingleBlob(dealPath(dealId), updated);
-  await patchIndex(updated, "upsert");
+  patchIndex(updated, "upsert");
 }
 
 // ─── Bulk write (for migration) ──────────────────────────
