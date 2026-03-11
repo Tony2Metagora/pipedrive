@@ -20,6 +20,9 @@ import {
   Sparkles,
   Linkedin,
   Link2,
+  Eye,
+  EyeOff,
+  ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import NewProspectModal from "@/components/NewProspectModal";
@@ -48,6 +51,23 @@ interface Prospect {
 }
 
 type StatusKey = "en cours" | "perdu" | "archivé";
+
+// Column definitions for visibility toggle
+const PROSPECT_COLUMNS = [
+  { key: "prenom", label: "Prénom", defaultVisible: true },
+  { key: "nom", label: "Nom", defaultVisible: true },
+  { key: "email", label: "Email", defaultVisible: true },
+  { key: "telephone", label: "Tél.", defaultVisible: true },
+  { key: "poste", label: "Poste", defaultVisible: true },
+  { key: "entreprise", label: "Entreprise", defaultVisible: true },
+  { key: "statut", label: "Statut", defaultVisible: true },
+  { key: "affaire", label: "Affaire", defaultVisible: true },
+  { key: "score_entreprise", label: "Score Ent.", defaultVisible: true },
+  { key: "score_job", label: "Score Job", defaultVisible: true },
+  { key: "linkedin", label: "LinkedIn", defaultVisible: true },
+  { key: "naf_code", label: "NAF", defaultVisible: true },
+  { key: "effectifs", label: "Eff.", defaultVisible: true },
+] as const;
 
 function ScoreStars({ value, onChange }: { value: number; onChange?: (v: number) => void }) {
   return (
@@ -108,6 +128,11 @@ export default function ProspectsPage() {
   const [showNewProspect, setShowNewProspect] = useState(false);
   const [linking, setLinking] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [visibleCols, setVisibleCols] = useState<Set<string>>(
+    new Set(PROSPECT_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key))
+  );
+  const [showColPicker, setShowColPicker] = useState(false);
+  const colVisible = (key: string) => visibleCols.has(key);
 
   const fetchProspects = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -602,6 +627,38 @@ export default function ProspectsPage() {
             />
             <span className="text-gray-500 font-medium">Archivé ({archivedCount})</span>
           </label>
+          <div className="ml-2 border-l border-gray-200 pl-2 relative">
+            <button
+              onClick={() => setShowColPicker(!showColPicker)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer"
+            >
+              {showColPicker ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              Colonnes
+              <ChevronDown className="w-3 h-3" />
+            </button>
+            {showColPicker && (
+              <div className="absolute right-0 top-full mt-1 w-52 bg-white rounded-lg border border-gray-200 shadow-xl z-50 p-2 space-y-0.5 max-h-80 overflow-y-auto">
+                {PROSPECT_COLUMNS.map((col) => (
+                  <label key={col.key} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-xs">
+                    <input
+                      type="checkbox"
+                      checked={visibleCols.has(col.key)}
+                      onChange={() => {
+                        setVisibleCols((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(col.key)) next.delete(col.key);
+                          else next.add(col.key);
+                          return next;
+                        });
+                      }}
+                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-gray-700">{col.label}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -619,7 +676,7 @@ export default function ProspectsPage() {
       ) : (
         <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm table-fixed">
+            <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="text-center pl-3 pr-0 py-2.5 w-[36px]">
@@ -631,19 +688,19 @@ export default function ProspectsPage() {
                       className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                     />
                   </th>
-                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[72px]">Prénom</th>
-                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[72px]">Nom</th>
-                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[160px]">Email</th>
-                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[90px]">Tél.</th>
-                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[90px]">Poste</th>
-                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[100px]">Entreprise</th>
-                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[62px]">Statut</th>
-                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[120px]">Affaire</th>
-                  <th className="text-center px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[80px]">Score Ent.</th>
-                  <th className="text-center px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[80px]">Score Job</th>
-                  <th className="text-center px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[30px]" title="LinkedIn"><Linkedin className="w-3 h-3 mx-auto text-gray-500" /></th>
-                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[70px]">NAF</th>
-                  <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[55px]">Eff.</th>
+                  {colVisible("prenom") && <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[72px]">Prénom</th>}
+                  {colVisible("nom") && <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[72px]">Nom</th>}
+                  {colVisible("email") && <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[160px]">Email</th>}
+                  {colVisible("telephone") && <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[90px]">Tél.</th>}
+                  {colVisible("poste") && <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[90px]">Poste</th>}
+                  {colVisible("entreprise") && <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[100px]">Entreprise</th>}
+                  {colVisible("statut") && <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[62px]">Statut</th>}
+                  {colVisible("affaire") && <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[120px]">Affaire</th>}
+                  {colVisible("score_entreprise") && <th className="text-center px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[80px]">Score Ent.</th>}
+                  {colVisible("score_job") && <th className="text-center px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[80px]">Score Job</th>}
+                  {colVisible("linkedin") && <th className="text-center px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[30px]" title="LinkedIn"><Linkedin className="w-3 h-3 mx-auto text-gray-500" /></th>}
+                  {colVisible("naf_code") && <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[70px]">NAF</th>}
+                  {colVisible("effectifs") && <th className="text-left px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[55px]">Eff.</th>}
                   <th className="text-center pr-3 pl-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide w-[60px]"></th>
                 </tr>
               </thead>
@@ -666,7 +723,7 @@ export default function ProspectsPage() {
                           className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                         />
                       </td>
-                      <td className="px-1 py-1.5 truncate">
+                      {colVisible("prenom") && <td className="px-1 py-1.5 truncate">
                         {isEditing ? (
                           <input
                             type="text"
@@ -677,8 +734,8 @@ export default function ProspectsPage() {
                         ) : (
                           <span className="font-medium text-gray-900 text-[11px]">{p.prenom}</span>
                         )}
-                      </td>
-                      <td className="px-1 py-1.5 truncate">
+                      </td>}
+                      {colVisible("nom") && <td className="px-1 py-1.5 truncate">
                         {isEditing ? (
                           <input
                             type="text"
@@ -689,8 +746,8 @@ export default function ProspectsPage() {
                         ) : (
                           <span className="text-gray-700 text-[11px]">{p.nom}</span>
                         )}
-                      </td>
-                      <td className="px-1 py-1.5 truncate">
+                      </td>}
+                      {colVisible("email") && <td className="px-1 py-1.5 truncate">
                         {isEditing ? (
                           <input
                             type="email"
@@ -701,8 +758,8 @@ export default function ProspectsPage() {
                         ) : (
                           <span className="text-gray-600 text-[10px]" title={p.email}>{p.email}</span>
                         )}
-                      </td>
-                      <td className="px-1 py-1.5 truncate">
+                      </td>}
+                      {colVisible("telephone") && <td className="px-1 py-1.5 truncate">
                         {isEditing ? (
                           <input
                             type="text"
@@ -713,8 +770,8 @@ export default function ProspectsPage() {
                         ) : (
                           <span className="text-gray-600 text-[10px]">{p.telephone}</span>
                         )}
-                      </td>
-                      <td className="px-1 py-1.5 truncate">
+                      </td>}
+                      {colVisible("poste") && <td className="px-1 py-1.5 truncate">
                         {isEditing ? (
                           <input
                             type="text"
@@ -725,8 +782,8 @@ export default function ProspectsPage() {
                         ) : (
                           <span className="text-gray-600 text-[10px]" title={p.poste}>{p.poste}</span>
                         )}
-                      </td>
-                      <td className="px-1 py-1.5 truncate">
+                      </td>}
+                      {colVisible("entreprise") && <td className="px-1 py-1.5 truncate">
                         {isEditing ? (
                           <input
                             type="text"
@@ -737,11 +794,11 @@ export default function ProspectsPage() {
                         ) : (
                           <span className="text-gray-700 text-[10px] font-medium" title={p.entreprise}>{p.entreprise}</span>
                         )}
-                      </td>
-                      <td className="px-1 py-1.5">
+                      </td>}
+                      {colVisible("statut") && <td className="px-1 py-1.5">
                         <StatusBadge statut={statut} />
-                      </td>
-                      <td className="px-1 py-1.5">
+                      </td>}
+                      {colVisible("affaire") && <td className="px-1 py-1.5">
                         {p.deal_id ? (
                           <Link
                             href={`/dashboard?deal=${p.deal_id}`}
@@ -776,8 +833,8 @@ export default function ProspectsPage() {
                             <span>Créer</span>
                           </button>
                         )}
-                      </td>
-                      <td className="px-1 py-1.5 text-center">
+                      </td>}
+                      {colVisible("score_entreprise") && <td className="px-1 py-1.5 text-center">
                         {isEditing ? (
                           <ScoreStars
                             value={parseInt(editData.score_entreprise || "0") || 0}
@@ -786,8 +843,8 @@ export default function ProspectsPage() {
                         ) : (
                           <ScoreStars value={scoreEnt} />
                         )}
-                      </td>
-                      <td className="px-1 py-1.5 text-center">
+                      </td>}
+                      {colVisible("score_job") && <td className="px-1 py-1.5 text-center">
                         {isEditing ? (
                           <ScoreStars
                             value={parseInt(editData.score_job || "0") || 0}
@@ -796,8 +853,8 @@ export default function ProspectsPage() {
                         ) : (
                           <ScoreStars value={scoreJob} />
                         )}
-                      </td>
-                      <td className="px-1 py-1.5 text-center">
+                      </td>}
+                      {colVisible("linkedin") && <td className="px-1 py-1.5 text-center">
                         {p.linkedin ? (
                           <a href={p.linkedin.startsWith("http") ? p.linkedin : `https://${p.linkedin}`} target="_blank" rel="noopener noreferrer" className="text-[#0077B5] hover:text-[#005885]" title={p.linkedin}>
                             <Linkedin className="w-3.5 h-3.5 mx-auto" />
@@ -805,13 +862,13 @@ export default function ProspectsPage() {
                         ) : (
                           <span className="text-gray-200"><Linkedin className="w-3.5 h-3.5 mx-auto" /></span>
                         )}
-                      </td>
-                      <td className="px-1 py-1.5 truncate">
+                      </td>}
+                      {colVisible("naf_code") && <td className="px-1 py-1.5 truncate">
                         <span className="text-gray-600 text-[9px]" title={p.naf_code}>{p.naf_code}</span>
-                      </td>
-                      <td className="px-1 py-1.5 truncate">
+                      </td>}
+                      {colVisible("effectifs") && <td className="px-1 py-1.5 truncate">
                         <span className="text-gray-600 text-[9px]">{p.effectifs}</span>
-                      </td>
+                      </td>}
                       <td className="pr-3 pl-1 py-1.5 text-center">
                         {isEditing ? (
                           <div className="flex items-center gap-0.5 justify-center">
