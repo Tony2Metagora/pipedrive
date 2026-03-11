@@ -290,6 +290,8 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
   const [followupSubject, setFollowupSubject] = useState<string>("");
   const [refining, setRefining] = useState(false);
   const [creatingTask, setCreatingTask] = useState(false);
+  const [manualNote, setManualNote] = useState("");
+  const [savingManualNote, setSavingManualNote] = useState(false);
 
   // Sync pending activities with parent state (handles Done/Delete from preview buttons)
   useEffect(() => {
@@ -470,6 +472,34 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
     }
   };
 
+  const saveManualNote = async () => {
+    if (!manualNote.trim()) return;
+    setSavingManualNote(true);
+    try {
+      const res = await fetch("/api/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: manualNote.trim().replace(/\n/g, "<br>"),
+          deal_id: dealId,
+          ...(personId && { person_id: personId }),
+        }),
+      });
+      const json = await res.json();
+      if (json.data) {
+        setCtx((prev) => {
+          if (!prev) return prev;
+          return { ...prev, notes: [json.data, ...prev.notes] };
+        });
+        setManualNote("");
+      }
+    } catch {
+      alert("Erreur lors de la sauvegarde de la note.");
+    } finally {
+      setSavingManualNote(false);
+    }
+  };
+
   const markDone = async (activityId: number) => {
     // Optimistic local update: move from pending to done
     setCtx((prev) => {
@@ -620,6 +650,30 @@ export default function DealContextPanel({ dealId, personId, orgId, personName, 
               {loadingSummary ? "Analyse..." : summary ? "Regénérer" : "Générer"}
             </button>
           </div>
+        </div>
+        {/* Ajouter une note manuellement */}
+        <div className="flex gap-1.5 mb-2">
+          <textarea
+            value={manualNote}
+            onChange={(e) => setManualNote(e.target.value)}
+            placeholder="Écrire une note..."
+            rows={2}
+            className="flex-1 px-2 py-1.5 text-xs border border-purple-200 rounded bg-white focus:ring-1 focus:ring-purple-400 outline-none resize-y"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                saveManualNote();
+              }
+            }}
+          />
+          <button
+            onClick={saveManualNote}
+            disabled={savingManualNote || !manualNote.trim()}
+            className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700 disabled:opacity-50 cursor-pointer self-end"
+          >
+            {savingManualNote ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+            Ajouter
+          </button>
         </div>
         {/* Dernières notes */}
         {ctx.notes.length > 0 && (
