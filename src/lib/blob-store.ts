@@ -83,29 +83,36 @@ export function withLock<T>(filename: string, fn: () => Promise<T>): Promise<T> 
 
 // ─── Generic Blob helpers ────────────────────────────────
 
+async function readBlobStrict<T>(filename: string): Promise<T[]> {
+  const result = await get(filename, { access: "private" });
+  // Blob doesn't exist yet → genuinely empty
+  if (result === null) return [];
+  if (result.statusCode !== 200 || !result.stream) {
+    throw new Error(`Blob read failed for ${filename}: status=${result.statusCode}`);
+  }
+  const chunks: Uint8Array[] = [];
+  const reader = result.stream.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  const text = new TextDecoder().decode(
+    chunks.reduce((acc, chunk) => {
+      const merged = new Uint8Array(acc.length + chunk.length);
+      merged.set(acc);
+      merged.set(chunk, acc.length);
+      return merged;
+    }, new Uint8Array())
+  );
+  return JSON.parse(text);
+}
+
 export async function readBlob<T>(filename: string): Promise<T[]> {
   try {
-    const result = await get(filename, { access: "private" });
-    if (!result || result.statusCode !== 200 || !result.stream) {
-      return [];
-    }
-    const chunks: Uint8Array[] = [];
-    const reader = result.stream.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-    }
-    const text = new TextDecoder().decode(
-      chunks.reduce((acc, chunk) => {
-        const merged = new Uint8Array(acc.length + chunk.length);
-        merged.set(acc);
-        merged.set(chunk, acc.length);
-        return merged;
-      }, new Uint8Array())
-    );
-    return JSON.parse(text);
-  } catch {
+    return await readBlobStrict<T>(filename);
+  } catch (err) {
+    console.warn(`[readBlob] Error reading ${filename}, returning []:`, err);
     return [];
   }
 }
@@ -120,8 +127,15 @@ export async function writeBlob<T>(filename: string, data: T[]): Promise<void> {
 
 async function mutateBlob<T>(filename: string, mutator: (data: T[]) => T[] | Promise<T[]>): Promise<T[]> {
   return withLock(filename, async () => {
-    const data = await readBlob<T>(filename);
+    // Use strict read: throw on transient errors instead of silently returning []
+    // This prevents the mutator from receiving [] and writing back [], wiping all data
+    const data = await readBlobStrict<T>(filename);
     const updated = await mutator(data);
+    // Safety: warn if a large dataset is being fully wiped (likely a bug, not intentional)
+    if (updated.length === 0 && data.length > 3) {
+      console.error(`[mutateBlob] BLOCKED: ${filename} would wipe ${data.length} items → refusing write`);
+      return data;
+    }
     await writeBlob(filename, updated);
     return updated;
   });

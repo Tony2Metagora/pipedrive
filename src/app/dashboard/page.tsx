@@ -1159,9 +1159,13 @@ function DealRow({
       if (res.ok) {
         onDealUpdated?.(deal.id, { pipeline_id: selectedPipelineId, stage_id: selectedStageId });
         setEditingPipeline(false);
+      } else {
+        console.error("savePipelineStage failed:", res.status, await res.text().catch(() => ""));
+        alert("Erreur lors de la mise à jour du pipeline. Réessayez.");
       }
     } catch (err) {
       console.error("Erreur mise à jour pipeline/stage:", err);
+      alert("Erreur réseau lors de la mise à jour du pipeline.");
     } finally {
       setSavingPipeline(false);
     }

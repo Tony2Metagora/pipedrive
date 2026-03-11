@@ -33,14 +33,18 @@ export default function ArchiveModal({
 
   const finalReason = reason === "__custom" ? customReason : reason;
 
+  const [error, setError] = useState<string | null>(null);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!finalReason.trim()) return;
 
     setSaving(true);
+    setError(null);
     try {
+      let res: Response;
       if (activityId) {
-        await fetch(`/api/activities/${activityId}`, {
+        res = await fetch(`/api/activities/${activityId}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -50,7 +54,7 @@ export default function ArchiveModal({
           }),
         });
       } else if (dealId) {
-        await fetch(`/api/deals/${dealId}`, {
+        res = await fetch(`/api/deals/${dealId}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -58,10 +62,20 @@ export default function ArchiveModal({
             lost_reason: finalReason.trim(),
           }),
         });
+      } else {
+        return;
+      }
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        console.error("Archivage failed:", res.status, text);
+        setError(`Erreur serveur (${res.status}). Réessayez.`);
+        setSaving(false);
+        return;
       }
       onArchived();
     } catch (err) {
       console.error("Erreur archivage:", err);
+      setError("Erreur réseau. Vérifiez votre connexion et réessayez.");
     } finally {
       setSaving(false);
     }
@@ -149,6 +163,12 @@ export default function ArchiveModal({
               />
             )}
           </div>
+
+          {error && (
+            <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+              {error}
+            </div>
+          )}
 
           {/* Actions */}
           <div className="flex justify-end gap-2 pt-2">
