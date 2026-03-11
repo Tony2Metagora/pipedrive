@@ -246,10 +246,19 @@ export async function createDeal(data: Omit<Deal, "id">): Promise<Deal> {
 
 export async function updateDeal(id: number, data: Partial<Deal>): Promise<Deal | null> {
   await ensureDealsMigrated();
-  const deal = await readSingleBlob<Deal>(dealPath(id));
-  if (!deal) return null;
+  const path = dealPath(id);
+  console.log(`[updateDeal] Reading ${path}...`);
+  const deal = await readSingleBlob<Deal>(path);
+  if (!deal) {
+    console.warn(`[updateDeal] Deal ${id} not found at ${path}`);
+    return null;
+  }
   const updated = { ...deal, ...data, id };
-  await writeSingleBlob(dealPath(id), updated);
+  console.log(`[updateDeal] Writing ${path}, changes:`, JSON.stringify(data));
+  await writeSingleBlob(path, updated);
+  // Verify write succeeded
+  const verify = await readSingleBlob<Deal>(path);
+  console.log(`[updateDeal] Verify ${path}:`, verify ? `pipeline=${verify.pipeline_id}, stage=${verify.stage_id}, status=${verify.status}` : "null!");
   return updated;
 }
 

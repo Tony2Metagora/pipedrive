@@ -48,7 +48,9 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const dealId = Number(id);
     const body = await request.json();
 
+    console.log(`[PUT /api/deals/${dealId}] body:`, JSON.stringify(body));
     const deal = await updateDeal(dealId, body);
+    console.log(`[PUT /api/deals/${dealId}] result:`, deal ? `updated (pipeline=${deal.pipeline_id}, stage=${deal.stage_id}, status=${deal.status})` : "null (not found)");
     if (!deal) {
       return NextResponse.json({ error: "Deal non trouvé" }, { status: 404 });
     }
