@@ -30,6 +30,7 @@ import {
   LayoutGrid,
   List,
   Filter,
+  ArrowDownWideNarrow,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDate, isOverdue, isWithinDays, detectActivityType } from "@/lib/utils";
@@ -105,6 +106,7 @@ function DashboardContent() {
   const [pipelineFilter, setPipelineFilter] = useState<number | "all">("all");
   const [stageFilter, setStageFilter] = useState<number | "all">("all");
   const [viewMode, setViewMode] = useState<"list" | "kanban">("list");
+  const [sortMode, setSortMode] = useState<"urgence" | "valeur" | "prio">("urgence");
   const [showNewDeal, setShowNewDeal] = useState(false);
 
   // Track IDs removed optimistically so background sync never brings them back
@@ -353,12 +355,46 @@ function DashboardContent() {
     return true;
   });
 
-  // Sort: urgent first (overdue), then sans info, then à jour
-  const sortedDeals = [...filteredDeals].sort((a, b) => {
-    const aUrgent = isUrgentDeal(a) ? 0 : isSansInfoDeal(a) ? 1 : 2;
-    const bUrgent = isUrgentDeal(b) ? 0 : isSansInfoDeal(b) ? 1 : 2;
-    return aUrgent - bUrgent;
-  });
+  // Sort deals based on selected sort mode
+  const sortedDeals = useMemo(() => {
+    const arr = [...filteredDeals];
+    switch (sortMode) {
+      case "valeur":
+        return arr.sort((a, b) => (b.value || 0) - (a.value || 0));
+      case "prio": {
+        // Priority: Hot leads (3-6 mois) pipeline first, then by stage advancement (higher index = more advanced)
+        const PIPELINE_ORDER = [1, 12, 4, 7]; // hot leads, 6-12, partenaires, nurturing
+        const pipelineRank = (d: Deal) => {
+          const idx = PIPELINE_ORDER.indexOf(d.pipeline_id);
+          return idx === -1 ? 99 : idx;
+        };
+        const stageRank = (d: Deal) => {
+          const pipeline = PIPELINES.find((p) => p.id === d.pipeline_id);
+          if (!pipeline) return 0;
+          const idx = pipeline.stages.findIndex((s) => s.id === d.stage_id);
+          return idx === -1 ? 0 : idx;
+        };
+        return arr.sort((a, b) => {
+          const pDiff = pipelineRank(a) - pipelineRank(b);
+          if (pDiff !== 0) return pDiff;
+          return stageRank(b) - stageRank(a); // more advanced first
+        });
+      }
+      case "urgence":
+      default: {
+        return arr.sort((a, b) => {
+          const aEarliest = earliestActivityByDeal(a.id);
+          const bEarliest = earliestActivityByDeal(b.id);
+          // Overdue first, then soonest date, then no task last
+          if (!aEarliest && !bEarliest) return 0;
+          if (!aEarliest) return 1;
+          if (!bEarliest) return -1;
+          return aEarliest.localeCompare(bEarliest);
+        });
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredDeals, sortMode]);
 
   return (
     <div>
@@ -492,7 +528,43 @@ function DashboardContent() {
             {sortedDeals.length} affaire{sortedDeals.length !== 1 ? "s" : ""}
           </span>
         </div>
-        <div className="flex items-center gap-1 bg-gray-100 rounded-md p-0.5">
+        <div className="flex items-center gap-2">
+          {/* Sort selector */}
+          <div className="flex items-center gap-1 bg-gray-100 rounded-md p-0.5">
+            <ArrowDownWideNarrow className="w-3.5 h-3.5 text-gray-400 ml-1" />
+            <button
+              onClick={() => setSortMode("urgence")}
+              className={cn(
+                "px-2 py-1 text-[11px] font-medium rounded transition-colors cursor-pointer",
+                sortMode === "urgence" ? "bg-white shadow-sm text-red-600" : "text-gray-500 hover:text-gray-700"
+              )}
+              title="Trier par urgence (tâches les plus proches en premier)"
+            >
+              Urgence
+            </button>
+            <button
+              onClick={() => setSortMode("valeur")}
+              className={cn(
+                "px-2 py-1 text-[11px] font-medium rounded transition-colors cursor-pointer",
+                sortMode === "valeur" ? "bg-white shadow-sm text-green-600" : "text-gray-500 hover:text-gray-700"
+              )}
+              title="Trier par valeur décroissante"
+            >
+              Valeur
+            </button>
+            <button
+              onClick={() => setSortMode("prio")}
+              className={cn(
+                "px-2 py-1 text-[11px] font-medium rounded transition-colors cursor-pointer",
+                sortMode === "prio" ? "bg-white shadow-sm text-indigo-600" : "text-gray-500 hover:text-gray-700"
+              )}
+              title="Trier par priorité (leads 3-6 mois, étapes avancées en premier)"
+            >
+              Prio
+            </button>
+          </div>
+          {/* View mode toggle */}
+          <div className="flex items-center gap-1 bg-gray-100 rounded-md p-0.5">
           <button
             onClick={() => setViewMode("list")}
             className={cn(
@@ -513,6 +585,7 @@ function DashboardContent() {
           >
             <LayoutGrid className="w-4 h-4" />
           </button>
+        </div>
         </div>
       </div>
 
