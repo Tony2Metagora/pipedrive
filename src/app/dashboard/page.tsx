@@ -1095,6 +1095,22 @@ function DealRow({
   const [titleInput, setTitleInput] = useState(deal.title);
   const [savingTitle, setSavingTitle] = useState(false);
 
+  // Sync local state when parent deal prop changes (e.g. after background sync or optimistic update)
+  useEffect(() => {
+    if (!editingPipeline) {
+      setSelectedPipelineId(deal.pipeline_id);
+      setSelectedStageId(deal.stage_id);
+    }
+  }, [deal.pipeline_id, deal.stage_id, editingPipeline]);
+
+  useEffect(() => {
+    if (!editingTitle) setTitleInput(deal.title);
+  }, [deal.title, editingTitle]);
+
+  useEffect(() => {
+    if (!editingValue) setValueInput(String(deal.value || 0));
+  }, [deal.value, editingValue]);
+
   const saveTitle = async () => {
     const trimmed = titleInput.trim();
     if (!trimmed || trimmed === deal.title) { setEditingTitle(false); setTitleInput(deal.title); return; }

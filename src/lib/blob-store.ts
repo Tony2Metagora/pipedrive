@@ -10,7 +10,7 @@
  * - prospects.json   : tableau de Prospect (déjà existant)
  */
 
-import { put, get } from "@vercel/blob";
+import { put, get, BlobPreconditionFailedError } from "@vercel/blob";
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -83,10 +83,11 @@ export function withLock<T>(filename: string, fn: () => Promise<T>): Promise<T> 
 
 // ─── Generic Blob helpers ────────────────────────────────
 
-async function readBlobStrict<T>(filename: string): Promise<T[]> {
+/** Read a blob, parse as JSON, and return data + ETag. Returns empty array + null etag if blob doesn't exist. Throws on transient errors. */
+async function readBlobWithEtag<T>(filename: string): Promise<{ data: T[]; etag: string | null }> {
   const result = await get(filename, { access: "private" });
   // Blob doesn't exist yet → genuinely empty
-  if (result === null) return [];
+  if (result === null) return { data: [], etag: null };
   if (result.statusCode !== 200 || !result.stream) {
     throw new Error(`Blob read failed for ${filename}: status=${result.statusCode}`);
   }
@@ -105,39 +106,53 @@ async function readBlobStrict<T>(filename: string): Promise<T[]> {
       return merged;
     }, new Uint8Array())
   );
-  return JSON.parse(text);
+  return { data: JSON.parse(text), etag: result.blob?.etag ?? null };
 }
 
 export async function readBlob<T>(filename: string): Promise<T[]> {
   try {
-    return await readBlobStrict<T>(filename);
+    const { data } = await readBlobWithEtag<T>(filename);
+    return data;
   } catch (err) {
     console.warn(`[readBlob] Error reading ${filename}, returning []:`, err);
     return [];
   }
 }
 
-export async function writeBlob<T>(filename: string, data: T[]): Promise<void> {
+export async function writeBlob<T>(filename: string, data: T[], ifMatch?: string): Promise<void> {
   await put(filename, JSON.stringify(data), {
     access: "private",
     addRandomSuffix: false,
     allowOverwrite: true,
+    ...(ifMatch ? { ifMatch } : {}),
   });
 }
 
+const MAX_RETRIES = 5;
+
 async function mutateBlob<T>(filename: string, mutator: (data: T[]) => T[] | Promise<T[]>): Promise<T[]> {
   return withLock(filename, async () => {
-    // Use strict read: throw on transient errors instead of silently returning []
-    // This prevents the mutator from receiving [] and writing back [], wiping all data
-    const data = await readBlobStrict<T>(filename);
-    const updated = await mutator(data);
-    // Safety: warn if a large dataset is being fully wiped (likely a bug, not intentional)
-    if (updated.length === 0 && data.length > 3) {
-      console.error(`[mutateBlob] BLOCKED: ${filename} would wipe ${data.length} items → refusing write`);
-      return data;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      const { data, etag } = await readBlobWithEtag<T>(filename);
+      const updated = await mutator(data);
+      // Safety: refuse to wipe a large dataset
+      if (updated.length === 0 && data.length > 3) {
+        console.error(`[mutateBlob] BLOCKED: ${filename} would wipe ${data.length} items → refusing write`);
+        return data;
+      }
+      try {
+        // Use ETag conditional write if we have one — prevents race conditions across serverless instances
+        await writeBlob(filename, updated, etag ?? undefined);
+        return updated;
+      } catch (err) {
+        if (err instanceof BlobPreconditionFailedError && attempt < MAX_RETRIES - 1) {
+          console.warn(`[mutateBlob] ${filename}: ETag conflict (attempt ${attempt + 1}/${MAX_RETRIES}), retrying...`);
+          continue;
+        }
+        throw err;
+      }
     }
-    await writeBlob(filename, updated);
-    return updated;
+    throw new Error(`[mutateBlob] ${filename}: failed after ${MAX_RETRIES} retries`);
   });
 }
 
