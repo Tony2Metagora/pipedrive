@@ -1,22 +1,35 @@
 /**
- * Backup endpoint — copies deals.json to deals-backup-{timestamp}.json
- * GET — creates backup and returns confirmation
+ * Full backup endpoint — copies ALL blob store collections to timestamped backup files.
+ * GET — creates backups of deals, activities, notes, persons, orgs, prospects
  */
 import { NextResponse } from "next/server";
 import { readBlob, writeBlob } from "@/lib/blob-store";
-import type { Deal } from "@/lib/blob-store";
+
+const COLLECTIONS = [
+  "deals.json",
+  "activities.json",
+  "notes.json",
+  "persons.json",
+  "orgs.json",
+  "prospects.json",
+];
 
 export async function GET() {
   try {
-    const deals = await readBlob<Deal>("deals.json");
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
-    const backupName = `deals-backup-${ts}.json`;
-    await writeBlob(backupName, deals);
+    const results: Record<string, { backup: string; count: number }> = {};
+
+    for (const filename of COLLECTIONS) {
+      const data = await readBlob<unknown>(filename);
+      const backupName = `backup-${ts}/${filename}`;
+      await writeBlob(backupName, data);
+      results[filename] = { backup: backupName, count: data.length };
+    }
+
     return NextResponse.json({
       success: true,
-      backup: backupName,
-      dealCount: deals.length,
-      deals: deals.map((d) => `${d.id}: ${d.title} (${d.status})`),
+      timestamp: ts,
+      collections: results,
     });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
