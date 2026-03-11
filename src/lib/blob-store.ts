@@ -231,6 +231,7 @@ export async function getDeal(id: number): Promise<Deal | null> {
 }
 
 export async function createDeal(data: Omit<Deal, "id">): Promise<Deal> {
+  await ensureDealsConsolidated();
   let created!: Deal;
   await mutateBlob<Deal>("deals.json", (deals) => {
     const maxId = deals.reduce((max, d) => Math.max(max, d.id), 0);
@@ -241,6 +242,7 @@ export async function createDeal(data: Omit<Deal, "id">): Promise<Deal> {
 }
 
 export async function updateDeal(id: number, data: Partial<Deal>): Promise<Deal | null> {
+  await ensureDealsConsolidated();
   let result: Deal | null = null;
   await mutateBlob<Deal>("deals.json", (deals) => {
     const idx = deals.findIndex((d) => d.id === id);
@@ -253,6 +255,7 @@ export async function updateDeal(id: number, data: Partial<Deal>): Promise<Deal 
 }
 
 export async function deleteDeal(id: number): Promise<void> {
+  await ensureDealsConsolidated();
   await mutateBlob<Deal>("deals.json", (deals) => deals.filter((d) => d.id !== id));
 }
 
@@ -404,6 +407,7 @@ export async function getDealParticipants(dealId: number): Promise<Person[]> {
 }
 
 export async function addDealParticipant(dealId: number, personId: number): Promise<void> {
+  await ensureDealsConsolidated();
   await mutateBlob<Deal>("deals.json", (deals) => {
     const idx = deals.findIndex((d) => d.id === dealId);
     if (idx === -1) throw new Error("Deal not found");
