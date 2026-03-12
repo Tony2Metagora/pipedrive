@@ -53,7 +53,9 @@ export async function POST(request: Request) {
         } catch { /* try next */ }
       }
       if (!arrayBuffer) {
-        return NextResponse.json({ error: "Impossible de télécharger l'image après 3 tentatives" }, { status: 500 });
+        // All download strategies failed — save the external URL directly
+        // The preview/generate will use the original URL instead of a local copy
+        return NextResponse.json({ success: true, path: null, externalUrl: imageUrl, warning: "Image non téléchargeable, URL externe utilisée" });
       }
     }
 

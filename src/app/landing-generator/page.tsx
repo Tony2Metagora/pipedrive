@@ -334,6 +334,11 @@ export default function LandingGeneratorPage() {
         setError(json.error);
         return;
       }
+      if (json.externalUrl) {
+        // Server couldn't download — use external URL directly as store image
+        setStoreImage(json.externalUrl);
+        setStoreImageOriginalUrl(json.externalUrl);
+      }
       setImageConfirmed(true);
       setImageSearchResults([]);
       setImageModalOpen(false);
