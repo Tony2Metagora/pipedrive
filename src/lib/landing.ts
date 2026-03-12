@@ -343,7 +343,7 @@ export function renderTemplate(template: string, vars: Record<string, string>): 
 // ─── FTP upload to Hostinger ─────────────────────────────
 
 function getFtpConfig() {
-  const host = process.env.FTP_HOST || "metagora-tech.fr";
+  const host = process.env.FTP_HOST || "72.60.93.34";
   const user = process.env.FTP_USER || "u222173711";
   const password = process.env.FTP_PASSWORD;
   if (!password) throw new Error("FTP_PASSWORD manquant — ajoutez-le dans .env.local / Vercel");
