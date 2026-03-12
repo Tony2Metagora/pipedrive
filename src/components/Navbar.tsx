@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { LayoutDashboard, Upload, LogOut, TrendingUp, Users } from "lucide-react";
+import { LayoutDashboard, Upload, LogOut, TrendingUp, Users, Globe } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
+  { href: "/landing-generator", label: "Landing", icon: Globe },
   { href: "/dashboard", label: "Affaires", icon: LayoutDashboard },
   { href: "/prospects", label: "Prospects", icon: Users },
   { href: "/pipeline", label: "Pipeline", icon: TrendingUp },
