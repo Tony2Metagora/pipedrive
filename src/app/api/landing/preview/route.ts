@@ -31,8 +31,9 @@ export async function POST(request: Request) {
     const vars = computeVariables(input, lang, brandTypeConfig.keywords);
     const html = renderTemplate(template, vars);
     const basePath = brandTypeConfig.basePath;
-    const outputPath = `${basePath}/${input.brandSlug}/${input.language}/index.html`;
-    const publicUrl = `https://metagora-tech.fr/${basePath}/${input.brandSlug}/${input.language}/`;
+    const pathCode = input.urlCode || input.language;
+    const outputPath = `${basePath}/${input.brandSlug}/${pathCode}/index.html`;
+    const publicUrl = `https://metagora-tech.fr/${basePath}/${input.brandSlug}/${pathCode}/`;
 
     return NextResponse.json({
       html,

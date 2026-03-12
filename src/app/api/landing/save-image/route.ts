@@ -17,11 +17,14 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
-    const { imageUrl, imagePath } = await request.json();
+    const { imageUrl, imagePath, brandType } = await request.json();
 
     if (!imageUrl || !imagePath) {
       return NextResponse.json({ error: "imageUrl et imagePath requis" }, { status: 400 });
     }
+
+    // Image goes under the brand type's assets folder (e.g. retail-luxe/assets/images/)
+    const baseDir = brandType === "premium" ? "retail-premium" : "retail-luxe";
 
     const token = process.env.GITHUB_TOKEN;
     if (!token) {
@@ -47,7 +50,7 @@ export async function POST(request: Request) {
     // Push to GitHub
     const octokit = new Octokit({ auth: token });
     const [owner, repo] = GITHUB_REPO.split("/");
-    const filePath = `assets/images/${imagePath}`;
+    const filePath = `${baseDir}/assets/images/${imagePath}`;
 
     // Check if file already exists
     let existingSha: string | undefined;

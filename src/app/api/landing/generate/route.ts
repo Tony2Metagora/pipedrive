@@ -44,8 +44,9 @@ export async function POST(request: Request) {
 
     // Determine output path
     const basePath = brandTypeConfig.basePath;
-    const outputPath = `${basePath}/${input.brandSlug}/${input.language}/index.html`;
-    const commitMessage = `Add landing page: ${input.brandName} (${input.language})`;
+    const pathCode = input.urlCode || input.language;
+    const outputPath = `${basePath}/${input.brandSlug}/${pathCode}/index.html`;
+    const commitMessage = `Add landing page: ${input.brandName} (${pathCode})`;
 
     // Push to GitHub
     const result = await pushToGitHub(outputPath, html, commitMessage);

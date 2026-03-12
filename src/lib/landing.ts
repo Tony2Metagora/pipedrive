@@ -104,6 +104,7 @@ export interface GenerateInput {
   brandName: string;
   brandType: "luxe" | "premium";
   language: string;
+  urlCode?: string;
   store: {
     name: string;
     address: string;

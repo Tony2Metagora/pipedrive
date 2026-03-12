@@ -83,11 +83,11 @@ const LANGUAGES = [
 ];
 
 const ALL_CITIES = [
-  { key: "paris", label: "Paris", flag: "\u{1F1EB}\u{1F1F7}", langs: ["fr"] },
-  { key: "london", label: "Londres", flag: "\u{1F1EC}\u{1F1E7}", langs: ["fr", "en"] },
-  { key: "newyork", label: "New York", flag: "\u{1F1FA}\u{1F1F8}", langs: ["fr", "en"] },
-  { key: "tokyo", label: "Tokyo", flag: "\u{1F1EF}\u{1F1F5}", langs: ["fr"] },
-  { key: "shanghai", label: "Shanghai", flag: "\u{1F1E8}\u{1F1F3}", langs: ["fr"] },
+  { key: "paris", label: "Paris", flag: "\u{1F1EB}\u{1F1F7}", langs: ["fr"], urlCode: "fr" },
+  { key: "london", label: "Londres", flag: "\u{1F1EC}\u{1F1E7}", langs: ["fr", "en"], urlCode: "uk" },
+  { key: "newyork", label: "New York", flag: "\u{1F1FA}\u{1F1F8}", langs: ["fr", "en"], urlCode: "us" },
+  { key: "tokyo", label: "Tokyo", flag: "\u{1F1EF}\u{1F1F5}", langs: ["fr"], urlCode: "jp" },
+  { key: "shanghai", label: "Shanghai", flag: "\u{1F1E8}\u{1F1F3}", langs: ["fr"], urlCode: "cn" },
 ];
 
 // ─── Component ────────────────────────────────────────────
@@ -184,19 +184,23 @@ export default function LandingGeneratorPage() {
     }
   }, [storeCity, brandName, varsData]);
 
+  // URL code derived from city (uk, us, fr, jp, cn)
+  const urlCode = ALL_CITIES.find((c) => c.key === storeCity)?.urlCode || language;
+
   // Build request body
   const body = useMemo(() => ({
     brandSlug,
     brandName,
     brandType,
     language,
+    urlCode,
     store: {
       name: storeName,
       address: storeAddress,
       city: storeCity,
-      image: storeImage || `boutiques/Boutique ${brandName} ${language}.jpg`,
+      image: storeImage || `boutiques/Boutique ${brandName} ${urlCode}.jpg`,
     },
-  }), [brandSlug, brandName, brandType, language, storeName, storeAddress, storeCity, storeImage]);
+  }), [brandSlug, brandName, brandType, language, urlCode, storeName, storeAddress, storeCity, storeImage]);
 
   // Filter cities by language
   const cities = useMemo(() => ALL_CITIES.filter((c) => c.langs.includes(language)), [language]);
@@ -239,7 +243,7 @@ export default function LandingGeneratorPage() {
   };
 
   const handleGenerate = async () => {
-    if (!confirm(`Générer et déployer la landing page pour ${brandName} (${language}) ?\n\nFichier: ${preview?.outputPath || `retail-${brandType}/${brandSlug}/${language}/index.html`}\nURL: ${preview?.publicUrl || `https://metagora-tech.fr/retail-${brandType}/${brandSlug}/${language}/`}`)) return;
+    if (!confirm(`Générer et déployer la landing page pour ${brandName} (${urlCode}) ?\n\nFichier: ${preview?.outputPath || `retail-${brandType}/${brandSlug}/${urlCode}/index.html`}\nURL: ${preview?.publicUrl || `https://metagora-tech.fr/retail-${brandType}/${brandSlug}/${urlCode}/`}`)) return;
 
     setError(null);
     setLoading(true);
@@ -333,13 +337,13 @@ export default function LandingGeneratorPage() {
     if (!imageUrl) return;
     setImageSaving(true);
     setError(null);
-    const imagePath = `boutiques/Boutique ${brandName} ${language}.jpg`;
+    const imagePath = `boutiques/Boutique ${brandName} ${urlCode}.jpg`;
     setStoreImage(imagePath);
     try {
       const res = await fetch("/api/landing/save-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageUrl, imagePath }),
+        body: JSON.stringify({ imageUrl, imagePath, brandType }),
       });
       const json = await res.json();
       if (json.error) {
@@ -650,13 +654,13 @@ export default function LandingGeneratorPage() {
                 <div>
                   <span className="text-gray-400">Fichier</span>
                   <p className="font-mono text-[10px] text-gray-500 mt-0.5 break-all">
-                    retail-{brandType}/{brandSlug || "..."}/{language}/index.html
+                    retail-{brandType}/{brandSlug || "..."}/{urlCode}/index.html
                   </p>
                 </div>
                 <div>
                   <span className="text-gray-400">URL publique</span>
                   <p className="font-mono text-[10px] text-indigo-500 mt-0.5 break-all">
-                    metagora-tech.fr/retail-{brandType}/{brandSlug || "..."}/{language}/
+                    metagora-tech.fr/retail-{brandType}/{brandSlug || "..."}/{urlCode}/
                   </p>
                 </div>
               </div>
