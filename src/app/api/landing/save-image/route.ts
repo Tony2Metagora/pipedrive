@@ -18,10 +18,10 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
-    const { imageBase64, imagePath, brandType } = await request.json();
+    const { imageBase64, imageUrl, imagePath, brandType } = await request.json();
 
-    if (!imageBase64 || !imagePath) {
-      return NextResponse.json({ error: "imageBase64 et imagePath requis" }, { status: 400 });
+    if ((!imageBase64 && !imageUrl) || !imagePath) {
+      return NextResponse.json({ error: "imageBase64 ou imageUrl + imagePath requis" }, { status: 400 });
     }
 
     // Image goes under the brand type's assets folder (e.g. retail-luxe/assets/images/)
@@ -32,8 +32,30 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "GITHUB_TOKEN manquant" }, { status: 500 });
     }
 
-    // Decode base64 image sent from client (avoids 403 from image hosts)
-    const arrayBuffer = Buffer.from(imageBase64, "base64");
+    // Get image data: prefer base64 from client, fallback to server-side download
+    let arrayBuffer: Buffer | null = null;
+    if (imageBase64) {
+      arrayBuffer = Buffer.from(imageBase64, "base64");
+    } else {
+      // Server-side download with multiple User-Agent strategies
+      const strategies: Record<string, string>[] = [
+        { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36", "Accept": "image/*,*/*", "Referer": new URL(imageUrl).origin + "/" },
+        { "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", "Accept": "*/*" },
+        { "User-Agent": "facebookexternalhit/1.1", "Accept": "*/*" },
+      ];
+      for (const headers of strategies) {
+        try {
+          const res = await fetch(imageUrl, { headers });
+          if (res.ok) {
+            arrayBuffer = Buffer.from(await res.arrayBuffer());
+            break;
+          }
+        } catch { /* try next */ }
+      }
+      if (!arrayBuffer) {
+        return NextResponse.json({ error: "Impossible de télécharger l'image après 3 tentatives" }, { status: 500 });
+      }
+    }
 
     // Resize & crop to 1200×900 (4:3) JPEG, quality 85%
     const resizedBuffer = await sharp(Buffer.from(arrayBuffer))

@@ -262,6 +262,39 @@ export default function LandingGeneratorPage() {
     setImageModalOpen(true);
   };
 
+  // Helper: load image into canvas and extract base64
+  const imageToBase64ViaCanvas = (url: string): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          canvas.getContext("2d")!.drawImage(img, 0, 0);
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+          resolve(dataUrl.split(",")[1]);
+        } catch { reject(new Error("canvas-blocked")); }
+      };
+      img.onerror = () => reject(new Error("img-load-failed"));
+      img.src = url;
+    });
+  };
+
+  // Helper: fetch via our proxy and convert to base64
+  const imageToBase64ViaProxy = async (url: string): Promise<string> => {
+    const res = await fetch(`/api/landing/image-proxy?url=${encodeURIComponent(url)}`);
+    if (!res.ok) throw new Error(`proxy-${res.status}`);
+    const blob = await res.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve((reader.result as string).split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
   // Confirm and save the selected image
   const handleConfirmImage = async () => {
     const imageUrl = imageSearchResults[imageModalIndex];
@@ -272,22 +305,30 @@ export default function LandingGeneratorPage() {
     setStoreImage(imagePath);
     setStoreImageOriginalUrl(imageUrl);
     try {
-      // Download image via our proxy (avoids CORS + 403 from external hosts)
-      const imgRes = await fetch(`/api/landing/image-proxy?url=${encodeURIComponent(imageUrl)}`);
-      if (!imgRes.ok) throw new Error(`Impossible de télécharger l'image: ${imgRes.status}`);
-      const blob = await imgRes.blob();
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve((reader.result as string).split(",")[1]);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
+      // Strategy 1: canvas (works if server sends CORS headers)
+      // Strategy 2: proxy (works if server doesn't block Vercel IPs)
+      // Strategy 3: send URL to server (server tries with browser-like headers)
+      let base64: string | null = null;
+      try { base64 = await imageToBase64ViaCanvas(imageUrl); } catch { /* try next */ }
+      if (!base64) {
+        try { base64 = await imageToBase64ViaProxy(imageUrl); } catch { /* try next */ }
+      }
 
-      const res = await fetch("/api/landing/save-image", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageBase64: base64, imagePath, brandType }),
-      });
+      let res;
+      if (base64) {
+        res = await fetch("/api/landing/save-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageBase64: base64, imagePath, brandType }),
+        });
+      } else {
+        // Last resort: let the server download it
+        res = await fetch("/api/landing/save-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageUrl, imagePath, brandType }),
+        });
+      }
       const json = await res.json();
       if (json.error) {
         setError(json.error);
@@ -715,8 +756,9 @@ export default function LandingGeneratorPage() {
               <img
                 src={imageSearchResults[imageModalIndex]}
                 alt={`Image ${imageModalIndex + 1}`}
+                crossOrigin="anonymous"
                 className="max-w-full max-h-[70vh] object-contain"
-                onError={(e) => { (e.target as HTMLImageElement).alt = "Image indisponible"; }}
+                onError={(e) => { (e.target as HTMLImageElement).removeAttribute("crossorigin"); }}
               />
 
               {/* Prev button */}
