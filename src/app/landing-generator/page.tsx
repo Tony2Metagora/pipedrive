@@ -13,6 +13,11 @@ import {
   ChevronUp,
   Copy,
   Check,
+  Monitor,
+  Smartphone,
+  Sparkles,
+  ImageIcon,
+  Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Navbar from "@/components/Navbar";
@@ -73,12 +78,12 @@ const LANGUAGES = [
   { code: "en", label: "English", flag: "🇬🇧" },
 ];
 
-const CITIES = [
-  { key: "paris", label: "Paris", flag: "🇫🇷" },
-  { key: "london", label: "Londres", flag: "🇬🇧" },
-  { key: "newyork", label: "New York", flag: "🇺🇸" },
-  { key: "tokyo", label: "Tokyo", flag: "🇯🇵" },
-  { key: "shanghai", label: "Shanghai", flag: "🇨🇳" },
+const ALL_CITIES = [
+  { key: "paris", label: "Paris", flag: "\u{1F1EB}\u{1F1F7}", langs: ["fr"] },
+  { key: "london", label: "Londres", flag: "\u{1F1EC}\u{1F1E7}", langs: ["fr", "en"] },
+  { key: "newyork", label: "New York", flag: "\u{1F1FA}\u{1F1F8}", langs: ["fr", "en"] },
+  { key: "tokyo", label: "Tokyo", flag: "\u{1F1EF}\u{1F1F5}", langs: ["fr"] },
+  { key: "shanghai", label: "Shanghai", flag: "\u{1F1E8}\u{1F1F3}", langs: ["fr"] },
 ];
 
 // ─── Component ────────────────────────────────────────────
@@ -94,6 +99,10 @@ export default function LandingGeneratorPage() {
   const [storeCity, setStoreCity] = useState("paris");
   const [storeAddress, setStoreAddress] = useState("");
   const [storeImage, setStoreImage] = useState("");
+  const [imageConfirmed, setImageConfirmed] = useState(false);
+  const [storeFinderLoading, setStoreFinderLoading] = useState(false);
+  const [imageSearchResults, setImageSearchResults] = useState<string[]>([]);
+  const [imageSearchLoading, setImageSearchLoading] = useState(false);
 
   // UI state
   const [loading, setLoading] = useState(false);
@@ -101,6 +110,7 @@ export default function LandingGeneratorPage() {
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [showPreviewVars, setShowPreviewVars] = useState(false);
   const [showPreviewPage, setShowPreviewPage] = useState(false);
+  const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
   const [result, setResult] = useState<GenerateResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -181,7 +191,18 @@ export default function LandingGeneratorPage() {
     },
   }), [brandSlug, brandName, brandType, language, storeName, storeAddress, storeCity, storeImage]);
 
-  const isValid = brandName && brandSlug && storeName && storeAddress;
+  // Filter cities by language
+  const cities = useMemo(() => ALL_CITIES.filter((c) => c.langs.includes(language)), [language]);
+
+  // Reset city if current city not available for new language
+  useEffect(() => {
+    const available = ALL_CITIES.filter((c) => c.langs.includes(language));
+    if (!available.find((c) => c.key === storeCity)) {
+      setStoreCity(available[0]?.key || "paris");
+    }
+  }, [language, storeCity]);
+
+  const isValid = brandName && brandSlug && storeName && storeAddress && imageConfirmed;
 
   // ─── Actions ──────────────────────────────────────────
 
@@ -238,6 +259,82 @@ export default function LandingGeneratorPage() {
     navigator.clipboard.writeText(url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  // AI store finder
+  const handleFindStore = async () => {
+    if (!brandName) return;
+    setStoreFinderLoading(true);
+    setError(null);
+    try {
+      const cityLabel = ALL_CITIES.find((c) => c.key === storeCity)?.label || storeCity;
+      const res = await fetch("/api/landing/store-finder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brandName, city: cityLabel }),
+      });
+      const json = await res.json();
+      if (json.error) {
+        setError(json.error);
+      } else if (json.data?.notFound) {
+        setError(`Pas de boutique flagship trouvée pour ${brandName} à ${cityLabel}`);
+      } else {
+        setStoreName(json.data.storeName || "");
+        setStoreAddress(json.data.storeAddress || "");
+      }
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setStoreFinderLoading(false);
+    }
+  };
+
+  // Image search
+  const handleImageSearch = async () => {
+    if (!storeName) return;
+    setImageSearchLoading(true);
+    setImageSearchResults([]);
+    setError(null);
+    try {
+      const res = await fetch("/api/landing/image-search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: `${storeName} ${storeAddress} boutique facade exterior` }),
+      });
+      const json = await res.json();
+      if (json.error) {
+        setError(json.error);
+      } else {
+        setImageSearchResults(json.data || []);
+      }
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setImageSearchLoading(false);
+    }
+  };
+
+  // Select an image from search results
+  const handleSelectImage = async (imageUrl: string) => {
+    const imagePath = `boutiques/Boutique ${brandName} ${language}.jpg`;
+    setStoreImage(imagePath);
+    // Save the image URL to be pushed to the repo
+    try {
+      const res = await fetch("/api/landing/save-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageUrl, imagePath }),
+      });
+      const json = await res.json();
+      if (json.error) {
+        setError(json.error);
+        return;
+      }
+      setImageConfirmed(true);
+      setImageSearchResults([]);
+    } catch (err) {
+      setError(String(err));
+    }
   };
 
   return (
@@ -403,7 +500,7 @@ export default function LandingGeneratorPage() {
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Ville</label>
                   <div className="flex flex-wrap gap-1.5">
-                    {CITIES.map((c) => (
+                    {cities.map((c) => (
                       <button
                         key={c.key}
                         onClick={() => setStoreCity(c.key)}
@@ -419,6 +516,15 @@ export default function LandingGeneratorPage() {
                     ))}
                   </div>
                 </div>
+                {/* AI Store Finder button */}
+                <button
+                  onClick={handleFindStore}
+                  disabled={!brandName || storeFinderLoading}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 disabled:opacity-50 transition-colors cursor-pointer"
+                >
+                  {storeFinderLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                  {storeFinderLoading ? "Recherche IA..." : "Trouver la boutique flagship (IA)"}
+                </button>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Nom de la boutique</label>
                   <input
@@ -439,16 +545,61 @@ export default function LandingGeneratorPage() {
                     className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 outline-none"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Chemin image boutique</label>
-                  <input
-                    type="text"
-                    value={storeImage}
-                    onChange={(e) => setStoreImage(e.target.value)}
-                    placeholder={`boutiques/Boutique ${brandName || "Brand"} ${language}.jpg`}
-                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 outline-none font-mono text-xs"
-                  />
-                  <p className="text-[10px] text-gray-400 mt-1">Chemin relatif dans assets/images/</p>
+
+                {/* Image section */}
+                <div className="border-t border-gray-100 pt-3 mt-1">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-medium text-gray-600">Image boutique</label>
+                    {imageConfirmed && (
+                      <span className="flex items-center gap-1 text-[10px] text-green-600 font-medium">
+                        <Check className="w-3 h-3" /> Image confirmée
+                      </span>
+                    )}
+                  </div>
+                  {storeImage && (
+                    <p className="text-[10px] font-mono text-gray-400 mb-2">{storeImage}</p>
+                  )}
+                  <button
+                    onClick={handleImageSearch}
+                    disabled={!storeName || imageSearchLoading}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50 transition-colors cursor-pointer"
+                  >
+                    {imageSearchLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                    {imageSearchLoading ? "Recherche..." : "Rechercher des photos"}
+                  </button>
+
+                  {/* Image search results grid */}
+                  {imageSearchResults.length > 0 && (
+                    <div className="mt-3">
+                      <p className="text-[10px] text-gray-500 mb-2">Cliquez sur une image pour la sélectionner :</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {imageSearchResults.map((url, i) => (
+                          <button
+                            key={i}
+                            onClick={() => handleSelectImage(url)}
+                            className="relative aspect-video rounded-lg overflow-hidden border-2 border-gray-200 hover:border-indigo-500 transition-colors cursor-pointer group"
+                          >
+                            <img
+                              src={url}
+                              alt={`Résultat ${i + 1}`}
+                              className="w-full h-full object-cover"
+                              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                            />
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                              <ImageIcon className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {!imageConfirmed && !imageSearchResults.length && (
+                    <p className="text-[10px] text-amber-600 mt-2 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" />
+                      Image requise avant prévisualisation et déploiement
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -474,7 +625,7 @@ export default function LandingGeneratorPage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-400">Ville</span>
-                  <span className="font-medium">{CITIES.find((c) => c.key === storeCity)?.flag} {CITIES.find((c) => c.key === storeCity)?.label}</span>
+                  <span className="font-medium">{ALL_CITIES.find((c) => c.key === storeCity)?.flag} {ALL_CITIES.find((c) => c.key === storeCity)?.label}</span>
                 </div>
                 <hr className="border-gray-100" />
                 <div>
@@ -523,6 +674,27 @@ export default function LandingGeneratorPage() {
                 Prévisualisation de la page
               </span>
               <div className="flex items-center gap-2">
+                {/* Desktop / Mobile toggle */}
+                <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden">
+                  <button
+                    onClick={() => setPreviewMode("desktop")}
+                    className={cn(
+                      "flex items-center gap-1 px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer",
+                      previewMode === "desktop" ? "bg-indigo-50 text-indigo-700" : "text-gray-400 hover:text-gray-600"
+                    )}
+                  >
+                    <Monitor className="w-3.5 h-3.5" /> Desktop
+                  </button>
+                  <button
+                    onClick={() => setPreviewMode("mobile")}
+                    className={cn(
+                      "flex items-center gap-1 px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer",
+                      previewMode === "mobile" ? "bg-indigo-50 text-indigo-700" : "text-gray-400 hover:text-gray-600"
+                    )}
+                  >
+                    <Smartphone className="w-3.5 h-3.5" /> Mobile
+                  </button>
+                </div>
                 <button
                   onClick={() => setShowPreviewVars(!showPreviewVars)}
                   className="text-xs text-indigo-600 hover:text-indigo-800 font-medium cursor-pointer"
@@ -549,13 +721,28 @@ export default function LandingGeneratorPage() {
                 </div>
               </div>
             )}
-            <iframe
-              srcDoc={preview.html}
-              className="w-full border-0"
-              style={{ height: "80vh" }}
-              title="Landing page preview"
-              sandbox="allow-scripts"
-            />
+            <div className="bg-gray-100 flex justify-center overflow-hidden" style={{ height: "80vh" }}>
+              <div
+                className="origin-top"
+                style={
+                  previewMode === "desktop"
+                    ? { width: 1440, transform: "scale(0.6)", height: "133vh" }
+                    : { width: 390, transform: "scale(0.85)", height: "94vh" }
+                }
+              >
+                <iframe
+                  srcDoc={preview.html}
+                  className="border-0 bg-white"
+                  style={
+                    previewMode === "desktop"
+                      ? { width: 1440, height: "133vh" }
+                      : { width: 390, height: "94vh", borderRadius: 20, boxShadow: "0 4px 24px rgba(0,0,0,0.12)" }
+                  }
+                  title="Landing page preview"
+                  sandbox="allow-scripts"
+                />
+              </div>
+            </div>
           </div>
         )}
       </div>
