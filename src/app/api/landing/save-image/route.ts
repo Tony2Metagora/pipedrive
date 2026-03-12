@@ -1,13 +1,17 @@
 /**
  * API Route — Save a store image to the landing-workflows GitHub repo
- * POST: downloads image from URL and pushes it to assets/images/{imagePath}
+ * POST: downloads image from URL, resizes to 1200×900 (4:3 landscape), pushes to assets/images/{imagePath}
  */
 
 import { NextResponse } from "next/server";
 import { Octokit } from "octokit";
+import sharp from "sharp";
 
 const GITHUB_REPO = process.env.GITHUB_REPO || "Tony2Metagora/landing-workflows";
 const GITHUB_BRANCH = "master";
+
+const TARGET_WIDTH = 1200;
+const TARGET_HEIGHT = 900; // 4:3 aspect ratio matching .boutique-visual
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +35,14 @@ export async function POST(request: Request) {
     }
 
     const arrayBuffer = await imgRes.arrayBuffer();
-    const base64Content = Buffer.from(arrayBuffer).toString("base64");
+
+    // Resize & crop to 1200×900 (4:3) JPEG, quality 85%
+    const resizedBuffer = await sharp(Buffer.from(arrayBuffer))
+      .resize(TARGET_WIDTH, TARGET_HEIGHT, { fit: "cover", position: "centre" })
+      .jpeg({ quality: 85 })
+      .toBuffer();
+
+    const base64Content = resizedBuffer.toString("base64");
 
     // Push to GitHub
     const octokit = new Octokit({ auth: token });
