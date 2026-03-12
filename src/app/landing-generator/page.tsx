@@ -726,7 +726,7 @@ export default function LandingGeneratorPage() {
                       : { width: 390, height: "94vh", borderRadius: 20, boxShadow: "0 4px 24px rgba(0,0,0,0.12)" }
                   }
                   title="Landing page preview"
-                  sandbox="allow-scripts"
+                  sandbox="allow-scripts allow-same-origin allow-popups"
                 />
               </div>
             </div>
