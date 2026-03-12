@@ -28,24 +28,6 @@ import Navbar from "@/components/Navbar";
 
 // ─── Types ────────────────────────────────────────────────
 
-interface StoreCity {
-  city: string;
-  country: string;
-  flagEmoji: string;
-}
-
-interface BrandConfig {
-  name: string;
-  type: string;
-  stores: Record<string, { name: string; address: string; image: string }>;
-}
-
-interface VariablesData {
-  brandTypes: Record<string, { label: string; examples: string[]; keywords: Record<string, string>; basePath: string }>;
-  languages: Record<string, { code: string; label: string }>;
-  stores: Record<string, StoreCity>;
-  brands: Record<string, BrandConfig>;
-}
 
 interface PreviewResult {
   html: string;
@@ -124,17 +106,6 @@ export default function LandingGeneratorPage() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // Variables.json metadata (for pre-filled brands)
-  const [varsData, setVarsData] = useState<VariablesData | null>(null);
-
-  // Load variables.json from API for brand suggestions
-  useEffect(() => {
-    fetch("/api/landing/variables")
-      .then((r) => r.json())
-      .then((d) => { if (d.data) setVarsData(d.data); })
-      .catch(() => {});
-  }, []);
-
   // Auto-compute slug from brand name
   useEffect(() => {
     if (!slugManual) {
@@ -142,49 +113,6 @@ export default function LandingGeneratorPage() {
     }
   }, [brandName, slugManual]);
 
-  // Pre-fill from known brand
-  const knownBrands = useMemo(() => {
-    if (!varsData?.brands) return [];
-    return Object.entries(varsData.brands).map(([slug, b]) => ({
-      slug,
-      name: b.name,
-      type: b.type as "luxe" | "premium",
-      stores: b.stores,
-    }));
-  }, [varsData]);
-
-  const selectKnownBrand = (slug: string) => {
-    const brand = varsData?.brands[slug];
-    if (!brand) return;
-    setBrandName(brand.name);
-    setBrandSlug(slug);
-    setSlugManual(true);
-    setBrandType(brand.type as "luxe" | "premium");
-
-    // Pre-fill store if available for selected city
-    const store = brand.stores[storeCity] || Object.values(brand.stores)[0];
-    if (store) {
-      setStoreName(store.name);
-      setStoreAddress(store.address);
-      setStoreImage(store.image);
-      // Set city to match the store
-      const cityKey = Object.keys(brand.stores).find((k) => brand.stores[k] === store) || storeCity;
-      setStoreCity(cityKey);
-    }
-  };
-
-  // When city changes, try to update store info from known brand
-  useEffect(() => {
-    if (!varsData?.brands) return;
-    const brand = Object.entries(varsData.brands).find(([, b]) => b.name === brandName);
-    if (!brand) return;
-    const store = brand[1].stores[storeCity];
-    if (store) {
-      setStoreName(store.name);
-      setStoreAddress(store.address);
-      setStoreImage(store.image);
-    }
-  }, [storeCity, brandName, varsData]);
 
   // URL code derived from city (uk, us, fr, jp, cn)
   const urlCode = ALL_CITIES.find((c) => c.key === storeCity)?.urlCode || language;
@@ -453,26 +381,6 @@ export default function LandingGeneratorPage() {
             {/* Brand name + slug */}
             <div className="bg-white rounded-xl border border-gray-200 p-5">
               <h2 className="text-sm font-semibold text-gray-800 mb-3">Marque</h2>
-
-              {/* Quick select from known brands */}
-              {knownBrands.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mb-3">
-                  {knownBrands.map((b) => (
-                    <button
-                      key={b.slug}
-                      onClick={() => selectKnownBrand(b.slug)}
-                      className={cn(
-                        "px-2.5 py-1 text-xs rounded-full border transition-colors cursor-pointer",
-                        brandSlug === b.slug
-                          ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium"
-                          : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100"
-                      )}
-                    >
-                      {b.name}
-                    </button>
-                  ))}
-                </div>
-              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
