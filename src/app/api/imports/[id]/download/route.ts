@@ -17,6 +17,8 @@ const CSV_HEADERS = [
   { key: "phone", label: "phone" },
   { key: "mobile_phone", label: "mobile_phone" },
   { key: "linkedin", label: "linkedin" },
+  { key: "location", label: "location" },
+  { key: "company_location", label: "company_location" },
   { key: "website", label: "website" },
   { key: "company_linkedin", label: "company_linkedin" },
   { key: "company_domain", label: "company_domain" },
@@ -29,6 +31,7 @@ const CSV_HEADERS = [
   { key: "company_city", label: "company_city" },
   { key: "company_postal_code", label: "company_postal_code" },
   { key: "company_country", label: "company_country" },
+  { key: "company_turnover", label: "company_turnover" },
   { key: "email_qualification", label: "email_qualification" },
   { key: "enriched", label: "enriched" },
 ];

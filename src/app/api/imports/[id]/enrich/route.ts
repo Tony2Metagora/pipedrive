@@ -146,6 +146,25 @@ function applyResults(
       if (dc.siren) { row.siren = dc.siren; updatedFields.push("siren"); }
       if (dc.siret) { row.siret = dc.siret; updatedFields.push("siret"); }
 
+      // Company address from siret_address (format: "2 Rue Rotland, 67140 Mittelbergheim")
+      if (dc.siret_address) {
+        row.company_address = dc.siret_address;
+        updatedFields.push("company_address");
+        // Parse city and postal code from address
+        const match = dc.siret_address.match(/(\d{5})\s+(.+)$/);
+        if (match) {
+          row.company_postal_code = match[1];
+          row.company_city = match[2];
+          updatedFields.push("company_city", "company_postal_code");
+        }
+      }
+
+      // Company LinkedIn
+      if (dc.company_linkedin) { row.company_linkedin = dc.company_linkedin; updatedFields.push("company_linkedin"); }
+
+      // Company turnover
+      if (dc.company_turnover) { row.company_turnover = dc.company_turnover; updatedFields.push("company_turnover"); }
+
       row.enriched = true;
     }
 

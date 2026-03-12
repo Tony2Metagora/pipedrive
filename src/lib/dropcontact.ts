@@ -30,6 +30,9 @@ export interface DropcontactResult {
   naf5_des?: string;
   siren?: string;
   siret?: string;
+  siret_address?: string;
+  company_linkedin?: string;
+  company_turnover?: string;
 }
 
 /**

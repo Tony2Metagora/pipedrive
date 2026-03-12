@@ -49,6 +49,11 @@ const COLUMN_ALIASES: Record<string, string> = {
   // linkedin
   linkedin: "linkedin", linkedinurl: "linkedin", linkedinprofileurl: "linkedin", "linkedin url": "linkedin",
   "linkedin profile": "linkedin", defaultprofileurl: "linkedin", profileurl: "linkedin",
+  // location (profile)
+  location: "location", ville: "location", city: "location", région: "location", region: "location",
+  // company_location
+  companylocation: "company_location", "company location": "company_location", "lieu entreprise": "company_location",
+  "ville entreprise": "company_location", companylocality: "company_location",
 };
 
 function mapColumnName(header: string): string | null {
@@ -87,6 +92,8 @@ interface ImportContact {
   job: string;
   phone: string;
   linkedin: string;
+  location?: string;
+  company_location?: string;
   mobile_phone?: string;
   website?: string;
   company_linkedin?: string;
@@ -111,6 +118,7 @@ interface PhantomProfile {
   companyName: string;
   linkedinUrl: string;
   location?: string;
+  companyLocation?: string;
   isDuplicate?: boolean;
   duplicateListName?: string;
 }
@@ -136,6 +144,11 @@ const ALL_COLUMNS: ColumnDef[] = [
   { key: "job", label: "Poste", defaultVisible: true, defaultWidth: 90, minWidth: 40 },
   { key: "phone", label: "Téléphone", defaultVisible: true, defaultWidth: 90, minWidth: 40 },
   { key: "linkedin", label: "LinkedIn", defaultVisible: true, defaultWidth: 36, minWidth: 28 },
+  { key: "location", label: "Localisation", defaultVisible: true, defaultWidth: 120, minWidth: 50 },
+  { key: "company_location", label: "Lieu entreprise", defaultVisible: false, defaultWidth: 120, minWidth: 50 },
+  { key: "company_address", label: "Adresse siège", defaultVisible: false, enrichedOnly: true, defaultWidth: 150, minWidth: 60 },
+  { key: "company_city", label: "Ville siège", defaultVisible: false, enrichedOnly: true, defaultWidth: 100, minWidth: 50 },
+  { key: "company_postal_code", label: "CP siège", defaultVisible: false, enrichedOnly: true, defaultWidth: 60, minWidth: 40 },
   { key: "mobile_phone", label: "Mobile", defaultVisible: false, enrichedOnly: true, defaultWidth: 90, minWidth: 40 },
   { key: "website", label: "Site web", defaultVisible: false, enrichedOnly: true, defaultWidth: 120, minWidth: 50 },
   { key: "naf_code", label: "NAF", defaultVisible: false, enrichedOnly: true, defaultWidth: 60, minWidth: 30 },
@@ -147,7 +160,7 @@ const ALL_COLUMNS: ColumnDef[] = [
   { key: "enriched", label: "Enrichi", defaultVisible: true, defaultWidth: 52, minWidth: 36 },
 ];
 
-const MAPPED_COLUMNS = ["first_name", "last_name", "email", "company", "job", "phone", "linkedin"];
+const MAPPED_COLUMNS = ["first_name", "last_name", "email", "company", "job", "phone", "linkedin", "location", "company_location"];
 
 // ─── Smart CSV parser (auto-detect delimiter, RFC 4180) ──
 
@@ -281,6 +294,7 @@ export default function ImportPage() {
 
   // Search (table filter)
   const [search, setSearch] = useState("");
+  const [locationFilter, setLocationFilter] = useState("");
 
   // Resizable columns
   const { widths: colWidths, onMouseDown: onColResize } = useResizableColumns(
@@ -320,6 +334,7 @@ export default function ImportPage() {
   }, []);
 
   useEffect(() => {
+    setLocationFilter("");
     if (selectedListId) fetchContacts(selectedListId);
     else setContacts([]);
   }, [selectedListId, fetchContacts]);
@@ -579,6 +594,7 @@ export default function ImportPage() {
         companyName: r.companyName || r.company || r["Company"] || "",
         linkedinUrl: r.linkedInProfileUrl || r.linkedinUrl || r.profileUrl || r.defaultProfileUrl || r.linkedin || r["LinkedIn URL"] || "",
         location: r.location || r.city || "",
+        companyLocation: r.companyLocation || r["Company Location"] || "",
       })).filter((p) => p.firstName.trim() || p.lastName.trim());
 
       // Deduplicate via API
@@ -723,19 +739,32 @@ export default function ImportPage() {
     });
   };
 
+  // ── Unique locations for filter dropdown ──
+  const allLocations = useMemo(() => {
+    const locs = contacts.map((c) => c.location?.trim()).filter(Boolean) as string[];
+    return [...new Set(locs)].sort();
+  }, [contacts]);
+
   // ── Filtered contacts ──
   const filtered = useMemo(() => {
-    if (!search) return contacts;
-    const q = search.toLowerCase();
-    return contacts.filter((c) =>
-      c.first_name?.toLowerCase().includes(q) ||
-      c.last_name?.toLowerCase().includes(q) ||
-      c.email?.toLowerCase().includes(q) ||
-      c.company?.toLowerCase().includes(q) ||
-      c.job?.toLowerCase().includes(q) ||
-      c.phone?.includes(q)
-    );
-  }, [contacts, search]);
+    let arr = contacts;
+    if (locationFilter) {
+      arr = arr.filter((c) => c.location?.trim() === locationFilter);
+    }
+    if (search) {
+      const q = search.toLowerCase();
+      arr = arr.filter((c) =>
+        c.first_name?.toLowerCase().includes(q) ||
+        c.last_name?.toLowerCase().includes(q) ||
+        c.email?.toLowerCase().includes(q) ||
+        c.company?.toLowerCase().includes(q) ||
+        c.job?.toLowerCase().includes(q) ||
+        c.phone?.includes(q) ||
+        c.location?.toLowerCase().includes(q)
+      );
+    }
+    return arr;
+  }, [contacts, search, locationFilter]);
 
   const visibleColumns = ALL_COLUMNS.filter((c) => visibleCols.has(c.key));
   const selectedList = lists.find((l) => l.id === selectedListId);
@@ -1311,6 +1340,19 @@ export default function ImportPage() {
               className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-400 outline-none w-48"
             />
 
+            {allLocations.length > 0 && (
+              <select
+                value={locationFilter}
+                onChange={(e) => setLocationFilter(e.target.value)}
+                className="px-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-400 outline-none max-w-[180px]"
+              >
+                <option value="">Toutes les régions</option>
+                {allLocations.map((loc) => (
+                  <option key={loc} value={loc}>{loc}</option>
+                ))}
+              </select>
+            )}
+
             {enrichMsg && (
               <span className="text-xs font-medium px-2 py-1 rounded bg-green-50 text-green-700">{enrichMsg}</span>
             )}
@@ -1360,6 +1402,7 @@ export default function ImportPage() {
               <Download className="w-3.5 h-3.5" />
               Exporter CSV
             </button>
+
           </div>
 
           {/* Table */}

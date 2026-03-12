@@ -33,6 +33,8 @@ export async function POST(request: Request) {
       job: (p.title || "").trim(),
       phone: "", // will be enriched by Dropcontact later
       linkedin: (p.linkedinUrl || "").trim(),
+      location: (p.location || "").trim(),
+      company_location: (p.companyLocation || "").trim(),
     }));
 
     const list = await createImportList(listName.trim(), contacts, "search");

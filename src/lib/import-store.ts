@@ -18,6 +18,8 @@ export interface ImportContact {
   job: string;
   phone: string;
   linkedin: string;
+  location?: string;
+  company_location?: string;
   // Dropcontact enriched fields
   mobile_phone?: string;
   website?: string;

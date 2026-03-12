@@ -48,6 +48,8 @@ export async function POST(request: Request) {
       job: row.job || "",
       phone: row.phone || "",
       linkedin: row.linkedin || "",
+      location: row.location || "",
+      company_location: row.company_location || "",
     }));
 
     const list = await createImportList(name.trim(), contacts);
