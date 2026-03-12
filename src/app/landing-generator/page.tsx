@@ -39,6 +39,7 @@ interface VariablesData {
 }
 
 interface PreviewResult {
+  html: string;
   variables: Record<string, string>;
   outputPath: string;
   publicUrl: string;
@@ -99,6 +100,7 @@ export default function LandingGeneratorPage() {
   const [previewing, setPreviewing] = useState(false);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [showPreviewVars, setShowPreviewVars] = useState(false);
+  const [showPreviewPage, setShowPreviewPage] = useState(false);
   const [result, setResult] = useState<GenerateResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -198,7 +200,8 @@ export default function LandingGeneratorPage() {
         setError(json.error);
       } else {
         setPreview(json);
-        setShowPreviewVars(true);
+        setShowPreviewPage(true);
+        setShowPreviewVars(false);
       }
     } catch (err) {
       setError(String(err));
@@ -511,21 +514,31 @@ export default function LandingGeneratorPage() {
           </div>
         </div>
 
-        {/* ─── Preview variables panel ──────────────────── */}
-        {preview && (
+        {/* ─── Full page preview (iframe) ─────────────────── */}
+        {preview && showPreviewPage && (
           <div className="mt-6 bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <button
-              onClick={() => setShowPreviewVars(!showPreviewVars)}
-              className="w-full flex items-center justify-between px-5 py-3 text-sm font-semibold text-gray-800 hover:bg-gray-50 transition-colors cursor-pointer"
-            >
-              <span className="flex items-center gap-2">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+              <span className="flex items-center gap-2 text-sm font-semibold text-gray-800">
                 <Eye className="w-4 h-4 text-indigo-500" />
-                Variables calculées ({preview.variableCount})
+                Prévisualisation de la page
               </span>
-              {showPreviewVars ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowPreviewVars(!showPreviewVars)}
+                  className="text-xs text-indigo-600 hover:text-indigo-800 font-medium cursor-pointer"
+                >
+                  {showPreviewVars ? "Masquer variables" : `Voir les ${preview.variableCount} variables`}
+                </button>
+                <button
+                  onClick={() => setShowPreviewPage(false)}
+                  className="text-xs text-gray-400 hover:text-gray-600 cursor-pointer ml-2"
+                >
+                  Fermer
+                </button>
+              </div>
+            </div>
             {showPreviewVars && (
-              <div className="border-t border-gray-100 px-5 py-4 max-h-96 overflow-y-auto">
+              <div className="border-b border-gray-100 px-5 py-4 max-h-60 overflow-y-auto bg-gray-50">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
                   {Object.entries(preview.variables).map(([key, val]) => (
                     <div key={key} className="flex gap-2 py-1 border-b border-gray-50">
@@ -536,6 +549,13 @@ export default function LandingGeneratorPage() {
                 </div>
               </div>
             )}
+            <iframe
+              srcDoc={preview.html}
+              className="w-full border-0"
+              style={{ height: "80vh" }}
+              title="Landing page preview"
+              sandbox="allow-scripts"
+            />
           </div>
         )}
       </div>

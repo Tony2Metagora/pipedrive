@@ -26,7 +26,11 @@ let templateCache: CacheEntry<string> | null = null;
 let variablesCache: CacheEntry<VariablesJson> | null = null;
 
 function getOctokit() {
-  return new Octokit({ auth: process.env.GITHUB_TOKEN });
+  const token = process.env.GITHUB_TOKEN;
+  if (!token) {
+    throw new Error("GITHUB_TOKEN manquant — ajoutez-le dans .env.local et redémarrez le serveur");
+  }
+  return new Octokit({ auth: token });
 }
 
 async function fetchFileFromGitHub(path: string): Promise<string> {
