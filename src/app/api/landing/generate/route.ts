@@ -10,6 +10,7 @@ import {
   computeVariables,
   renderTemplate,
   pushToGitHub,
+  uploadToFtp,
   type GenerateInput,
 } from "@/lib/landing";
 
@@ -48,8 +49,13 @@ export async function POST(request: Request) {
     const outputPath = `${basePath}/${input.brandSlug}/${pathCode}/index.html`;
     const commitMessage = `Add landing page: ${input.brandName} (${pathCode})`;
 
-    // Push to GitHub
-    const result = await pushToGitHub(outputPath, html, commitMessage);
+    // Push to GitHub + FTP upload to Hostinger in parallel
+    const [result] = await Promise.all([
+      pushToGitHub(outputPath, html, commitMessage),
+      uploadToFtp(outputPath, html).catch((err) =>
+        console.error("FTP upload failed (non-blocking):", err)
+      ),
+    ]);
 
     return NextResponse.json({
       success: true,

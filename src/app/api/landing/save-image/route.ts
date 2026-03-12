@@ -6,6 +6,7 @@
 import { NextResponse } from "next/server";
 import { Octokit } from "octokit";
 import sharp from "sharp";
+import { uploadToFtp } from "@/lib/landing";
 
 const GITHUB_REPO = process.env.GITHUB_REPO || "Tony2Metagora/landing-workflows";
 const GITHUB_BRANCH = "master";
@@ -72,15 +73,21 @@ export async function POST(request: Request) {
       // File doesn't exist yet
     }
 
-    await octokit.rest.repos.createOrUpdateFileContents({
-      owner,
-      repo,
-      path: filePath,
-      message: `Add store image: ${imagePath}`,
-      content: base64Content,
-      branch: GITHUB_BRANCH,
-      ...(existingSha ? { sha: existingSha } : {}),
-    });
+    // Push to GitHub + FTP upload to Hostinger in parallel
+    await Promise.all([
+      octokit.rest.repos.createOrUpdateFileContents({
+        owner,
+        repo,
+        path: filePath,
+        message: `Add store image: ${imagePath}`,
+        content: base64Content,
+        branch: GITHUB_BRANCH,
+        ...(existingSha ? { sha: existingSha } : {}),
+      }),
+      uploadToFtp(filePath, resizedBuffer).catch((err) =>
+        console.error("FTP image upload failed (non-blocking):", err)
+      ),
+    ]);
 
     return NextResponse.json({ success: true, path: filePath });
   } catch (error) {

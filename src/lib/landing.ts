@@ -8,6 +8,8 @@
  */
 
 import { Octokit } from "octokit";
+import { Client } from "basic-ftp";
+import { Readable } from "stream";
 
 const GITHUB_REPO = process.env.GITHUB_REPO || "Tony2Metagora/landing-workflows";
 const GITHUB_BRANCH = "master";
@@ -336,6 +338,37 @@ export function renderTemplate(template: string, vars: Record<string, string>): 
     html = html.replace(new RegExp(`\\{\\{${key}\\}\\}`, "g"), val);
   }
   return html;
+}
+
+// ─── FTP upload to Hostinger ─────────────────────────────
+
+function getFtpConfig() {
+  const host = process.env.FTP_HOST || "metagora-tech.fr";
+  const user = process.env.FTP_USER || "u222173711";
+  const password = process.env.FTP_PASSWORD;
+  if (!password) throw new Error("FTP_PASSWORD manquant — ajoutez-le dans .env.local / Vercel");
+  return { host, user, password, secure: false };
+}
+
+export async function uploadToFtp(
+  remotePath: string,
+  content: string | Buffer
+): Promise<void> {
+  const config = getFtpConfig();
+  const client = new Client();
+  client.ftp.verbose = false;
+  try {
+    await client.access(config);
+    // Ensure remote directory exists
+    const dir = remotePath.substring(0, remotePath.lastIndexOf("/"));
+    await client.ensureDir("/public_html/" + dir);
+    // Upload
+    const buf = typeof content === "string" ? Buffer.from(content, "utf-8") : content;
+    const stream = Readable.from(buf);
+    await client.uploadFrom(stream, "/public_html/" + remotePath);
+  } finally {
+    client.close();
+  }
 }
 
 // ─── Push file to GitHub ─────────────────────────────────
