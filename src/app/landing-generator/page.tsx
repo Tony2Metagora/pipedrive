@@ -272,10 +272,21 @@ export default function LandingGeneratorPage() {
     setStoreImage(imagePath);
     setStoreImageOriginalUrl(imageUrl);
     try {
+      // Download image via our proxy (avoids CORS + 403 from external hosts)
+      const imgRes = await fetch(`/api/landing/image-proxy?url=${encodeURIComponent(imageUrl)}`);
+      if (!imgRes.ok) throw new Error(`Impossible de télécharger l'image: ${imgRes.status}`);
+      const blob = await imgRes.blob();
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve((reader.result as string).split(",")[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+
       const res = await fetch("/api/landing/save-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageUrl, imagePath, brandType }),
+        body: JSON.stringify({ imageBase64: base64, imagePath, brandType }),
       });
       const json = await res.json();
       if (json.error) {

@@ -1,6 +1,6 @@
 /**
  * API Route — Save a store image to the landing-workflows GitHub repo
- * POST: downloads image from URL, resizes to 1200×900 (4:3 landscape), pushes to assets/images/{imagePath}
+ * POST: accepts base64 image from client, resizes to 1200×900 (4:3 landscape), pushes to GitHub + FTP
  */
 
 import { NextResponse } from "next/server";
@@ -18,10 +18,10 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
-    const { imageUrl, imagePath, brandType } = await request.json();
+    const { imageBase64, imagePath, brandType } = await request.json();
 
-    if (!imageUrl || !imagePath) {
-      return NextResponse.json({ error: "imageUrl et imagePath requis" }, { status: 400 });
+    if (!imageBase64 || !imagePath) {
+      return NextResponse.json({ error: "imageBase64 et imagePath requis" }, { status: 400 });
     }
 
     // Image goes under the brand type's assets folder (e.g. retail-luxe/assets/images/)
@@ -32,19 +32,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "GITHUB_TOKEN manquant" }, { status: 500 });
     }
 
-    // Download the image (with browser-like headers to avoid 403)
-    const imgRes = await fetch(imageUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-        "Referer": new URL(imageUrl).origin + "/",
-      },
-    });
-    if (!imgRes.ok) {
-      return NextResponse.json({ error: `Impossible de télécharger l'image: ${imgRes.status}` }, { status: 500 });
-    }
-
-    const arrayBuffer = await imgRes.arrayBuffer();
+    // Decode base64 image sent from client (avoids 403 from image hosts)
+    const arrayBuffer = Buffer.from(imageBase64, "base64");
 
     // Resize & crop to 1200×900 (4:3) JPEG, quality 85%
     const resizedBuffer = await sharp(Buffer.from(arrayBuffer))
