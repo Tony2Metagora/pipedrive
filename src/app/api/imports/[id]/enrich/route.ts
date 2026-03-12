@@ -28,17 +28,14 @@ export async function POST(
       return NextResponse.json({ error: "Liste vide" }, { status: 404 });
     }
 
-    // Filter: enrich contacts that are missing email OR phone OR linkedin
-    let toEnrich = contacts.filter((c) => !c.email || !c.phone || !c.linkedin);
-
-    // If specific IDs provided, filter further
+    // If specific IDs provided, enrich only those; otherwise enrich contacts missing data
+    let toEnrich: typeof contacts;
     if (contactIds?.length) {
       const idSet = new Set(contactIds);
-      toEnrich = toEnrich.filter((c) => idSet.has(c.id));
+      toEnrich = contacts.filter((c) => idSet.has(c.id) && !c.enriched);
+    } else {
+      toEnrich = contacts.filter((c) => (!c.email || !c.phone || !c.linkedin) && !c.enriched);
     }
-
-    // Skip already enriched
-    toEnrich = toEnrich.filter((c) => !c.enriched);
 
     if (toEnrich.length === 0) {
       return NextResponse.json({

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createImportList, type ImportContact } from "@/lib/import-store";
+import { parseLocation } from "@/lib/french-geo";
 
 function genId() {
   return `c_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
@@ -24,18 +25,24 @@ export async function POST(request: Request) {
     }
 
     // Convert PhantomBuster profiles → ImportContact[]
-    const contacts: ImportContact[] = profiles.map((p: Record<string, string>) => ({
-      id: genId(),
-      first_name: (p.firstName || "").trim(),
-      last_name: (p.lastName || "").trim(),
-      email: "", // will be enriched by Dropcontact later
-      company: (p.companyName || "").trim(),
-      job: (p.title || "").trim(),
-      phone: "", // will be enriched by Dropcontact later
-      linkedin: (p.linkedinUrl || "").trim(),
-      location: (p.location || "").trim(),
-      company_location: (p.companyLocation || "").trim(),
-    }));
+    const contacts: ImportContact[] = profiles.map((p: Record<string, string>) => {
+      const loc = (p.location || "").trim();
+      const geo = loc ? parseLocation(loc) : { region: undefined, postal_code: undefined };
+      return {
+        id: genId(),
+        first_name: (p.firstName || "").trim(),
+        last_name: (p.lastName || "").trim(),
+        email: "", // will be enriched by Dropcontact later
+        company: (p.companyName || "").trim(),
+        job: (p.title || "").trim(),
+        phone: "", // will be enriched by Dropcontact later
+        linkedin: (p.linkedinUrl || "").trim(),
+        location: loc,
+        company_location: (p.companyLocation || "").trim(),
+        region: geo.region || "",
+        postal_code: geo.postal_code || "",
+      };
+    });
 
     const list = await createImportList(listName.trim(), contacts, "search");
 

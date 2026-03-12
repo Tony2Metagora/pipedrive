@@ -94,6 +94,8 @@ interface ImportContact {
   linkedin: string;
   location?: string;
   company_location?: string;
+  region?: string;
+  postal_code?: string;
   mobile_phone?: string;
   website?: string;
   company_linkedin?: string;
@@ -144,7 +146,9 @@ const ALL_COLUMNS: ColumnDef[] = [
   { key: "job", label: "Poste", defaultVisible: true, defaultWidth: 90, minWidth: 40 },
   { key: "phone", label: "Téléphone", defaultVisible: true, defaultWidth: 90, minWidth: 40 },
   { key: "linkedin", label: "LinkedIn", defaultVisible: true, defaultWidth: 36, minWidth: 28 },
-  { key: "location", label: "Localisation", defaultVisible: true, defaultWidth: 120, minWidth: 50 },
+  { key: "location", label: "Localisation", defaultVisible: false, defaultWidth: 120, minWidth: 50 },
+  { key: "region", label: "Région", defaultVisible: true, defaultWidth: 100, minWidth: 50 },
+  { key: "postal_code", label: "Code postal", defaultVisible: true, defaultWidth: 70, minWidth: 40 },
   { key: "company_location", label: "Lieu entreprise", defaultVisible: false, defaultWidth: 120, minWidth: 50 },
   { key: "company_address", label: "Adresse siège", defaultVisible: false, enrichedOnly: true, defaultWidth: 150, minWidth: 60 },
   { key: "company_city", label: "Ville siège", defaultVisible: false, enrichedOnly: true, defaultWidth: 100, minWidth: 50 },
@@ -292,6 +296,9 @@ export default function ImportPage() {
   const [enriching, setEnriching] = useState(false);
   const [enrichMsg, setEnrichMsg] = useState<string | null>(null);
 
+  // Contact selection for selective enrichment
+  const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(new Set());
+
   // Search (table filter)
   const [search, setSearch] = useState("");
   const [locationFilter, setLocationFilter] = useState("");
@@ -335,6 +342,7 @@ export default function ImportPage() {
 
   useEffect(() => {
     setLocationFilter("");
+    setSelectedContactIds(new Set());
     if (selectedListId) fetchContacts(selectedListId);
     else setContacts([]);
   }, [selectedListId, fetchContacts]);
@@ -661,13 +669,18 @@ export default function ImportPage() {
   // ── Enrich via Dropcontact ──
   const enrichList = async () => {
     if (!selectedListId) return;
-    const toEnrichCount = contacts.filter((c) => (!c.email || !c.phone || !c.linkedin) && !c.enriched).length;
+    const hasSelection = selectedContactIds.size > 0;
+    const toEnrich = hasSelection
+      ? contacts.filter((c) => selectedContactIds.has(c.id) && !c.enriched)
+      : contacts.filter((c) => (!c.email || !c.phone || !c.linkedin) && !c.enriched);
+    const toEnrichCount = toEnrich.length;
     if (toEnrichCount === 0) {
-      setEnrichMsg("Tous les contacts ont déjà email + téléphone + linkedin (ou sont déjà enrichis)");
+      setEnrichMsg(hasSelection ? "Les contacts sélectionnés sont déjà enrichis" : "Tous les contacts ont déjà email + téléphone + linkedin (ou sont déjà enrichis)");
       setTimeout(() => setEnrichMsg(null), 5000);
       return;
     }
-    if (!confirm(`Enrichir ${toEnrichCount} contact${toEnrichCount > 1 ? "s" : ""} via Dropcontact ?\nCela consommera des crédits API.`)) return;
+    const label = hasSelection ? `Enrichir ${toEnrichCount} contact${toEnrichCount > 1 ? "s" : ""} sélectionné${toEnrichCount > 1 ? "s" : ""}` : `Enrichir ${toEnrichCount} contact${toEnrichCount > 1 ? "s" : ""}`;
+    if (!confirm(`${label} via Dropcontact ?\nCela consommera des crédits API.`)) return;
 
     setEnriching(true);
     setEnrichMsg("Envoi à Dropcontact...");
@@ -676,7 +689,7 @@ export default function ImportPage() {
       const submitRes = await fetch(`/api/imports/${selectedListId}/enrich`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify(hasSelection ? { contactIds: [...selectedContactIds] } : {}),
       });
       const submitJson = await submitRes.json();
 
@@ -739,17 +752,17 @@ export default function ImportPage() {
     });
   };
 
-  // ── Unique locations for filter dropdown ──
-  const allLocations = useMemo(() => {
-    const locs = contacts.map((c) => c.location?.trim()).filter(Boolean) as string[];
-    return [...new Set(locs)].sort();
+  // ── Unique regions for filter dropdown ──
+  const allRegions = useMemo(() => {
+    const regs = contacts.map((c) => c.region?.trim()).filter(Boolean) as string[];
+    return [...new Set(regs)].sort();
   }, [contacts]);
 
   // ── Filtered contacts ──
   const filtered = useMemo(() => {
     let arr = contacts;
     if (locationFilter) {
-      arr = arr.filter((c) => c.location?.trim() === locationFilter);
+      arr = arr.filter((c) => c.region?.trim() === locationFilter);
     }
     if (search) {
       const q = search.toLowerCase();
@@ -760,7 +773,8 @@ export default function ImportPage() {
         c.company?.toLowerCase().includes(q) ||
         c.job?.toLowerCase().includes(q) ||
         c.phone?.includes(q) ||
-        c.location?.toLowerCase().includes(q)
+        c.location?.toLowerCase().includes(q) ||
+        c.region?.toLowerCase().includes(q)
       );
     }
     return arr;
@@ -1340,15 +1354,15 @@ export default function ImportPage() {
               className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-400 outline-none w-48"
             />
 
-            {allLocations.length > 0 && (
+            {allRegions.length > 0 && (
               <select
                 value={locationFilter}
                 onChange={(e) => setLocationFilter(e.target.value)}
                 className="px-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-400 outline-none max-w-[180px]"
               >
                 <option value="">Toutes les régions</option>
-                {allLocations.map((loc) => (
-                  <option key={loc} value={loc}>{loc}</option>
+                {allRegions.map((r) => (
+                  <option key={r} value={r}>{r}</option>
                 ))}
               </select>
             )}
@@ -1388,11 +1402,14 @@ export default function ImportPage() {
 
             <button
               onClick={enrichList}
-              disabled={enriching || enrichableCount === 0}
+              disabled={enriching || (enrichableCount === 0 && selectedContactIds.size === 0)}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-50 cursor-pointer"
             >
               {enriching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-              Enrichir ({enrichableCount})
+              {selectedContactIds.size > 0
+                ? `Enrichir sélection (${selectedContactIds.size})`
+                : `Enrichir (${enrichableCount})`
+              }
             </button>
 
             <button
@@ -1415,6 +1432,20 @@ export default function ImportPage() {
               <table className="text-xs" style={{ tableLayout: "fixed" }}>
                 <thead className="bg-gray-50 text-gray-500 text-[10px] uppercase sticky top-0">
                   <tr>
+                    <th className="px-2 py-2.5 w-8 min-w-[32px]">
+                      <input
+                        type="checkbox"
+                        checked={filtered.length > 0 && filtered.every((c) => selectedContactIds.has(c.id))}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedContactIds(new Set(filtered.map((c) => c.id)));
+                          } else {
+                            setSelectedContactIds(new Set());
+                          }
+                        }}
+                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                    </th>
                     {visibleColumns.map((col) => (
                       <th
                         key={col.key}
@@ -1432,7 +1463,21 @@ export default function ImportPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {filtered.map((c) => (
-                    <tr key={c.id} className="hover:bg-gray-50/50">
+                    <tr key={c.id} className={cn("hover:bg-gray-50/50", selectedContactIds.has(c.id) && "bg-indigo-50/50")}>
+                      <td className="px-2 py-2 w-8">
+                        <input
+                          type="checkbox"
+                          checked={selectedContactIds.has(c.id)}
+                          onChange={() => {
+                            setSelectedContactIds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(c.id)) next.delete(c.id); else next.add(c.id);
+                              return next;
+                            });
+                          }}
+                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                      </td>
                       {visibleColumns.map((col) => {
                         const val = c[col.key];
                         const cellStyle = { width: colWidths[col.key], maxWidth: colWidths[col.key] };

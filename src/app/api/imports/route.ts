@@ -10,6 +10,7 @@ import {
   createImportList,
   type ImportContact,
 } from "@/lib/import-store";
+import { parseLocation } from "@/lib/french-geo";
 
 export const dynamic = "force-dynamic";
 
@@ -38,19 +39,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Maximum 500 contacts par import" }, { status: 400 });
     }
 
-    // Build contacts
-    const contacts: ImportContact[] = rows.map((row, i) => ({
-      id: `c_${Date.now()}_${i}`,
-      first_name: row.first_name || "",
-      last_name: row.last_name || "",
-      email: row.email || "",
-      company: row.company || "",
-      job: row.job || "",
-      phone: row.phone || "",
-      linkedin: row.linkedin || "",
-      location: row.location || "",
-      company_location: row.company_location || "",
-    }));
+    // Build contacts — auto-compute region + postal_code from location
+    const contacts: ImportContact[] = rows.map((row, i) => {
+      const loc = row.location || "";
+      const geo = loc ? parseLocation(loc) : { region: undefined, postal_code: undefined };
+      return {
+        id: `c_${Date.now()}_${i}`,
+        first_name: row.first_name || "",
+        last_name: row.last_name || "",
+        email: row.email || "",
+        company: row.company || "",
+        job: row.job || "",
+        phone: row.phone || "",
+        linkedin: row.linkedin || "",
+        location: loc,
+        company_location: row.company_location || "",
+        region: geo.region || "",
+        postal_code: geo.postal_code || "",
+      };
+    });
 
     const list = await createImportList(name.trim(), contacts);
 

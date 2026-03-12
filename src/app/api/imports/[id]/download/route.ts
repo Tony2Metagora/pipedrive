@@ -18,6 +18,8 @@ const CSV_HEADERS = [
   { key: "mobile_phone", label: "mobile_phone" },
   { key: "linkedin", label: "linkedin" },
   { key: "location", label: "location" },
+  { key: "region", label: "region" },
+  { key: "postal_code", label: "postal_code" },
   { key: "company_location", label: "company_location" },
   { key: "website", label: "website" },
   { key: "company_linkedin", label: "company_linkedin" },

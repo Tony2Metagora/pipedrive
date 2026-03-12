@@ -20,6 +20,8 @@ export interface ImportContact {
   linkedin: string;
   location?: string;
   company_location?: string;
+  region?: string;
+  postal_code?: string;
   // Dropcontact enriched fields
   mobile_phone?: string;
   website?: string;
