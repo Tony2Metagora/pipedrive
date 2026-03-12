@@ -23,7 +23,7 @@ interface CacheEntry<T> {
   fetchedAt: number;
 }
 
-const CACHE_TTL = 10 * 60 * 1000; // 10 min
+const CACHE_TTL = 2 * 60 * 1000; // 2 min
 let templateCache: CacheEntry<string> | null = null;
 let variablesCache: CacheEntry<VariablesJson> | null = null;
 
