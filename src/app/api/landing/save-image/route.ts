@@ -31,8 +31,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "GITHUB_TOKEN manquant" }, { status: 500 });
     }
 
-    // Download the image
-    const imgRes = await fetch(imageUrl);
+    // Download the image (with browser-like headers to avoid 403)
+    const imgRes = await fetch(imageUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        "Referer": new URL(imageUrl).origin + "/",
+      },
+    });
     if (!imgRes.ok) {
       return NextResponse.json({ error: `Impossible de télécharger l'image: ${imgRes.status}` }, { status: 500 });
     }

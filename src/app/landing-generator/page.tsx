@@ -310,7 +310,7 @@ export default function LandingGeneratorPage() {
       const res = await fetch("/api/landing/image-search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: `${storeName} ${storeAddress} boutique facade exterior` }),
+        body: JSON.stringify({ query: `${brandName} ${storeName} ${storeAddress} store facade exterior photo` }),
       });
       const json = await res.json();
       if (json.error) {
