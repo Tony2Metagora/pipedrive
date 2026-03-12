@@ -18,6 +18,10 @@ import {
   Sparkles,
   ImageIcon,
   Search,
+  X,
+  ChevronLeft,
+  ChevronRight,
+  Save,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Navbar from "@/components/Navbar";
@@ -103,6 +107,9 @@ export default function LandingGeneratorPage() {
   const [storeFinderLoading, setStoreFinderLoading] = useState(false);
   const [imageSearchResults, setImageSearchResults] = useState<string[]>([]);
   const [imageSearchLoading, setImageSearchLoading] = useState(false);
+  const [imageModalOpen, setImageModalOpen] = useState(false);
+  const [imageModalIndex, setImageModalIndex] = useState(0);
+  const [imageSaving, setImageSaving] = useState(false);
 
   // UI state
   const [loading, setLoading] = useState(false);
@@ -314,11 +321,20 @@ export default function LandingGeneratorPage() {
     }
   };
 
-  // Select an image from search results
-  const handleSelectImage = async (imageUrl: string) => {
+  // Open image in modal for preview
+  const openImageModal = (index: number) => {
+    setImageModalIndex(index);
+    setImageModalOpen(true);
+  };
+
+  // Confirm and save the selected image
+  const handleConfirmImage = async () => {
+    const imageUrl = imageSearchResults[imageModalIndex];
+    if (!imageUrl) return;
+    setImageSaving(true);
+    setError(null);
     const imagePath = `boutiques/Boutique ${brandName} ${language}.jpg`;
     setStoreImage(imagePath);
-    // Save the image URL to be pushed to the repo
     try {
       const res = await fetch("/api/landing/save-image", {
         method: "POST",
@@ -332,8 +348,11 @@ export default function LandingGeneratorPage() {
       }
       setImageConfirmed(true);
       setImageSearchResults([]);
+      setImageModalOpen(false);
     } catch (err) {
       setError(String(err));
+    } finally {
+      setImageSaving(false);
     }
   };
 
@@ -576,7 +595,7 @@ export default function LandingGeneratorPage() {
                         {imageSearchResults.map((url, i) => (
                           <button
                             key={i}
-                            onClick={() => handleSelectImage(url)}
+                            onClick={() => openImageModal(i)}
                             className="relative aspect-video rounded-lg overflow-hidden border-2 border-gray-200 hover:border-indigo-500 transition-colors cursor-pointer group"
                           >
                             <img
@@ -746,6 +765,90 @@ export default function LandingGeneratorPage() {
           </div>
         )}
       </div>
+
+      {/* ─── Image picker modal ───────────────────────────── */}
+      {imageModalOpen && imageSearchResults.length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="relative w-full max-w-4xl mx-4">
+            {/* Close button */}
+            <button
+              onClick={() => setImageModalOpen(false)}
+              className="absolute -top-12 right-0 text-white/80 hover:text-white cursor-pointer"
+            >
+              <X className="w-6 h-6" />
+            </button>
+
+            {/* Image counter */}
+            <div className="text-center text-white/70 text-sm mb-3">
+              {imageModalIndex + 1} / {imageSearchResults.length}
+            </div>
+
+            {/* Main image */}
+            <div className="relative bg-black rounded-xl overflow-hidden flex items-center justify-center" style={{ minHeight: 400 }}>
+              <img
+                src={imageSearchResults[imageModalIndex]}
+                alt={`Image ${imageModalIndex + 1}`}
+                className="max-w-full max-h-[70vh] object-contain"
+                onError={(e) => { (e.target as HTMLImageElement).alt = "Image indisponible"; }}
+              />
+
+              {/* Prev button */}
+              {imageModalIndex > 0 && (
+                <button
+                  onClick={() => setImageModalIndex((i) => i - 1)}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center text-white cursor-pointer transition-colors"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+              )}
+
+              {/* Next button */}
+              {imageModalIndex < imageSearchResults.length - 1 && (
+                <button
+                  onClick={() => setImageModalIndex((i) => i + 1)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center text-white cursor-pointer transition-colors"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex items-center justify-center gap-3 mt-4">
+              <button
+                onClick={() => setImageModalOpen(false)}
+                className="px-5 py-2.5 text-sm font-medium text-white/80 bg-white/10 border border-white/20 rounded-xl hover:bg-white/20 transition-colors cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleConfirmImage}
+                disabled={imageSaving}
+                className="px-5 py-2.5 text-sm font-medium text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors cursor-pointer flex items-center gap-2 shadow-lg"
+              >
+                {imageSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {imageSaving ? "Sauvegarde..." : "Confirmer et sauvegarder"}
+              </button>
+            </div>
+
+            {/* Thumbnails strip */}
+            <div className="flex items-center justify-center gap-2 mt-4 overflow-x-auto pb-2">
+              {imageSearchResults.map((url, i) => (
+                <button
+                  key={i}
+                  onClick={() => setImageModalIndex(i)}
+                  className={cn(
+                    "flex-shrink-0 w-16 h-12 rounded-lg overflow-hidden border-2 transition-all cursor-pointer",
+                    i === imageModalIndex ? "border-indigo-500 ring-2 ring-indigo-500/50" : "border-white/20 opacity-60 hover:opacity-100"
+                  )}
+                >
+                  <img src={url} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
