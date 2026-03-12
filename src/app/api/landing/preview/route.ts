@@ -29,8 +29,12 @@ export async function POST(request: Request) {
     }
 
     const vars = computeVariables(input, lang, brandTypeConfig.keywords);
-    const html = renderTemplate(template, vars);
+    let html = renderTemplate(template, vars);
     const basePath = brandTypeConfig.basePath;
+
+    // For preview: replace relative asset paths with absolute URLs so images load in iframe
+    const absoluteAssetsBase = `https://metagora-tech.fr/${basePath}/assets/images`;
+    html = html.replace(/\.\.\/\.\.\/assets\/images/g, absoluteAssetsBase);
     const pathCode = input.urlCode || input.language;
     const outputPath = `${basePath}/${input.brandSlug}/${pathCode}/index.html`;
     const publicUrl = `https://metagora-tech.fr/${basePath}/${input.brandSlug}/${pathCode}/`;
