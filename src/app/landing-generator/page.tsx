@@ -84,10 +84,11 @@ const LANGUAGES = [
 
 const ALL_CITIES = [
   { key: "paris", label: "Paris", flag: "\u{1F1EB}\u{1F1F7}", langs: ["fr"], urlCode: "fr" },
-  { key: "london", label: "Londres", flag: "\u{1F1EC}\u{1F1E7}", langs: ["fr", "en"], urlCode: "uk" },
-  { key: "newyork", label: "New York", flag: "\u{1F1FA}\u{1F1F8}", langs: ["fr", "en"], urlCode: "us" },
-  { key: "tokyo", label: "Tokyo", flag: "\u{1F1EF}\u{1F1F5}", langs: ["fr"], urlCode: "jp" },
-  { key: "shanghai", label: "Shanghai", flag: "\u{1F1E8}\u{1F1F3}", langs: ["fr"], urlCode: "cn" },
+  { key: "bruxelles", label: "Bruxelles", flag: "\u{1F1E7}\u{1F1EA}", langs: ["fr"], urlCode: "be" },
+  { key: "montreal", label: "Montréal", flag: "\u{1F1E8}\u{1F1E6}", langs: ["fr"], urlCode: "ca" },
+  { key: "geneve", label: "Genève", flag: "\u{1F1E8}\u{1F1ED}", langs: ["fr"], urlCode: "ch" },
+  { key: "london", label: "London", flag: "\u{1F1EC}\u{1F1E7}", langs: ["en"], urlCode: "uk" },
+  { key: "newyork", label: "New York", flag: "\u{1F1FA}\u{1F1F8}", langs: ["en"], urlCode: "us" },
 ];
 
 // ─── Component ────────────────────────────────────────────
@@ -103,6 +104,7 @@ export default function LandingGeneratorPage() {
   const [storeCity, setStoreCity] = useState("paris");
   const [storeAddress, setStoreAddress] = useState("");
   const [storeImage, setStoreImage] = useState("");
+  const [storeImageOriginalUrl, setStoreImageOriginalUrl] = useState("");
   const [imageConfirmed, setImageConfirmed] = useState(false);
   const [storeFinderLoading, setStoreFinderLoading] = useState(false);
   const [imageSearchResults, setImageSearchResults] = useState<string[]>([]);
@@ -194,13 +196,14 @@ export default function LandingGeneratorPage() {
     brandType,
     language,
     urlCode,
+    storeImageOriginalUrl,
     store: {
       name: storeName,
       address: storeAddress,
       city: storeCity,
       image: storeImage || `boutiques/Boutique ${brandName} ${urlCode}.jpg`,
     },
-  }), [brandSlug, brandName, brandType, language, urlCode, storeName, storeAddress, storeCity, storeImage]);
+  }), [brandSlug, brandName, brandType, language, urlCode, storeImageOriginalUrl, storeName, storeAddress, storeCity, storeImage]);
 
   // Filter cities by language
   const cities = useMemo(() => ALL_CITIES.filter((c) => c.langs.includes(language)), [language]);
@@ -339,6 +342,7 @@ export default function LandingGeneratorPage() {
     setError(null);
     const imagePath = `boutiques/Boutique ${brandName} ${urlCode}.jpg`;
     setStoreImage(imagePath);
+    setStoreImageOriginalUrl(imageUrl);
     try {
       const res = await fetch("/api/landing/save-image", {
         method: "POST",

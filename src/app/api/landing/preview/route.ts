@@ -10,7 +10,8 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
-    const input = (await request.json()) as GenerateInput;
+    const { storeImageOriginalUrl, ...inputFields } = await request.json();
+    const input = inputFields as GenerateInput;
 
     if (!input.brandName || !input.brandType || !input.language) {
       return NextResponse.json({ error: "Champs obligatoires manquants" }, { status: 400 });
@@ -35,6 +36,12 @@ export async function POST(request: Request) {
     // For preview: replace relative asset paths with absolute URLs so images load in iframe
     const absoluteAssetsBase = `https://metagora-tech.fr/${basePath}/assets/images`;
     html = html.replace(/\.\.\/\.\.\/assets\/images/g, absoluteAssetsBase);
+
+    // If original store image URL provided, replace the repo path with it (image may not be synced yet)
+    if (storeImageOriginalUrl && input.store?.image) {
+      const repoImageUrl = `${absoluteAssetsBase}/${input.store.image}`;
+      html = html.split(repoImageUrl).join(storeImageOriginalUrl);
+    }
     const pathCode = input.urlCode || input.language;
     const outputPath = `${basePath}/${input.brandSlug}/${pathCode}/index.html`;
     const publicUrl = `https://metagora-tech.fr/${basePath}/${input.brandSlug}/${pathCode}/`;
