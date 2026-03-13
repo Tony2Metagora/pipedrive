@@ -36,24 +36,37 @@ import * as XLSX from "xlsx";
 const COLUMN_ALIASES: Record<string, string> = {
   // first_name
   first_name: "first_name", firstname: "first_name", "first name": "first_name", prénom: "first_name", prenom: "first_name",
+  "prénom dirigeant": "first_name", "prenom dirigeant": "first_name",
   // last_name
   last_name: "last_name", lastname: "last_name", "last name": "last_name", nom: "last_name",
+  "nom dirigeant": "last_name",
   // email
   email: "email", "e-mail": "email", mail: "email", courriel: "email",
   // company
   company: "company", companyname: "company", "company name": "company", entreprise: "company", société: "company", societe: "company",
+  "raison sociale": "company", enseigne: "company",
   // job
   job: "job", title: "job", jobtitle: "job", "job title": "job", poste: "job", fonction: "job",
+  "rôle dirigeant": "job", "role dirigeant": "job",
   // phone
   phone: "phone", telephone: "phone", téléphone: "phone", tel: "phone", "phone number": "phone",
   // linkedin
-  linkedin: "linkedin", linkedinurl: "linkedin", linkedinprofileurl: "linkedin", "linkedin url": "linkedin",
-  "linkedin profile": "linkedin", defaultprofileurl: "linkedin", profileurl: "linkedin",
+  linkedin: "linkedin", linkedinurl: "linkedin", linkedinprofileurl: "linkedin", "linkedin profile": "linkedin",
+  defaultprofileurl: "linkedin", profileurl: "linkedin",
   // location (profile)
   location: "location", ville: "location", city: "location", région: "location", region: "location",
+  commune: "location",
   // company_location
   companylocation: "company_location", "company location": "company_location", "lieu entreprise": "company_location",
   "ville entreprise": "company_location", companylocality: "company_location",
+  // postal_code (from scrapping CSV)
+  "code postal": "postal_code", cp: "postal_code", "postal code": "postal_code", postalcode: "postal_code",
+  // siren / siret
+  siren: "siren", siret: "siret",
+  // naf
+  "code naf": "naf_code", codenaf: "naf_code", "libellé naf": "naf_label", libellenaf: "naf_label",
+  // nb_employees
+  effectif: "nb_employees", "tranche effectif": "nb_employees", effectifs: "nb_employees", "eff. approx.": "nb_employees",
 };
 
 function mapColumnName(header: string): string | null {
@@ -164,7 +177,7 @@ const ALL_COLUMNS: ColumnDef[] = [
   { key: "enriched", label: "Enrichi", defaultVisible: true, defaultWidth: 52, minWidth: 36 },
 ];
 
-const MAPPED_COLUMNS = ["first_name", "last_name", "email", "company", "job", "phone", "linkedin", "location", "company_location"];
+const MAPPED_COLUMNS = ["first_name", "last_name", "email", "company", "job", "phone", "linkedin", "location", "company_location", "postal_code", "siren", "siret", "naf_code", "naf_label", "nb_employees"];
 
 // ─── Smart CSV parser (auto-detect delimiter, RFC 4180) ──
 
@@ -243,7 +256,7 @@ function mapRows(headers: string[], rows: Record<string, string>[]): { mapped: R
       }
     }
     return out;
-  }).filter((r) => r.first_name || r.last_name);
+  }).filter((r) => r.first_name || r.last_name || r.company);
   return { mapped, mappingInfo };
 }
 
@@ -388,13 +401,13 @@ export default function ImportPage() {
       const mappedFields = Object.values(mappingInfo);
       const unmapped = headers.filter((h) => !mapColumnName(h));
 
-      if (!mappedFields.includes("first_name") && !mappedFields.includes("last_name")) {
-        setCsvError(`Impossible de détecter les colonnes prénom/nom. Colonnes trouvées : ${headers.join(", ")}. Essayez avec des en-têtes comme : first_name, last_name, email, company, job, phone, linkedin.`);
+      if (!mappedFields.includes("first_name") && !mappedFields.includes("last_name") && !mappedFields.includes("company")) {
+        setCsvError(`Impossible de détecter les colonnes prénom/nom/entreprise. Colonnes trouvées : ${headers.join(", ")}. Essayez avec des en-têtes comme : first_name, last_name, email, company, job, phone, linkedin.`);
         return;
       }
 
       if (mapped.length === 0) {
-        setCsvError("Aucun contact valide trouvé (prénom ou nom requis).");
+        setCsvError("Aucun contact valide trouvé (prénom, nom ou entreprise requis).");
         return;
       }
 

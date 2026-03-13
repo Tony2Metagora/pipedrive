@@ -174,14 +174,20 @@ export async function POST(request: Request) {
 
     // Map to flat structure
     const companies = unique.slice(0, maxResults).map((r) => {
-      // Find the main dirigeant (personne physique first)
-      const dirigeantPP = r.dirigeants?.find((d) => d.type_dirigeant === "personne physique");
-      const dirigeantPrenom = dirigeantPP?.prenoms || "";
-      const dirigeantNom = dirigeantPP?.nom || "";
+      // Collect all PP dirigeants
+      const allPP = (r.dirigeants || []).filter((d) => d.type_dirigeant === "personne physique");
+      const allDirigeants = allPP.map((d) => ({
+        prenom: d.prenoms || "",
+        nom: d.nom || "",
+        role: d.qualite || "",
+      }));
+      // Primary dirigeant = first PP
+      const dirigeantPrenom = allDirigeants[0]?.prenom || "";
+      const dirigeantNom = allDirigeants[0]?.nom || "";
       const dirigeantName = dirigeantPrenom || dirigeantNom
         ? `${dirigeantPrenom} ${dirigeantNom}`.trim()
         : "ND";
-      const dirigeantRole = dirigeantPP?.qualite || "";
+      const dirigeantRole = allDirigeants[0]?.role || "";
 
       const siege = r.siege;
       const enseigne = siege.liste_enseignes?.[0] || siege.nom_commercial || "";
@@ -206,6 +212,7 @@ export async function POST(request: Request) {
         dirigeant_prenom: dirigeantPrenom,
         dirigeant_nom: dirigeantNom,
         dirigeant_role: dirigeantRole,
+        all_dirigeants: allDirigeants,
         effectif_approx: estimateEffectif(trancheCode),
         statut: r.etat_administratif === "A" ? "Actif" : "Cessé",
       };

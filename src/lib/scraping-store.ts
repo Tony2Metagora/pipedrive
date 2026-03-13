@@ -27,6 +27,7 @@ export interface ScrapingCompany {
   dirigeant_prenom: string;
   dirigeant_nom: string;
   dirigeant_role: string;
+  all_dirigeants: Array<{ prenom: string; nom: string; role: string }>;
   effectif_approx: string;
   statut: string;
 }

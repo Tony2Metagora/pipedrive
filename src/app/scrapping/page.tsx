@@ -4,11 +4,13 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Search, Loader2, Save, Trash2, Download, AlertCircle, Building2,
   MapPin, Filter, ChevronDown, ChevronUp, Edit3, Check, X,
-  Database, Columns3, ShieldCheck,
+  Database, Columns3, ShieldCheck, Users2, GripVertical,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────
+
+interface Dirigeant { prenom: string; nom: string; role: string }
 
 interface ScrapingCompany {
   id?: string;
@@ -28,6 +30,7 @@ interface ScrapingCompany {
   dirigeant_prenom: string;
   dirigeant_nom: string;
   dirigeant_role: string;
+  all_dirigeants?: Dirigeant[];
   effectif_approx: string;
   statut: string;
 }
@@ -46,7 +49,7 @@ interface ScrapingList {
   };
 }
 
-// ─── Column config (dirigeant first) ────────────────────
+// ─── Column config ──────────────────────────────────────
 
 interface ColDef {
   key: keyof ScrapingCompany;
@@ -56,24 +59,24 @@ interface ColDef {
   defaultW: number;
 }
 
-const ALL_COLUMNS: ColDef[] = [
+const DEFAULT_COLUMNS: ColDef[] = [
+  { key: "enseigne", label: "Enseigne", defaultOn: true, minW: 80, defaultW: 160 },
   { key: "dirigeant_nom", label: "Nom dirigeant", defaultOn: true, minW: 80, defaultW: 140 },
   { key: "dirigeant_prenom", label: "Prénom dirigeant", defaultOn: true, minW: 80, defaultW: 130 },
-  { key: "raison_sociale", label: "Raison sociale", defaultOn: true, minW: 100, defaultW: 200 },
-  { key: "enseigne", label: "Enseigne", defaultOn: true, minW: 80, defaultW: 140 },
-  { key: "siren", label: "SIREN", defaultOn: true, minW: 80, defaultW: 100 },
-  { key: "siret", label: "SIRET", defaultOn: false, minW: 100, defaultW: 140 },
   { key: "code_postal", label: "CP", defaultOn: true, minW: 50, defaultW: 65 },
-  { key: "commune", label: "Commune", defaultOn: true, minW: 80, defaultW: 130 },
+  { key: "tranche_effectif", label: "Effectif", defaultOn: true, minW: 60, defaultW: 80 },
+  { key: "raison_sociale", label: "Raison sociale", defaultOn: false, minW: 100, defaultW: 200 },
+  { key: "siren", label: "SIREN", defaultOn: false, minW: 80, defaultW: 100 },
+  { key: "siret", label: "SIRET", defaultOn: false, minW: 100, defaultW: 140 },
+  { key: "commune", label: "Commune", defaultOn: false, minW: 80, defaultW: 130 },
   { key: "departement", label: "Département", defaultOn: false, minW: 40, defaultW: 60 },
   { key: "adresse", label: "Adresse", defaultOn: false, minW: 120, defaultW: 200 },
-  { key: "code_naf", label: "Code NAF", defaultOn: true, minW: 60, defaultW: 75 },
+  { key: "code_naf", label: "Code NAF", defaultOn: false, minW: 60, defaultW: 75 },
   { key: "libelle_naf", label: "Libellé NAF", defaultOn: false, minW: 100, defaultW: 160 },
-  { key: "tranche_effectif", label: "Effectif", defaultOn: true, minW: 60, defaultW: 80 },
   { key: "effectif_approx", label: "Eff. approx.", defaultOn: false, minW: 50, defaultW: 70 },
   { key: "dirigeant", label: "Dirigeant (complet)", defaultOn: false, minW: 100, defaultW: 170 },
   { key: "dirigeant_role", label: "Rôle dirigeant", defaultOn: false, minW: 80, defaultW: 130 },
-  { key: "statut", label: "Statut", defaultOn: true, minW: 50, defaultW: 65 },
+  { key: "statut", label: "Statut", defaultOn: false, minW: 50, defaultW: 65 },
 ];
 
 // ─── Constants ───────────────────────────────────────────
@@ -131,6 +134,8 @@ function CellValue({ col, company }: { col: ColDef; company: ScrapingCompany }) 
       return <span className="font-mono">{v}</span>;
     case "raison_sociale":
       return <span className="font-medium text-gray-900">{v}</span>;
+    case "enseigne":
+      return <span className="font-semibold text-gray-900">{v || "—"}</span>;
     case "dirigeant_nom":
       return <span className="font-semibold text-gray-900 uppercase">{v || "—"}</span>;
     case "dirigeant_prenom":
@@ -173,31 +178,30 @@ export default function ScrappingPage() {
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
 
-  // Table
-  const [tableSearch, setTableSearch] = useState("");
+  // Table columns — orderable
+  const [columnOrder, setColumnOrder] = useState<(keyof ScrapingCompany)[]>(DEFAULT_COLUMNS.map((c) => c.key));
   const [visibleCols, setVisibleCols] = useState<Set<string>>(
-    new Set(ALL_COLUMNS.filter((c) => c.defaultOn).map((c) => c.key))
+    new Set(DEFAULT_COLUMNS.filter((c) => c.defaultOn).map((c) => c.key))
   );
   const [showColPicker, setShowColPicker] = useState(false);
   const colPickerRef = useRef<HTMLDivElement>(null);
+  const [tableSearch, setTableSearch] = useState("");
 
   // Column widths (resizable)
   const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
     const w: Record<string, number> = {};
-    ALL_COLUMNS.forEach((c) => { w[c.key] = c.defaultW; });
+    DEFAULT_COLUMNS.forEach((c) => { w[c.key] = c.defaultW; });
     return w;
   });
 
-  // Resize state
+  // Resize
   const resizingRef = useRef<{ key: string; startX: number; startW: number } | null>(null);
-
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       if (!resizingRef.current) return;
       const { key, startX, startW } = resizingRef.current;
-      const col = ALL_COLUMNS.find((c) => c.key === key);
-      const minW = col?.minW ?? 50;
-      const newW = Math.max(minW, startW + (e.clientX - startX));
+      const col = DEFAULT_COLUMNS.find((c) => c.key === key);
+      const newW = Math.max(col?.minW ?? 50, startW + (e.clientX - startX));
       setColWidths((prev) => ({ ...prev, [key]: newW }));
     };
     const onMouseUp = () => { resizingRef.current = null; document.body.style.cursor = ""; };
@@ -205,12 +209,29 @@ export default function ScrappingPage() {
     document.addEventListener("mouseup", onMouseUp);
     return () => { document.removeEventListener("mousemove", onMouseMove); document.removeEventListener("mouseup", onMouseUp); };
   }, []);
-
   const startResize = (key: string, e: React.MouseEvent) => {
-    e.preventDefault();
+    e.preventDefault(); e.stopPropagation();
     resizingRef.current = { key, startX: e.clientX, startW: colWidths[key] ?? 100 };
     document.body.style.cursor = "col-resize";
   };
+
+  // Drag & drop columns
+  const dragColRef = useRef<keyof ScrapingCompany | null>(null);
+  const handleDragStart = (key: keyof ScrapingCompany) => { dragColRef.current = key; };
+  const handleDragOver = (e: React.DragEvent, targetKey: keyof ScrapingCompany) => {
+    e.preventDefault();
+    if (!dragColRef.current || dragColRef.current === targetKey) return;
+    setColumnOrder((prev) => {
+      const from = prev.indexOf(dragColRef.current!);
+      const to = prev.indexOf(targetKey);
+      if (from === -1 || to === -1) return prev;
+      const next = [...prev];
+      next.splice(from, 1);
+      next.splice(to, 0, dragColRef.current!);
+      return next;
+    });
+  };
+  const handleDragEnd = () => { dragColRef.current = null; };
 
   // Close col picker on outside click
   useEffect(() => {
@@ -220,6 +241,10 @@ export default function ScrappingPage() {
     if (showColPicker) document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [showColPicker]);
+
+  // Split dirigeants modal
+  const [showSplitModal, setShowSplitModal] = useState(false);
+  const [splitChecked, setSplitChecked] = useState<Set<string>>(new Set());
 
   // Saved SIRENs
   const savedSirens = new Set(lists.flatMap((l) => l.sirens || []));
@@ -279,7 +304,7 @@ export default function ScrappingPage() {
     finally { setSearching(false); }
   };
 
-  // ── Save — uses results directly, not gated by selectedListId ──
+  // ── Save ──
   const handleSave = async () => {
     if (!listName.trim() || results.length === 0) return;
     setSaving(true); setError(null);
@@ -337,7 +362,7 @@ export default function ScrappingPage() {
 
   // ── CSV export ──
   const exportCsv = (companies: ScrapingCompany[], filename: string) => {
-    const cols = ALL_COLUMNS.filter((c) => visibleCols.has(c.key));
+    const cols = orderedActiveCols;
     const headers = cols.map((c) => c.label);
     const rows = companies.map((c) => cols.map((col) => String(c[col.key] ?? "")));
     const csv = [headers, ...rows].map((r) => r.map((v) => `"${(v || "").replace(/"/g, '""')}"`).join(";")).join("\n");
@@ -348,6 +373,46 @@ export default function ScrappingPage() {
   // ── Toggles ──
   const toggle = (setter: React.Dispatch<React.SetStateAction<Set<string>>>, code: string) => {
     setter((prev) => { const n = new Set(prev); if (n.has(code)) n.delete(code); else n.add(code); return n; });
+  };
+
+  // ── Split dirigeants ──
+  const openSplitModal = () => {
+    const companies = selectedListId ? listCompanies : results;
+    const checked = new Set<string>();
+    companies.forEach((c) => {
+      if ((c.all_dirigeants?.length ?? 0) > 1) {
+        checked.add(c.siren);
+      }
+    });
+    setSplitChecked(checked);
+    setShowSplitModal(true);
+  };
+
+  const applySplit = () => {
+    const source = selectedListId ? listCompanies : results;
+    const expanded: ScrapingCompany[] = [];
+    for (const c of source) {
+      if (splitChecked.has(c.siren) && c.all_dirigeants && c.all_dirigeants.length > 1) {
+        for (const d of c.all_dirigeants) {
+          expanded.push({
+            ...c,
+            dirigeant: `${d.prenom} ${d.nom}`.trim() || "ND",
+            dirigeant_prenom: d.prenom,
+            dirigeant_nom: d.nom,
+            dirigeant_role: d.role,
+            all_dirigeants: [d],
+          });
+        }
+      } else {
+        expanded.push(c);
+      }
+    }
+    if (selectedListId) {
+      setListCompanies(expanded);
+    } else {
+      setResults(expanded);
+    }
+    setShowSplitModal(false);
   };
 
   // ── Displayed data ──
@@ -362,7 +427,15 @@ export default function ScrappingPage() {
       })
     : displayedCompanies;
 
-  const activeCols = ALL_COLUMNS.filter((c) => visibleCols.has(c.key));
+  // Ordered active columns (respecting drag order)
+  const colMap = new Map(DEFAULT_COLUMNS.map((c) => [c.key, c]));
+  const orderedActiveCols = columnOrder
+    .filter((k) => visibleCols.has(k))
+    .map((k) => colMap.get(k)!)
+    .filter(Boolean);
+
+  // Multi-dirigeant count
+  const multiDirCount = displayedCompanies.filter((c) => (c.all_dirigeants?.length ?? 0) > 1).length;
 
   // ─── JSX ──────────────────────────────────────────────
 
@@ -537,6 +610,14 @@ export default function ScrappingPage() {
             <div className="flex items-center gap-2">
               <input type="text" value={tableSearch} onChange={(e) => setTableSearch(e.target.value)} placeholder="Filtrer…"
                 className="px-3 py-1.5 text-xs border border-gray-200 rounded-lg w-48 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none" />
+              {/* Split dirigeants button */}
+              {multiDirCount > 0 && (
+                <button onClick={openSplitModal}
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 cursor-pointer">
+                  <Users2 className="w-3 h-3" />Séparer dirigeants ({multiDirCount})
+                </button>
+              )}
+              {/* Column picker */}
               <div className="relative" ref={colPickerRef}>
                 <button onClick={() => setShowColPicker(!showColPicker)}
                   className={cn("flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border cursor-pointer transition-colors",
@@ -545,7 +626,7 @@ export default function ScrappingPage() {
                 </button>
                 {showColPicker && (
                   <div className="absolute right-0 top-full mt-1 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-50 max-h-80 overflow-y-auto">
-                    {ALL_COLUMNS.map((col) => (
+                    {DEFAULT_COLUMNS.map((col) => (
                       <label key={col.key} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-xs text-gray-700">
                         <input type="checkbox" checked={visibleCols.has(col.key)} onChange={() => toggle(setVisibleCols, col.key)}
                           className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
@@ -568,32 +649,43 @@ export default function ScrappingPage() {
             <div className="flex items-center justify-center py-12"><Loader2 className="w-5 h-5 animate-spin text-indigo-500" /></div>
           ) : (
             <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
-              <table className="text-xs border-collapse" style={{ minWidth: activeCols.reduce((s, c) => s + (colWidths[c.key] ?? c.defaultW), 0) }}>
+              <table className="text-xs border-collapse" style={{ minWidth: orderedActiveCols.reduce((s, c) => s + (colWidths[c.key] ?? c.defaultW), 0) }}>
                 <thead className="bg-gray-50 sticky top-0 z-10">
                   <tr>
-                    {activeCols.map((col) => (
-                      <th key={col.key} className="text-left font-medium text-gray-500 whitespace-nowrap relative select-none group"
-                        style={{ width: colWidths[col.key] ?? col.defaultW, minWidth: col.minW }}>
-                        <div className="px-3 py-2 flex items-center">
+                    {orderedActiveCols.map((col) => (
+                      <th key={col.key}
+                        className="text-left font-medium text-gray-500 whitespace-nowrap relative select-none group"
+                        style={{ width: colWidths[col.key] ?? col.defaultW, minWidth: col.minW }}
+                        draggable
+                        onDragStart={() => handleDragStart(col.key)}
+                        onDragOver={(e) => handleDragOver(e, col.key)}
+                        onDragEnd={handleDragEnd}>
+                        <div className="px-3 py-2 flex items-center gap-1 cursor-grab active:cursor-grabbing">
+                          <GripVertical className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
                           {col.label}
                         </div>
                         <div className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-300 group-hover:bg-gray-300 transition-colors"
-                          onMouseDown={(e) => startResize(col.key, e)} />
+                          onMouseDown={(e) => startResize(col.key, e)}
+                          draggable={false}
+                          onDragStart={(e) => e.stopPropagation()} />
                       </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {filteredCompanies.map((c, i) => (
-                    <tr key={c.siret || i} className="hover:bg-gray-50">
-                      {activeCols.map((col) => (
-                        <td key={col.key} className="px-3 py-2 overflow-hidden text-ellipsis whitespace-nowrap"
-                          style={{ maxWidth: colWidths[col.key] ?? col.defaultW }}>
-                          <CellValue col={col} company={c} />
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
+                  {filteredCompanies.map((c, i) => {
+                    const isMultiDir = (c.all_dirigeants?.length ?? 0) > 1;
+                    return (
+                      <tr key={`${c.siren}-${i}`} className={cn("hover:bg-gray-50", isMultiDir && "bg-amber-50/40")}>
+                        {orderedActiveCols.map((col) => (
+                          <td key={col.key} className={cn("px-3 py-2 overflow-hidden text-ellipsis whitespace-nowrap", isMultiDir && "font-bold")}
+                            style={{ maxWidth: colWidths[col.key] ?? col.defaultW }}>
+                            <CellValue col={col} company={c} />
+                          </td>
+                        ))}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -614,6 +706,99 @@ export default function ScrappingPage() {
           <Search className="w-10 h-10 text-gray-300 mx-auto mb-3" />
           <p className="text-sm text-gray-500">Aucun résultat pour ces critères</p>
           <p className="text-xs text-gray-400 mt-1">Essayez d&apos;élargir vos filtres</p>
+        </div>
+      )}
+
+      {/* ── Split dirigeants modal ── */}
+      {showSplitModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col mx-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div>
+                <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                  <Users2 className="w-4 h-4 text-amber-600" />
+                  Séparer les dirigeants
+                </h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Les entreprises avec plusieurs dirigeants seront dupliquées (1 ligne par dirigeant).
+                  Les lignes en gras ont plusieurs dirigeants et sont pré-cochées.
+                </p>
+              </div>
+              <button onClick={() => setShowSplitModal(false)} className="p-1 text-gray-400 hover:text-gray-600 cursor-pointer"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 py-3">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 sticky top-0">
+                  <tr>
+                    <th className="px-2 py-2 text-left w-8">
+                      <input type="checkbox"
+                        checked={splitChecked.size === displayedCompanies.filter((c) => (c.all_dirigeants?.length ?? 0) > 1).length}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            const all = new Set<string>();
+                            displayedCompanies.forEach((c) => { if ((c.all_dirigeants?.length ?? 0) > 1) all.add(c.siren); });
+                            setSplitChecked(all);
+                          } else {
+                            setSplitChecked(new Set());
+                          }
+                        }}
+                        className="rounded border-gray-300 text-amber-600 focus:ring-amber-500" />
+                    </th>
+                    <th className="px-2 py-2 text-left font-medium text-gray-500">Enseigne</th>
+                    <th className="px-2 py-2 text-left font-medium text-gray-500">Dirigeants</th>
+                    <th className="px-2 py-2 text-left font-medium text-gray-500 w-12">Nb</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {displayedCompanies.filter((c) => (c.all_dirigeants?.length ?? 0) > 1).map((c) => (
+                    <tr key={c.siren} className="hover:bg-gray-50">
+                      <td className="px-2 py-2">
+                        <input type="checkbox"
+                          checked={splitChecked.has(c.siren)}
+                          onChange={() => {
+                            setSplitChecked((prev) => {
+                              const n = new Set(prev);
+                              if (n.has(c.siren)) n.delete(c.siren); else n.add(c.siren);
+                              return n;
+                            });
+                          }}
+                          className="rounded border-gray-300 text-amber-600 focus:ring-amber-500" />
+                      </td>
+                      <td className="px-2 py-2 font-semibold text-gray-900">{c.enseigne || c.raison_sociale}</td>
+                      <td className="px-2 py-2">
+                        {c.all_dirigeants?.map((d, j) => (
+                          <div key={j} className="text-gray-700">
+                            <span className="font-medium uppercase">{d.nom}</span>{" "}
+                            <span className="capitalize">{d.prenom}</span>
+                            {d.role && <span className="text-gray-400 ml-1">({d.role})</span>}
+                          </div>
+                        ))}
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold">
+                          {c.all_dirigeants?.length}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {displayedCompanies.filter((c) => (c.all_dirigeants?.length ?? 0) > 1).length === 0 && (
+                <p className="text-center text-sm text-gray-400 py-8">Aucune entreprise avec plusieurs dirigeants</p>
+              )}
+            </div>
+            <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100">
+              <span className="text-xs text-gray-500">{splitChecked.size} entreprise{splitChecked.size > 1 ? "s" : ""} à séparer</span>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setShowSplitModal(false)}
+                  className="px-4 py-2 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 cursor-pointer">Annuler</button>
+                <button onClick={applySplit} disabled={splitChecked.size === 0}
+                  className="px-4 py-2 text-xs font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 cursor-pointer">
+                  Séparer ({splitChecked.size})
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
