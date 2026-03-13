@@ -70,6 +70,7 @@ interface Deal {
   org_name?: string;
   next_activity_date?: string;
   next_activity_subject?: string;
+  assigned_to?: string;
 }
 
 const TYPE_ICONS: Record<string, typeof Phone> = {
@@ -208,6 +209,23 @@ function DashboardContent() {
   const handleDealFieldUpdated = useCallback((dealId: number, fields: Partial<Deal>) => {
     setDeals((prev) => prev.map((d) => d.id === dealId ? { ...d, ...fields } : d));
   }, []);
+
+  // Cycle assigned_to tag: Tony → Yves → none
+  const ASSIGN_OPTIONS = ["Tony", "Yves", ""];
+  const cycleAssign = useCallback(async (dealId: number, current?: string) => {
+    const idx = ASSIGN_OPTIONS.indexOf(current || "");
+    const next = ASSIGN_OPTIONS[(idx + 1) % ASSIGN_OPTIONS.length];
+    handleDealFieldUpdated(dealId, { assigned_to: next });
+    try {
+      await fetch(`/api/deals/${dealId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assigned_to: next }),
+      });
+    } catch (err) {
+      console.error("Erreur mise à jour assigné:", err);
+    }
+  }, [handleDealFieldUpdated]);
 
   // Supprimer une activité
   const deleteActivityById = async (id: number) => {
@@ -706,6 +724,7 @@ function DashboardContent() {
           activitiesByDeal={activitiesByDeal}
           pipelineFilter={pipelineFilter}
           onDealMoved={syncBackground}
+          onAssignCycle={cycleAssign}
         />
       )}
 
@@ -753,11 +772,13 @@ function KanbanView({
   activitiesByDeal,
   pipelineFilter,
   onDealMoved,
+  onAssignCycle,
 }: {
   deals: Deal[];
   activitiesByDeal: Map<number, Activity[]>;
   pipelineFilter: number | "all";
   onDealMoved: () => void;
+  onAssignCycle: (dealId: number, current?: string) => void;
 }) {
   const [dragDealId, setDragDealId] = useState<number | null>(null);
   const [dropStageId, setDropStageId] = useState<number | null>(null);
@@ -890,8 +911,24 @@ function KanbanView({
                                 isDragging && "opacity-40 scale-95"
                               )}
                             >
+                              <div className="flex items-start justify-between gap-1">
+                                <Link href={`/deal/${deal.id}`} className="block min-w-0 flex-1">
+                                  <p className="text-xs font-semibold text-gray-900 truncate group-hover:text-indigo-700">{deal.title}</p>
+                                </Link>
+                                <button
+                                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAssignCycle(deal.id, deal.assigned_to); }}
+                                  className={cn(
+                                    "flex-shrink-0 px-1.5 py-0.5 rounded text-[9px] font-bold cursor-pointer transition-colors",
+                                    deal.assigned_to === "Tony" ? "bg-indigo-100 text-indigo-700 hover:bg-indigo-200" :
+                                    deal.assigned_to === "Yves" ? "bg-amber-100 text-amber-700 hover:bg-amber-200" :
+                                    "bg-gray-100 text-gray-400 hover:bg-gray-200"
+                                  )}
+                                  title="Cliquer pour changer l'assigné"
+                                >
+                                  {deal.assigned_to || "—"}
+                                </button>
+                              </div>
                               <Link href={`/deal/${deal.id}`} className="block">
-                                <p className="text-xs font-semibold text-gray-900 truncate group-hover:text-indigo-700">{deal.title}</p>
                                 {(deal.org_name || deal.person_name) && (
                                   <p className="text-[10px] text-gray-500 truncate mt-0.5">
                                     {[deal.org_name, deal.person_name].filter(Boolean).join(", ")}
@@ -1404,13 +1441,38 @@ function DealRow({
               </button>
             </div>
           ) : (
-            <p
-              className="font-medium text-gray-900 truncate cursor-pointer hover:text-indigo-700"
-              onClick={(e) => { e.stopPropagation(); setEditingTitle(true); setTitleInput(deal.title); }}
-              title="Cliquer pour modifier le titre"
-            >
-              {deal.title}
-            </p>
+            <div className="flex items-center gap-2">
+              <p
+                className="font-medium text-gray-900 truncate cursor-pointer hover:text-indigo-700"
+                onClick={(e) => { e.stopPropagation(); setEditingTitle(true); setTitleInput(deal.title); }}
+                title="Cliquer pour modifier le titre"
+              >
+                {deal.title}
+              </p>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const opts = ["Tony", "Yves", ""];
+                  const idx = opts.indexOf(deal.assigned_to || "");
+                  const next = opts[(idx + 1) % opts.length];
+                  onDealUpdated?.(deal.id, { assigned_to: next });
+                  fetch(`/api/deals/${deal.id}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ assigned_to: next }),
+                  }).catch(console.error);
+                }}
+                className={cn(
+                  "flex-shrink-0 px-1.5 py-0.5 rounded text-[9px] font-bold cursor-pointer transition-colors",
+                  deal.assigned_to === "Tony" ? "bg-indigo-100 text-indigo-700 hover:bg-indigo-200" :
+                  deal.assigned_to === "Yves" ? "bg-amber-100 text-amber-700 hover:bg-amber-200" :
+                  "bg-gray-100 text-gray-400 hover:bg-gray-200"
+                )}
+                title="Cliquer pour changer l'assigné"
+              >
+                {deal.assigned_to || "—"}
+              </button>
+            </div>
           )}
           <div className="flex items-center gap-3 mt-1 text-xs text-gray-500" onClick={(e) => e.stopPropagation()}>
             {editingPipeline ? (

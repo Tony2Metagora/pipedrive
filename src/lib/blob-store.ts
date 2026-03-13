@@ -38,6 +38,7 @@ export interface Deal {
   next_activity_subject?: string;
   lost_reason?: string;
   participants?: number[]; // person IDs
+  assigned_to?: string; // "Tony" | "Yves" | ""
 }
 
 export interface Person {
