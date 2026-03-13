@@ -50,7 +50,14 @@ export async function POST(request: Request) {
       vars.STORE_IMAGE = `https://raw.githubusercontent.com/Tony2Metagora/landing-workflows/master/retail-luxe/assets/images/${encodeURIComponent(repoPath).replace(/%2F/g, "/")}`;
     }
 
-    const html = renderTemplate(template, vars);
+    let html = renderTemplate(template, vars);
+
+    // For non-luxe brand types, replace relative asset paths with absolute URLs
+    // because assets only exist under retail-luxe/assets/images on the server
+    if (basePath !== "retail-luxe") {
+      html = html.replace(/\.\.\/\.\.\/assets\/images/g, "https://metagora-tech.fr/retail-luxe/assets/images");
+    }
+
     const pathCode = input.urlCode || input.language;
     const outputPath = `${basePath}/${input.brandSlug}/${pathCode}/index.html`;
     const commitMessage = `Add landing page: ${input.brandName} (${pathCode})`;
