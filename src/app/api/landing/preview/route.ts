@@ -34,7 +34,8 @@ export async function POST(request: Request) {
     const basePath = brandTypeConfig.basePath;
 
     // For preview: replace relative asset paths with absolute URLs so images load in iframe
-    const absoluteAssetsBase = `https://metagora-tech.fr/${basePath}/assets/images`;
+    // Assets (logos, illustrations, hero) are always in retail-luxe regardless of brandType
+    const absoluteAssetsBase = `https://metagora-tech.fr/retail-luxe/assets/images`;
     html = html.replace(/\.\.\/\.\.\/assets\/images/g, absoluteAssetsBase);
 
     // If original store image URL provided, replace the repo path with it (image may not be synced yet)

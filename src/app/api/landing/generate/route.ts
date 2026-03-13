@@ -44,9 +44,10 @@ export async function POST(request: Request) {
     const basePath = brandTypeConfig.basePath;
 
     // Store images use GitHub raw URL to bypass Hostinger CDN cache delays
+    // Assets are always stored under retail-luxe regardless of brandType
     if (vars.STORE_IMAGE && vars.STORE_IMAGE.includes("../../assets/images/")) {
       const repoPath = vars.STORE_IMAGE.replace("../../assets/images/", "");
-      vars.STORE_IMAGE = `https://raw.githubusercontent.com/Tony2Metagora/landing-workflows/master/${basePath}/assets/images/${encodeURIComponent(repoPath).replace(/%2F/g, "/")}`;
+      vars.STORE_IMAGE = `https://raw.githubusercontent.com/Tony2Metagora/landing-workflows/master/retail-luxe/assets/images/${encodeURIComponent(repoPath).replace(/%2F/g, "/")}`;
     }
 
     const html = renderTemplate(template, vars);

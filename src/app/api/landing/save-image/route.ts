@@ -24,8 +24,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "imageBase64 ou imageUrl + imagePath requis" }, { status: 400 });
     }
 
-    // Image goes under the brand type's assets folder (e.g. retail-luxe/assets/images/)
-    const baseDir = brandType === "premium" ? "retail-premium" : "retail-luxe";
+    // All assets are stored under retail-luxe regardless of brandType (shared assets)
+    const baseDir = "retail-luxe";
 
     const token = process.env.GITHUB_TOKEN;
     if (!token) {
