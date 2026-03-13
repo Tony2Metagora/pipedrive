@@ -34,6 +34,7 @@ export interface ScrapingList {
   name: string;
   created_at: string;
   count: number;
+  sirens: string[];
   filters: {
     nafCodes: string[];
     departement?: string;
@@ -105,6 +106,7 @@ export async function createScrapingList(
     name,
     created_at: new Date().toISOString(),
     count: companies.length,
+    sirens: companies.map((c) => c.siren).filter(Boolean),
     filters,
   };
   await writeScrapingCompanies(id, companies);
