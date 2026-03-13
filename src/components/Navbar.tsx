@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { LayoutDashboard, Upload, LogOut, TrendingUp, Users, Globe } from "lucide-react";
+import { LayoutDashboard, Upload, LogOut, TrendingUp, Users, Globe, Database } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { href: "/prospects", label: "Prospects", icon: Users },
   { href: "/pipeline", label: "Pipeline", icon: TrendingUp },
   { href: "/import", label: "Import", icon: Upload },
+  { href: "/scrapping", label: "Scrapping", icon: Database },
 ];
 
 export default function Navbar() {
