@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Search, Loader2, Save, Trash2, Download, AlertCircle, Building2,
-  MapPin, Users, Filter, ChevronDown, ChevronUp, Edit3, Check, X,
+  MapPin, Filter, ChevronDown, ChevronUp, Edit3, Check, X,
   Database, Columns3, ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -25,6 +25,8 @@ interface ScrapingCompany {
   tranche_effectif: string;
   tranche_code: string;
   dirigeant: string;
+  dirigeant_prenom: string;
+  dirigeant_nom: string;
   dirigeant_role: string;
   effectif_approx: string;
   statut: string;
@@ -44,26 +46,34 @@ interface ScrapingList {
   };
 }
 
-// ─── Column config ──────────────────────────────────────
+// ─── Column config (dirigeant first) ────────────────────
 
-interface ColDef { key: keyof ScrapingCompany; label: string; defaultOn: boolean }
+interface ColDef {
+  key: keyof ScrapingCompany;
+  label: string;
+  defaultOn: boolean;
+  minW: number;
+  defaultW: number;
+}
 
 const ALL_COLUMNS: ColDef[] = [
-  { key: "raison_sociale", label: "Raison sociale", defaultOn: true },
-  { key: "enseigne", label: "Enseigne", defaultOn: true },
-  { key: "siren", label: "SIREN", defaultOn: true },
-  { key: "siret", label: "SIRET", defaultOn: true },
-  { key: "code_postal", label: "CP", defaultOn: true },
-  { key: "commune", label: "Commune", defaultOn: true },
-  { key: "departement", label: "Département", defaultOn: false },
-  { key: "adresse", label: "Adresse", defaultOn: false },
-  { key: "code_naf", label: "Code NAF", defaultOn: true },
-  { key: "libelle_naf", label: "Libellé NAF", defaultOn: false },
-  { key: "tranche_effectif", label: "Effectif", defaultOn: true },
-  { key: "effectif_approx", label: "Effectif approx.", defaultOn: false },
-  { key: "dirigeant", label: "Dirigeant", defaultOn: true },
-  { key: "dirigeant_role", label: "Rôle dirigeant", defaultOn: false },
-  { key: "statut", label: "Statut", defaultOn: true },
+  { key: "dirigeant_nom", label: "Nom dirigeant", defaultOn: true, minW: 80, defaultW: 140 },
+  { key: "dirigeant_prenom", label: "Prénom dirigeant", defaultOn: true, minW: 80, defaultW: 130 },
+  { key: "raison_sociale", label: "Raison sociale", defaultOn: true, minW: 100, defaultW: 200 },
+  { key: "enseigne", label: "Enseigne", defaultOn: true, minW: 80, defaultW: 140 },
+  { key: "siren", label: "SIREN", defaultOn: true, minW: 80, defaultW: 100 },
+  { key: "siret", label: "SIRET", defaultOn: false, minW: 100, defaultW: 140 },
+  { key: "code_postal", label: "CP", defaultOn: true, minW: 50, defaultW: 65 },
+  { key: "commune", label: "Commune", defaultOn: true, minW: 80, defaultW: 130 },
+  { key: "departement", label: "Département", defaultOn: false, minW: 40, defaultW: 60 },
+  { key: "adresse", label: "Adresse", defaultOn: false, minW: 120, defaultW: 200 },
+  { key: "code_naf", label: "Code NAF", defaultOn: true, minW: 60, defaultW: 75 },
+  { key: "libelle_naf", label: "Libellé NAF", defaultOn: false, minW: 100, defaultW: 160 },
+  { key: "tranche_effectif", label: "Effectif", defaultOn: true, minW: 60, defaultW: 80 },
+  { key: "effectif_approx", label: "Eff. approx.", defaultOn: false, minW: 50, defaultW: 70 },
+  { key: "dirigeant", label: "Dirigeant (complet)", defaultOn: false, minW: 100, defaultW: 170 },
+  { key: "dirigeant_role", label: "Rôle dirigeant", defaultOn: false, minW: 80, defaultW: 130 },
+  { key: "statut", label: "Statut", defaultOn: true, minW: 50, defaultW: 65 },
 ];
 
 // ─── Constants ───────────────────────────────────────────
@@ -107,7 +117,7 @@ const DEPARTEMENTS = [
 // ─── Cell renderer ──────────────────────────────────────
 
 function CellValue({ col, company }: { col: ColDef; company: ScrapingCompany }) {
-  const v = company[col.key] ?? "";
+  const v = String(company[col.key] ?? "");
   switch (col.key) {
     case "code_naf":
       return <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[10px] font-medium">{v}</span>;
@@ -121,8 +131,12 @@ function CellValue({ col, company }: { col: ColDef; company: ScrapingCompany }) 
       return <span className="font-mono">{v}</span>;
     case "raison_sociale":
       return <span className="font-medium text-gray-900">{v}</span>;
+    case "dirigeant_nom":
+      return <span className="font-semibold text-gray-900 uppercase">{v || "—"}</span>;
+    case "dirigeant_prenom":
+      return <span className="text-gray-800 capitalize">{v || "—"}</span>;
     default:
-      return <span className="text-gray-600">{String(v) || "—"}</span>;
+      return <span className="text-gray-600">{v || "—"}</span>;
   }
 }
 
@@ -167,6 +181,37 @@ export default function ScrappingPage() {
   const [showColPicker, setShowColPicker] = useState(false);
   const colPickerRef = useRef<HTMLDivElement>(null);
 
+  // Column widths (resizable)
+  const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
+    const w: Record<string, number> = {};
+    ALL_COLUMNS.forEach((c) => { w[c.key] = c.defaultW; });
+    return w;
+  });
+
+  // Resize state
+  const resizingRef = useRef<{ key: string; startX: number; startW: number } | null>(null);
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!resizingRef.current) return;
+      const { key, startX, startW } = resizingRef.current;
+      const col = ALL_COLUMNS.find((c) => c.key === key);
+      const minW = col?.minW ?? 50;
+      const newW = Math.max(minW, startW + (e.clientX - startX));
+      setColWidths((prev) => ({ ...prev, [key]: newW }));
+    };
+    const onMouseUp = () => { resizingRef.current = null; document.body.style.cursor = ""; };
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    return () => { document.removeEventListener("mousemove", onMouseMove); document.removeEventListener("mouseup", onMouseUp); };
+  }, []);
+
+  const startResize = (key: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    resizingRef.current = { key, startX: e.clientX, startW: colWidths[key] ?? 100 };
+    document.body.style.cursor = "col-resize";
+  };
+
   // Close col picker on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -176,7 +221,7 @@ export default function ScrappingPage() {
     return () => document.removeEventListener("mousedown", handler);
   }, [showColPicker]);
 
-  // Saved SIRENs from all lists
+  // Saved SIRENs
   const savedSirens = new Set(lists.flatMap((l) => l.sirens || []));
 
   // ── Fetch lists ──
@@ -188,7 +233,6 @@ export default function ScrappingPage() {
     } catch (err) { console.error("Erreur chargement listes:", err); }
     finally { setLoadingLists(false); }
   }, []);
-
   useEffect(() => { fetchLists(); }, [fetchLists]);
 
   // ── Fetch companies ──
@@ -201,7 +245,6 @@ export default function ScrappingPage() {
     } catch (err) { console.error("Erreur chargement entreprises:", err); }
     finally { setLoadingCompanies(false); }
   }, []);
-
   useEffect(() => {
     if (selectedListId) fetchCompanies(selectedListId);
     else setListCompanies([]);
@@ -236,10 +279,10 @@ export default function ScrappingPage() {
     finally { setSearching(false); }
   };
 
-  // ── Save ──
+  // ── Save — uses results directly, not gated by selectedListId ──
   const handleSave = async () => {
     if (!listName.trim() || results.length === 0) return;
-    setSaving(true);
+    setSaving(true); setError(null);
     try {
       const res = await fetch("/api/scraping/save", {
         method: "POST",
@@ -314,7 +357,8 @@ export default function ScrappingPage() {
         const q = tableSearch.toLowerCase();
         return c.raison_sociale?.toLowerCase().includes(q) || c.enseigne?.toLowerCase().includes(q) ||
           c.commune?.toLowerCase().includes(q) || c.code_postal?.includes(q) ||
-          c.dirigeant?.toLowerCase().includes(q) || c.siren?.includes(q);
+          c.dirigeant?.toLowerCase().includes(q) || c.dirigeant_nom?.toLowerCase().includes(q) ||
+          c.dirigeant_prenom?.toLowerCase().includes(q) || c.siren?.includes(q);
       })
     : displayedCompanies;
 
@@ -343,7 +387,7 @@ export default function ScrappingPage() {
         )}
       </div>
 
-      {/* ── Saved lists bar ── */}
+      {/* Saved lists bar */}
       <div className="bg-white rounded-xl border border-gray-200 p-3">
         <div className="flex items-center gap-2 mb-2">
           <Database className="w-4 h-4 text-gray-400" />
@@ -356,14 +400,10 @@ export default function ScrappingPage() {
         ) : (
           <div className="flex flex-wrap gap-2">
             {[...lists].reverse().map((l) => (
-              <div
-                key={l.id}
-                className={cn(
-                  "relative group flex items-center gap-2 px-3 py-2 rounded-lg border text-xs cursor-pointer transition-colors",
-                  selectedListId === l.id ? "bg-indigo-50 border-indigo-300 text-indigo-700" : "bg-gray-50 border-gray-200 text-gray-700 hover:border-gray-300"
-                )}
-                onClick={() => { setSelectedListId(l.id === selectedListId ? null : l.id); setResults([]); setSearchDone(false); }}
-              >
+              <div key={l.id}
+                className={cn("relative group flex items-center gap-2 px-3 py-2 rounded-lg border text-xs cursor-pointer transition-colors",
+                  selectedListId === l.id ? "bg-indigo-50 border-indigo-300 text-indigo-700" : "bg-gray-50 border-gray-200 text-gray-700 hover:border-gray-300")}
+                onClick={() => { setSelectedListId(l.id === selectedListId ? null : l.id); setResults([]); setSearchDone(false); }}>
                 {editingListId === l.id ? (
                   <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                     <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)}
@@ -389,7 +429,7 @@ export default function ScrappingPage() {
         )}
       </div>
 
-      {/* ── Filters ── */}
+      {/* Filters */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <button onClick={() => setShowFilters(!showFilters)}
           className="w-full flex items-center justify-between px-5 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer">
@@ -398,7 +438,6 @@ export default function ScrappingPage() {
         </button>
         {showFilters && (
           <div className="px-5 pb-5 space-y-4 border-t border-gray-100 pt-4">
-            {/* NAF */}
             <div>
               <label className="text-xs font-medium text-gray-500 mb-2 block">Codes NAF (activité)</label>
               <div className="flex flex-wrap gap-2">
@@ -411,7 +450,6 @@ export default function ScrappingPage() {
                 ))}
               </div>
             </div>
-            {/* Dept + CP */}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs font-medium text-gray-500 mb-1 block">Département</label>
@@ -426,7 +464,6 @@ export default function ScrappingPage() {
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none" />
               </div>
             </div>
-            {/* Tranches */}
             <div>
               <label className="text-xs font-medium text-gray-500 mb-2 block">Tranche d&apos;effectif</label>
               <div className="flex flex-wrap gap-2">
@@ -439,7 +476,6 @@ export default function ScrappingPage() {
                 ))}
               </div>
             </div>
-            {/* Max + Search */}
             <div className="flex items-end gap-3">
               <div className="w-32">
                 <label className="text-xs font-medium text-gray-500 mb-1 block">Max résultats</label>
@@ -474,7 +510,7 @@ export default function ScrappingPage() {
       )}
 
       {/* Save bar */}
-      {searchDone && results.length > 0 && !selectedListId && (
+      {searchDone && results.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center gap-3">
           <span className="text-sm font-medium text-gray-600 whitespace-nowrap">{results.length} entreprises trouvées</span>
           <input type="text" value={listName} onChange={(e) => setListName(e.target.value)} placeholder="Nom de la liste (ex: Boutiques mode Paris)"
@@ -490,10 +526,9 @@ export default function ScrappingPage() {
         </div>
       )}
 
-      {/* ── Results table (full width) ── */}
+      {/* Results table */}
       {(filteredCompanies.length > 0 || loadingCompanies) && (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          {/* Toolbar */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
             <span className="text-sm font-medium text-gray-700">
               {selectedListId ? `${listCompanies.length} entreprises` : `${results.length} résultats`}
@@ -502,7 +537,6 @@ export default function ScrappingPage() {
             <div className="flex items-center gap-2">
               <input type="text" value={tableSearch} onChange={(e) => setTableSearch(e.target.value)} placeholder="Filtrer…"
                 className="px-3 py-1.5 text-xs border border-gray-200 rounded-lg w-48 focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none" />
-              {/* Column picker */}
               <div className="relative" ref={colPickerRef}>
                 <button onClick={() => setShowColPicker(!showColPicker)}
                   className={cn("flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border cursor-pointer transition-colors",
@@ -534,11 +568,18 @@ export default function ScrappingPage() {
             <div className="flex items-center justify-center py-12"><Loader2 className="w-5 h-5 animate-spin text-indigo-500" /></div>
           ) : (
             <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
-              <table className="w-full text-xs">
+              <table className="text-xs border-collapse" style={{ minWidth: activeCols.reduce((s, c) => s + (colWidths[c.key] ?? c.defaultW), 0) }}>
                 <thead className="bg-gray-50 sticky top-0 z-10">
                   <tr>
                     {activeCols.map((col) => (
-                      <th key={col.key} className="px-3 py-2 text-left font-medium text-gray-500 whitespace-nowrap">{col.label}</th>
+                      <th key={col.key} className="text-left font-medium text-gray-500 whitespace-nowrap relative select-none group"
+                        style={{ width: colWidths[col.key] ?? col.defaultW, minWidth: col.minW }}>
+                        <div className="px-3 py-2 flex items-center">
+                          {col.label}
+                        </div>
+                        <div className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-300 group-hover:bg-gray-300 transition-colors"
+                          onMouseDown={(e) => startResize(col.key, e)} />
+                      </th>
                     ))}
                   </tr>
                 </thead>
@@ -546,7 +587,8 @@ export default function ScrappingPage() {
                   {filteredCompanies.map((c, i) => (
                     <tr key={c.siret || i} className="hover:bg-gray-50">
                       {activeCols.map((col) => (
-                        <td key={col.key} className="px-3 py-2 max-w-[220px] truncate">
+                        <td key={col.key} className="px-3 py-2 overflow-hidden text-ellipsis whitespace-nowrap"
+                          style={{ maxWidth: colWidths[col.key] ?? col.defaultW }}>
                           <CellValue col={col} company={c} />
                         </td>
                       ))}

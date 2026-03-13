@@ -176,8 +176,10 @@ export async function POST(request: Request) {
     const companies = unique.slice(0, maxResults).map((r) => {
       // Find the main dirigeant (personne physique first)
       const dirigeantPP = r.dirigeants?.find((d) => d.type_dirigeant === "personne physique");
-      const dirigeantName = dirigeantPP
-        ? `${dirigeantPP.prenoms || ""} ${dirigeantPP.nom || ""}`.trim()
+      const dirigeantPrenom = dirigeantPP?.prenoms || "";
+      const dirigeantNom = dirigeantPP?.nom || "";
+      const dirigeantName = dirigeantPrenom || dirigeantNom
+        ? `${dirigeantPrenom} ${dirigeantNom}`.trim()
         : "ND";
       const dirigeantRole = dirigeantPP?.qualite || "";
 
@@ -201,6 +203,8 @@ export async function POST(request: Request) {
         tranche_effectif: TRANCHE_LABELS[trancheCode] || trancheCode,
         tranche_code: trancheCode,
         dirigeant: dirigeantName,
+        dirigeant_prenom: dirigeantPrenom,
+        dirigeant_nom: dirigeantNom,
         dirigeant_role: dirigeantRole,
         effectif_approx: estimateEffectif(trancheCode),
         statut: r.etat_administratif === "A" ? "Actif" : "Cessé",

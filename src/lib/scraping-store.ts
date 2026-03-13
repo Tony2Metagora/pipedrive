@@ -24,6 +24,8 @@ export interface ScrapingCompany {
   tranche_effectif: string;
   tranche_code: string;
   dirigeant: string;
+  dirigeant_prenom: string;
+  dirigeant_nom: string;
   dirigeant_role: string;
   effectif_approx: string;
   statut: string;
