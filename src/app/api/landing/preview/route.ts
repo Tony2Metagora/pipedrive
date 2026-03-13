@@ -17,7 +17,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Champs obligatoires manquants" }, { status: 400 });
     }
 
-    const [template, variables] = await Promise.all([getTemplate(), getVariables()]);
+    const [template, variables] = await Promise.all([getTemplate(true), getVariables()]);
 
     const lang = variables.languages[input.language];
     if (!lang) {

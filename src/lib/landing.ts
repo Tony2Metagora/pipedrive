@@ -49,8 +49,8 @@ async function fetchFileFromGitHub(path: string): Promise<string> {
   return Buffer.from(data.content, data.encoding as BufferEncoding || "base64").toString("utf-8");
 }
 
-export async function getTemplate(): Promise<string> {
-  if (templateCache && Date.now() - templateCache.fetchedAt < CACHE_TTL) {
+export async function getTemplate(forceRefresh = false): Promise<string> {
+  if (!forceRefresh && templateCache && Date.now() - templateCache.fetchedAt < CACHE_TTL) {
     return templateCache.data;
   }
   const html = await fetchFileFromGitHub(TEMPLATE_PATH);
