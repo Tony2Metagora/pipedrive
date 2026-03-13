@@ -22,6 +22,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Save,
+  ZoomIn,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Navbar from "@/components/Navbar";
@@ -94,6 +95,8 @@ export default function LandingGeneratorPage() {
   const [imageModalOpen, setImageModalOpen] = useState(false);
   const [imageModalIndex, setImageModalIndex] = useState(0);
   const [imageSaving, setImageSaving] = useState(false);
+  const [upscaling, setUpscaling] = useState(false);
+  const [upscaleProgress, setUpscaleProgress] = useState("");
 
   // UI state
   const [loading, setLoading] = useState(false);
@@ -293,6 +296,60 @@ export default function LandingGeneratorPage() {
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
+  };
+
+  // Upscale the currently displayed image via Replicate Real-ESRGAN
+  const handleUpscale = async () => {
+    const imageUrl = imageSearchResults[imageModalIndex];
+    if (!imageUrl) return;
+    setUpscaling(true);
+    setUpscaleProgress("Téléchargement de l'image…");
+    setError(null);
+    try {
+      // Get image as data URL (canvas or proxy)
+      let dataUrl: string | null = null;
+      try {
+        const b64 = await imageToBase64ViaCanvas(imageUrl);
+        dataUrl = `data:image/jpeg;base64,${b64}`;
+      } catch { /* try proxy */ }
+      if (!dataUrl) {
+        try {
+          const b64 = await imageToBase64ViaProxy(imageUrl);
+          dataUrl = `data:image/jpeg;base64,${b64}`;
+        } catch { /* give up */ }
+      }
+      if (!dataUrl) {
+        setError("Impossible de charger l'image pour l'upscale");
+        return;
+      }
+
+      setUpscaleProgress("Upscaling en cours (30s à 2 min)…");
+
+      const res = await fetch("/api/landing/upscale", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageDataUrl: dataUrl, scale: 2 }),
+      });
+      const json = await res.json();
+      if (json.error) {
+        setError(`Upscale: ${json.error}`);
+        return;
+      }
+      if (json.image) {
+        // Replace the current image in the results array with the upscaled version
+        setImageSearchResults((prev) => {
+          const next = [...prev];
+          next[imageModalIndex] = json.image;
+          return next;
+        });
+        setUpscaleProgress("✓ Image upscalée !");
+        setTimeout(() => setUpscaleProgress(""), 2000);
+      }
+    } catch (err) {
+      setError(`Upscale: ${String(err)}`);
+    } finally {
+      setUpscaling(false);
+    }
   };
 
   // Confirm and save the selected image
@@ -787,6 +844,13 @@ export default function LandingGeneratorPage() {
               )}
             </div>
 
+            {/* Upscale progress */}
+            {upscaleProgress && (
+              <div className="text-center text-amber-300 text-sm mt-3 animate-pulse">
+                {upscaleProgress}
+              </div>
+            )}
+
             {/* Action buttons */}
             <div className="flex items-center justify-center gap-3 mt-4">
               <button
@@ -796,8 +860,16 @@ export default function LandingGeneratorPage() {
                 Annuler
               </button>
               <button
+                onClick={handleUpscale}
+                disabled={upscaling || imageSaving}
+                className="px-5 py-2.5 text-sm font-medium text-white bg-amber-600 rounded-xl hover:bg-amber-700 disabled:opacity-50 transition-colors cursor-pointer flex items-center gap-2"
+              >
+                {upscaling ? <Loader2 className="w-4 h-4 animate-spin" /> : <ZoomIn className="w-4 h-4" />}
+                {upscaling ? "Upscaling…" : "Upscale HD"}
+              </button>
+              <button
                 onClick={handleConfirmImage}
-                disabled={imageSaving}
+                disabled={imageSaving || upscaling}
                 className="px-5 py-2.5 text-sm font-medium text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors cursor-pointer flex items-center gap-2 shadow-lg"
               >
                 {imageSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
