@@ -5,6 +5,7 @@
 
 import { NextResponse } from "next/server";
 import { getImportContacts } from "@/lib/import-store";
+import { requireAuth } from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,8 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const guard = await requireAuth("import", "GET");
+  if (guard.denied) return guard.denied;
   try {
     const { id } = await params;
     const contacts = await getImportContacts(id);

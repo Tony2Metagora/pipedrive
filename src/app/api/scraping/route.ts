@@ -6,6 +6,7 @@
 
 import { NextResponse } from "next/server";
 import { getScrapingIndex } from "@/lib/scraping-store";
+import { requireAuth } from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -81,6 +82,8 @@ interface GouvResult {
 }
 
 export async function GET() {
+  const guard = await requireAuth("scrapping", "GET");
+  if (guard.denied) return guard.denied;
   try {
     const index = await getScrapingIndex();
     return NextResponse.json({ data: index });
@@ -91,6 +94,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const guard = await requireAuth("scrapping", "POST");
+  if (guard.denied) return guard.denied;
   try {
     const body = await request.json();
     const {

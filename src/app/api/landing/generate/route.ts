@@ -4,6 +4,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { requireAuth } from "@/lib/api-guard";
 import {
   getTemplate,
   getVariables,
@@ -17,6 +18,8 @@ import {
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  const guard = await requireAuth("landing", "POST");
+  if (guard.denied) return guard.denied;
   try {
     const input = (await request.json()) as GenerateInput;
 

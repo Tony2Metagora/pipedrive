@@ -4,12 +4,15 @@
  */
 
 import { NextResponse } from "next/server";
+import { requireAuth } from "@/lib/api-guard";
 
 const SERPER_API_KEY = process.env.SERPER_API_KEY;
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  const guard = await requireAuth("landing", "POST");
+  if (guard.denied) return guard.denied;
   try {
     if (!SERPER_API_KEY) {
       return NextResponse.json(

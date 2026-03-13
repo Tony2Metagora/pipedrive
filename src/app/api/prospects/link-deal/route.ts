@@ -6,6 +6,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { requireAuth } from "@/lib/api-guard";
 import {
   getDeals,
   getPersons,
@@ -35,6 +36,8 @@ async function readProspects(): Promise<ProspectRow[]> {
 }
 
 export async function POST(request: Request) {
+  const guard = await requireAuth("prospects", "POST");
+  if (guard.denied) return guard.denied;
   try {
     const body = await request.json();
     const { prospectId, dealId, dealTitle } = body;

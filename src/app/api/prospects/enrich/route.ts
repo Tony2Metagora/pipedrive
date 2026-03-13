@@ -13,6 +13,7 @@
 
 import { NextResponse } from "next/server";
 import { readBlob, writeBlob, withLock } from "@/lib/blob-store";
+import { requireAuth } from "@/lib/api-guard";
 import { submitBatchEnrich, pollBatchEnrich, type DropcontactResult } from "@/lib/dropcontact";
 
 interface ProspectRow {
@@ -45,6 +46,8 @@ async function writeProspects(rows: ProspectRow[]) {
  * POST — Submit batch to Dropcontact, return requestId immediately
  */
 export async function POST(request: Request) {
+  const guard = await requireAuth("prospects", "POST");
+  if (guard.denied) return guard.denied;
   try {
     const body = await request.json();
     const { ids } = body as { ids: string[] };
@@ -195,6 +198,8 @@ function applyResults(rows: ProspectRow[], prospectIds: string[], dcResults: Dro
  * GET — Poll Dropcontact for results, apply if ready
  */
 export async function GET(request: Request) {
+  const guard = await requireAuth("prospects", "GET");
+  if (guard.denied) return guard.denied;
   try {
     const { searchParams } = new URL(request.url);
     const requestId = searchParams.get("requestId");

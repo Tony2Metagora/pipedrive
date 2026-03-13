@@ -6,8 +6,11 @@
 
 import { NextResponse } from "next/server";
 import { getPersons, createPerson, createDeal } from "@/lib/blob-store";
+import { requireAuth } from "@/lib/api-guard";
 
 export async function POST(request: Request) {
+  const guard = await requireAuth("dashboard", "POST");
+  if (guard.denied) return guard.denied;
   try {
     const body = await request.json();
     const { nom, prenom, email, telephone, poste, entreprise, dealTitle, value, pipeline_id, stage_id } = body;

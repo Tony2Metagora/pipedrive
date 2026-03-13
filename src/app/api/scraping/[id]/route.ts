@@ -11,6 +11,7 @@ import {
   removeFromScrapingIndex,
   updateScrapingListMeta,
 } from "@/lib/scraping-store";
+import { requireAuth } from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,8 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const guard = await requireAuth("scrapping", "GET");
+  if (guard.denied) return guard.denied;
   try {
     const { id } = await params;
     const companies = await getScrapingCompanies(id);
@@ -32,6 +35,8 @@ export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const guard = await requireAuth("scrapping", "DELETE");
+  if (guard.denied) return guard.denied;
   try {
     const { id } = await params;
     await removeFromScrapingIndex(id);
@@ -46,6 +51,8 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const guard = await requireAuth("scrapping", "PATCH");
+  if (guard.denied) return guard.denied;
   try {
     const { id } = await params;
     const body = await request.json();

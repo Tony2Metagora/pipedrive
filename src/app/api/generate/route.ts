@@ -5,8 +5,11 @@
 
 import { NextResponse } from "next/server";
 import { generateText } from "@/lib/openai";
+import { requireAdmin } from "@/lib/api-guard";
 
 export async function POST(request: Request) {
+  const guard = await requireAdmin();
+  if (guard.denied) return guard.denied;
   try {
     const body = await request.json();
     const { type, template, contact, dealNotes, userPrompt } = body;

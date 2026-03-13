@@ -7,6 +7,7 @@
 
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/api-guard";
 
 interface GmailMessage {
   id: string;
@@ -48,6 +49,8 @@ const API_VERSION = process.env.AZURE_OPENAI_API_VERSION || "2024-12-01-preview"
 const DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.2-chat-2";
 
 export async function POST(request: Request) {
+  const guard = await requireAdmin();
+  if (guard.denied) return guard.denied;
   try {
     const session = await auth();
     const accessToken = session

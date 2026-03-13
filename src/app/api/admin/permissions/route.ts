@@ -5,40 +5,24 @@
  */
 
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/api-guard";
 import {
   getPermissionsConfig,
   savePermissionsConfig,
-  isAdmin,
   type PermissionsConfig,
 } from "@/lib/permissions";
 
 export async function GET() {
-  const session = await auth();
-  const email = session?.user?.email;
-  if (!email) {
-    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-  }
-
-  // Only admin can view permissions config
-  if (!isAdmin(email)) {
-    return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
-  }
+  const guard = await requireAdmin();
+  if (guard.denied) return guard.denied;
 
   const config = await getPermissionsConfig();
   return NextResponse.json({ data: config });
 }
 
 export async function PUT(request: Request) {
-  const session = await auth();
-  const email = session?.user?.email;
-  if (!email) {
-    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-  }
-
-  if (!isAdmin(email)) {
-    return NextResponse.json({ error: "Accès refusé — admin uniquement" }, { status: 403 });
-  }
+  const guard = await requireAdmin();
+  if (guard.denied) return guard.denied;
 
   try {
     const body = (await request.json()) as PermissionsConfig;

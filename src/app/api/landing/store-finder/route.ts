@@ -4,6 +4,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { requireAuth } from "@/lib/api-guard";
 
 const ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT!;
 const API_KEY = process.env.AZURE_OPENAI_API_KEY!;
@@ -13,6 +14,8 @@ const DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.2-chat-2";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  const guard = await requireAuth("landing", "POST");
+  if (guard.denied) return guard.denied;
   try {
     const { brandName, city } = await request.json();
 

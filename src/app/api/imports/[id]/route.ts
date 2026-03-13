@@ -6,6 +6,7 @@
 
 import { NextResponse } from "next/server";
 import { getImportContacts, deleteImportList, updateListMeta } from "@/lib/import-store";
+import { requireAuth } from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,8 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const guard = await requireAuth("import", "GET");
+  if (guard.denied) return guard.denied;
   try {
     const { id } = await params;
     const contacts = await getImportContacts(id);
@@ -27,6 +30,8 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const guard = await requireAuth("import", "PATCH");
+  if (guard.denied) return guard.denied;
   try {
     const { id } = await params;
     const body = await request.json();
@@ -50,6 +55,8 @@ export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const guard = await requireAuth("import", "DELETE");
+  if (guard.denied) return guard.denied;
   try {
     const { id } = await params;
     await deleteImportList(id);

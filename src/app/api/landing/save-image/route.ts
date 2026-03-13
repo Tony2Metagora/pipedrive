@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import { Octokit } from "octokit";
 import sharp from "sharp";
 import { uploadToFtp } from "@/lib/landing";
+import { requireAuth } from "@/lib/api-guard";
 
 const GITHUB_REPO = process.env.GITHUB_REPO || "Tony2Metagora/landing-workflows";
 const GITHUB_BRANCH = "master";
@@ -17,6 +18,8 @@ const TARGET_HEIGHT = 900; // 4:3 aspect ratio matching .boutique-visual
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  const guard = await requireAuth("landing", "POST");
+  if (guard.denied) return guard.denied;
   try {
     const { imageBase64, imageUrl, imagePath, brandType } = await request.json();
 

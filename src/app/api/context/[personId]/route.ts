@@ -12,11 +12,14 @@ import {
   getNotesForPerson,
   getNotesForDeal,
 } from "@/lib/blob-store";
+import { requireAuth } from "@/lib/api-guard";
 
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ personId: string }> }
 ) {
+  const guard = await requireAuth("dashboard", "GET");
+  if (guard.denied) return guard.denied;
   try {
     const { personId } = await params;
     const pid = Number(personId);

@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { mergeImportLists, getImportIndex } from "@/lib/import-store";
+import { requireAuth } from "@/lib/api-guard";
 
 export async function POST(request: Request) {
+  const guard = await requireAuth("import", "POST");
+  if (guard.denied) return guard.denied;
   try {
     const { listIds, name, companyTag } = await request.json();
 

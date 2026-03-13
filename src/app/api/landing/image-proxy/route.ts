@@ -4,10 +4,13 @@
  */
 
 import { NextResponse } from "next/server";
+import { requireAuth } from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  const guard = await requireAuth("landing", "GET");
+  if (guard.denied) return guard.denied;
   const { searchParams } = new URL(request.url);
   const imageUrl = searchParams.get("url");
 

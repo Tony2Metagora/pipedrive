@@ -4,6 +4,7 @@
 
 import { NextResponse } from "next/server";
 import { readBlob } from "@/lib/blob-store";
+import { requireAuth } from "@/lib/api-guard";
 
 function escapeCsv(val: string): string {
   if (val.includes(",") || val.includes('"') || val.includes("\n")) {
@@ -13,6 +14,8 @@ function escapeCsv(val: string): string {
 }
 
 export async function GET() {
+  const guard = await requireAuth("prospects", "GET");
+  if (guard.denied) return guard.denied;
   try {
     const rows = await readBlob<Record<string, string>>("prospects.json");
     if (rows.length === 0) {

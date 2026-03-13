@@ -5,6 +5,7 @@
 
 import { NextResponse } from "next/server";
 import sharp from "sharp";
+import { requireAuth } from "@/lib/api-guard";
 
 const REPLICATE_VERSION = "f121d640bd286e1fdc67f9799164c1d5be36ff74576ee11c803ae5b665dd46aa";
 const POLL_INTERVAL = 3000;
@@ -60,6 +61,8 @@ async function compressToJpeg(buffer: Buffer, maxBytes: number): Promise<Buffer>
 }
 
 export async function POST(request: Request) {
+  const guard = await requireAuth("landing", "POST");
+  if (guard.denied) return guard.denied;
   const token = process.env.REPLICATE_API_TOKEN;
   if (!token) {
     return NextResponse.json({ error: "REPLICATE_API_TOKEN manquant" }, { status: 500 });

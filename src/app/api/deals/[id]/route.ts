@@ -12,8 +12,11 @@ import {
   getActivitiesForDeal,
   getNotesForDeal,
 } from "@/lib/blob-store";
+import { requireAuth } from "@/lib/api-guard";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const guard = await requireAuth("deal", "GET");
+  if (guard.denied) return guard.denied;
   try {
     const { id } = await params;
     const dealId = Number(id);
@@ -43,6 +46,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 }
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const guard = await requireAuth("dashboard", "PUT");
+  if (guard.denied) return guard.denied;
   try {
     const { id } = await params;
     const dealId = Number(id);

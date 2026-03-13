@@ -7,6 +7,7 @@
 import { NextResponse } from "next/server";
 import { writeBlob, withLock } from "@/lib/blob-store";
 import * as XLSX from "xlsx";
+import { requireAuth } from "@/lib/api-guard";
 
 interface ProspectRow {
   id: string;
@@ -178,6 +179,8 @@ function parseFileToHeadersAndRows(file: File, buffer: ArrayBuffer): { rawHeader
 }
 
 export async function POST(request: Request) {
+  const guard = await requireAuth("prospects", "POST");
+  if (guard.denied) return guard.denied;
   try {
     const formData = await request.formData();
     const file = formData.get("file") as File | null;

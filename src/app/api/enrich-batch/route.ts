@@ -8,6 +8,7 @@
 import { NextResponse } from "next/server";
 import { enrichContact } from "@/lib/dropcontact";
 import { getPerson, getOrganization, updatePerson } from "@/lib/blob-store";
+import { requireAuth } from "@/lib/api-guard";
 
 interface EnrichResult {
   personId: number;
@@ -18,6 +19,8 @@ interface EnrichResult {
 }
 
 export async function POST(request: Request) {
+  const guard = await requireAuth("dashboard", "POST");
+  if (guard.denied) return guard.denied;
   try {
     const body = await request.json();
     const { personIds } = body as { personIds: number[] };

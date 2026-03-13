@@ -6,8 +6,11 @@
 
 import { NextResponse } from "next/server";
 import { getActivities, createActivity, type Activity } from "@/lib/blob-store";
+import { requireAuth } from "@/lib/api-guard";
 
 export async function GET() {
+  const guard = await requireAuth("dashboard", "GET");
+  if (guard.denied) return guard.denied;
   try {
     const all = await getActivities();
     // Filtre : non faites + liées à un deal, triées par date
@@ -22,6 +25,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const guard = await requireAuth("dashboard", "POST");
+  if (guard.denied) return guard.denied;
   try {
     const body = await request.json();
     const activity = await createActivity({

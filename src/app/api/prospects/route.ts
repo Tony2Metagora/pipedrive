@@ -6,6 +6,7 @@
 
 import { NextResponse } from "next/server";
 import { getDeals, getPersons, readBlob, writeBlob, withLock } from "@/lib/blob-store";
+import { requireAuth } from "@/lib/api-guard";
 
 interface ProspectRow {
   id: string;
@@ -42,6 +43,8 @@ async function writeProspects(rows: ProspectRow[]) {
 }
 
 export async function GET() {
+  const guard = await requireAuth("prospects", "GET");
+  if (guard.denied) return guard.denied;
   try {
     const [rows, deals, persons] = await Promise.all([
       readProspects(),
@@ -109,6 +112,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const guard = await requireAuth("prospects", "POST");
+  if (guard.denied) return guard.denied;
   try {
     const body = await request.json();
     const { nom, prenom, email, telephone, poste, entreprise, notes, linkedin } = body;
@@ -150,6 +155,8 @@ export async function POST(request: Request) {
 }
 
 export async function PUT(request: Request) {
+  const guard = await requireAuth("prospects", "PUT");
+  if (guard.denied) return guard.denied;
   try {
     const body = await request.json();
     const { id, ...updates } = body;
@@ -181,6 +188,8 @@ export async function PUT(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  const guard = await requireAuth("prospects", "PATCH");
+  if (guard.denied) return guard.denied;
   try {
     const body = await request.json();
     const { ids, statut } = body as { ids: string[]; statut: string };

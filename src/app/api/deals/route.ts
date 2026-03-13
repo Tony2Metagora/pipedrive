@@ -6,8 +6,11 @@
 
 import { NextResponse } from "next/server";
 import { getDeals, createDeal, type Deal } from "@/lib/blob-store";
+import { requireAuth } from "@/lib/api-guard";
 
 export async function GET(request: Request) {
+  const guard = await requireAuth("dashboard", "GET");
+  if (guard.denied) return guard.denied;
   try {
     const { searchParams } = new URL(request.url);
     const search = searchParams.get("search")?.toLowerCase();
@@ -37,6 +40,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const guard = await requireAuth("dashboard", "POST");
+  if (guard.denied) return guard.denied;
   try {
     const body = await request.json();
     const deal = await createDeal(body as Omit<Deal, "id">);

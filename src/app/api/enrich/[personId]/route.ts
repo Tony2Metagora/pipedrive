@@ -6,11 +6,14 @@
 import { NextResponse } from "next/server";
 import { enrichContact } from "@/lib/dropcontact";
 import { updatePerson } from "@/lib/blob-store";
+import { requireAuth } from "@/lib/api-guard";
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ personId: string }> }
 ) {
+  const guard = await requireAuth("dashboard", "POST");
+  if (guard.denied) return guard.denied;
   try {
     const { personId } = await params;
     const body = await request.json();

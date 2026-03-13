@@ -11,10 +11,13 @@ import {
   type ImportContact,
 } from "@/lib/import-store";
 import { parseLocation } from "@/lib/french-geo";
+import { requireAuth } from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const guard = await requireAuth("import", "GET");
+  if (guard.denied) return guard.denied;
   try {
     const index = await getImportIndex();
     return NextResponse.json({ data: index });
@@ -25,6 +28,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const guard = await requireAuth("import", "POST");
+  if (guard.denied) return guard.denied;
   try {
     const body = await request.json();
     const { name, rows } = body as { name: string; rows: Record<string, string>[] };

@@ -4,6 +4,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { requireAdmin } from "@/lib/api-guard";
 
 const ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT!;
 const API_KEY = process.env.AZURE_OPENAI_API_KEY!;
@@ -11,6 +12,8 @@ const API_VERSION = process.env.AZURE_OPENAI_API_VERSION || "2024-12-01-preview"
 const DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.2-chat-2";
 
 export async function POST(request: Request) {
+  const guard = await requireAdmin();
+  if (guard.denied) return guard.denied;
   try {
     const { context } = await request.json();
 

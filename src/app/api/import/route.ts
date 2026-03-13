@@ -11,6 +11,7 @@ import {
   createDeal,
   createNote,
 } from "@/lib/blob-store";
+import { requireAuth } from "@/lib/api-guard";
 
 interface ImportRow {
   nom?: string;
@@ -23,6 +24,8 @@ interface ImportRow {
 }
 
 export async function POST(request: Request) {
+  const guard = await requireAuth("import", "POST");
+  if (guard.denied) return guard.denied;
   try {
     const formData = await request.formData();
     const file = formData.get("file") as File;

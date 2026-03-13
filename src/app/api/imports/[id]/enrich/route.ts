@@ -8,6 +8,7 @@
 import { NextResponse } from "next/server";
 import { getImportContacts, writeImportContacts, updateListMeta } from "@/lib/import-store";
 import { submitBatchEnrich, pollBatchEnrich, type DropcontactResult } from "@/lib/dropcontact";
+import { requireAuth } from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,8 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const guard = await requireAuth("import", "POST");
+  if (guard.denied) return guard.denied;
   try {
     const { id } = await params;
     const body = await request.json();
@@ -183,6 +186,8 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const guard = await requireAuth("import", "GET");
+  if (guard.denied) return guard.denied;
   try {
     const { id: listId } = await params;
     const { searchParams } = new URL(request.url);

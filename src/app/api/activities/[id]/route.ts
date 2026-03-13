@@ -6,8 +6,11 @@
 
 import { NextResponse } from "next/server";
 import { updateActivity, updateDeal, deleteActivity } from "@/lib/blob-store";
+import { requireAuth } from "@/lib/api-guard";
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const guard = await requireAuth("dashboard", "PUT");
+  if (guard.denied) return guard.denied;
   try {
     const { id } = await params;
     const body = await request.json();
@@ -33,6 +36,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 }
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const guard = await requireAuth("dashboard", "DELETE");
+  if (guard.denied) return guard.denied;
   try {
     const { id } = await params;
     await deleteActivity(Number(id));

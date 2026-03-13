@@ -5,10 +5,13 @@
 
 import { NextResponse } from "next/server";
 import { getTemplate, getVariables, computeVariables, renderTemplate, type GenerateInput } from "@/lib/landing";
+import { requireAuth } from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  const guard = await requireAuth("landing", "POST");
+  if (guard.denied) return guard.denied;
   try {
     const { storeImageOriginalUrl, ...inputFields } = await request.json();
     const input = inputFields as GenerateInput;

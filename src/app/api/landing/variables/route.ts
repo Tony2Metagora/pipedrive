@@ -5,10 +5,13 @@
 
 import { NextResponse } from "next/server";
 import { getVariables } from "@/lib/landing";
+import { requireAuth } from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const guard = await requireAuth("landing", "GET");
+  if (guard.denied) return guard.denied;
   try {
     const data = await getVariables();
     return NextResponse.json({ data });

@@ -7,6 +7,7 @@
 
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/api-guard";
 
 interface GmailMessage {
   id: string;
@@ -23,11 +24,10 @@ interface GmailMessageDetail {
 }
 
 export async function GET(request: Request) {
+  const guard = await requireAdmin();
+  if (guard.denied) return guard.denied;
   try {
     const session = await auth();
-    if (!session) {
-      return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-    }
 
     const accessToken = (session as unknown as Record<string, unknown>).accessToken as string;
     if (!accessToken) {
