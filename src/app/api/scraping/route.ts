@@ -175,18 +175,30 @@ export async function POST(request: Request) {
     // Map to flat structure
     const companies = unique.slice(0, maxResults).map((r) => {
       // Collect all PP dirigeants — deduplicate by nom+prenom, skip empty names
+      // Separate CAC (commissaires aux comptes) and "Autre" from real dirigeants
       const allPP = (r.dirigeants || []).filter((d) => d.type_dirigeant === "personne physique");
       const seenDir = new Set<string>();
       const allDirigeants: Array<{ prenom: string; nom: string; role: string }> = [];
+      const cacNames: string[] = [];
       for (const d of allPP) {
         const nom = (d.nom || "").trim();
         const prenom = (d.prenoms || "").trim();
         if (!nom && !prenom) continue;
+        const role = (d.qualite || "").trim();
+        const roleLower = role.toLowerCase();
+        // Exclude commissaires aux comptes and "Autre"
+        if (roleLower.includes("commissaire aux comptes") || roleLower === "autre") {
+          if (roleLower.includes("commissaire aux comptes")) {
+            cacNames.push(`${prenom} ${nom}`.trim());
+          }
+          continue;
+        }
         const key = `${nom.toLowerCase()}|${prenom.toLowerCase()}`;
         if (seenDir.has(key)) continue;
         seenDir.add(key);
-        allDirigeants.push({ prenom, nom, role: d.qualite || "" });
+        allDirigeants.push({ prenom, nom, role });
       }
+      const cacLabel = cacNames.length > 0 ? cacNames.join(", ") : "";
       // Primary dirigeant = first PP
       const dirigeantPrenom = allDirigeants[0]?.prenom || "";
       const dirigeantNom = allDirigeants[0]?.nom || "";
@@ -219,6 +231,8 @@ export async function POST(request: Request) {
         dirigeant_nom: dirigeantNom,
         dirigeant_role: dirigeantRole,
         all_dirigeants: allDirigeants,
+        plusieurs_dirigeants: allDirigeants.length > 1 ? "OUI" : "NON",
+        commissaire_aux_comptes: cacLabel,
         effectif_approx: estimateEffectif(trancheCode),
         statut: r.etat_administratif === "A" ? "Actif" : "Cessé",
       };

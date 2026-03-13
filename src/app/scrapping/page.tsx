@@ -32,6 +32,8 @@ interface ScrapingCompany {
   dirigeant_nom: string;
   dirigeant_role: string;
   all_dirigeants?: Dirigeant[];
+  plusieurs_dirigeants?: string;
+  commissaire_aux_comptes?: string;
   effectif_approx: string;
   statut: string;
 }
@@ -68,6 +70,8 @@ const DEFAULT_COLUMNS: ColDef[] = [
   { key: "code_postal", label: "CP", defaultOn: true, minW: 50, defaultW: 65 },
   { key: "tranche_effectif", label: "Effectif", defaultOn: true, minW: 60, defaultW: 80 },
   { key: "siren", label: "SIREN", defaultOn: true, minW: 80, defaultW: 100 },
+  { key: "plusieurs_dirigeants", label: "Plusieurs dirigeants", defaultOn: true, minW: 50, defaultW: 80 },
+  { key: "commissaire_aux_comptes", label: "Commissaire aux comptes", defaultOn: true, minW: 80, defaultW: 160 },
   { key: "siret", label: "SIRET", defaultOn: false, minW: 100, defaultW: 140 },
   { key: "commune", label: "Commune", defaultOn: false, minW: 80, defaultW: 130 },
   { key: "departement", label: "Département", defaultOn: false, minW: 40, defaultW: 60 },
@@ -129,6 +133,10 @@ function CellValue({ col, company }: { col: ColDef; company: ScrapingCompany }) 
       return <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-medium">{v}</span>;
     case "statut":
       return <span className={cn("inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium", v === "Actif" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700")}>{v}</span>;
+    case "plusieurs_dirigeants":
+      return <span className={cn("inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium", v === "OUI" ? "bg-amber-50 text-amber-700" : "bg-gray-50 text-gray-500")}>{v || "NON"}</span>;
+    case "commissaire_aux_comptes":
+      return v ? <span className="text-purple-700 text-[10px] font-medium">{v}</span> : <span className="text-gray-300">—</span>;
     case "siret":
       return <span className="font-mono text-[10px]">{v}</span>;
     case "siren":
@@ -414,6 +422,7 @@ export default function ScrappingPage() {
             dirigeant_nom: d.nom,
             dirigeant_role: d.role,
             all_dirigeants: [d],
+            plusieurs_dirigeants: "NON",
           });
         }
       } else {
