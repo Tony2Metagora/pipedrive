@@ -23,6 +23,7 @@ import {
   ChevronRight,
   Save,
   ZoomIn,
+  Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Navbar from "@/components/Navbar";
@@ -97,6 +98,8 @@ export default function LandingGeneratorPage() {
   const [imageSaving, setImageSaving] = useState(false);
   const [upscaling, setUpscaling] = useState(false);
   const [upscaleProgress, setUpscaleProgress] = useState("");
+  const [localImageBase64, setLocalImageBase64] = useState<string | null>(null);
+  const [localImagePreview, setLocalImagePreview] = useState<string | null>(null);
 
   // UI state
   const [loading, setLoading] = useState(false);
@@ -298,44 +301,41 @@ export default function LandingGeneratorPage() {
     });
   };
 
-  // Upscale the currently displayed image via Replicate Real-ESRGAN
-  const handleUpscale = async () => {
+  // Download image from modal to user's PC
+  const handleDownloadImage = () => {
     const imageUrl = imageSearchResults[imageModalIndex];
     if (!imageUrl) return;
+    const a = document.createElement("a");
+    a.href = imageUrl;
+    a.target = "_blank";
+    a.download = `boutique-${brandSlug || "image"}.jpg`;
+    a.click();
+  };
+
+  // Handle local file upload
+  const handleLocalFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      setLocalImagePreview(dataUrl);
+      setLocalImageBase64(dataUrl.split(",")[1]);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Upscale local image via Replicate Real-ESRGAN
+  const handleUpscale = async () => {
+    if (!localImageBase64) return;
     setUpscaling(true);
-    setUpscaleProgress("Capture de l'image…");
+    setUpscaleProgress("Upscaling en cours (30s à 2 min)…");
     setError(null);
     try {
-      // Capture the image from the DOM (already loaded, avoids CORS re-fetch)
-      let base64: string | null = null;
-      const imgEl = document.querySelector(".image-modal-main") as HTMLImageElement | null;
-      if (imgEl && imgEl.naturalWidth > 0) {
-        try {
-          const canvas = document.createElement("canvas");
-          canvas.width = imgEl.naturalWidth;
-          canvas.height = imgEl.naturalHeight;
-          canvas.getContext("2d")!.drawImage(imgEl, 0, 0);
-          base64 = canvas.toDataURL("image/jpeg", 0.92).split(",")[1];
-        } catch { /* canvas tainted — try proxy */ }
-      }
-      // Fallback: download via our server proxy
-      if (!base64) {
-        setUpscaleProgress("Téléchargement via proxy…");
-        try {
-          base64 = await imageToBase64ViaProxy(imageUrl);
-        } catch { /* give up */ }
-      }
-      if (!base64) {
-        setError("Impossible de capturer l'image pour l'upscale");
-        return;
-      }
-
-      setUpscaleProgress("Upscaling en cours (30s à 2 min)…");
-
       const res = await fetch("/api/landing/upscale", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageBase64: base64, scale: 2 }),
+        body: JSON.stringify({ imageBase64: localImageBase64, scale: 2 }),
       });
       const json = await res.json();
       if (json.error) {
@@ -343,12 +343,9 @@ export default function LandingGeneratorPage() {
         return;
       }
       if (json.image) {
-        // Replace the current image in the results array with the upscaled version
-        setImageSearchResults((prev) => {
-          const next = [...prev];
-          next[imageModalIndex] = json.image;
-          return next;
-        });
+        // Replace local image with upscaled version
+        setLocalImagePreview(json.image);
+        setLocalImageBase64(json.image.split(",")[1]);
         setUpscaleProgress("✓ Image upscalée !");
         setTimeout(() => setUpscaleProgress(""), 3000);
       }
@@ -356,6 +353,34 @@ export default function LandingGeneratorPage() {
       setError(`Upscale: ${String(err)}`);
     } finally {
       setUpscaling(false);
+    }
+  };
+
+  // Deploy local image to server
+  const handleDeployLocalImage = async () => {
+    if (!localImageBase64) return;
+    setImageSaving(true);
+    setError(null);
+    const imagePath = `boutiques/Boutique ${brandName} ${urlCode}.jpg`;
+    setStoreImage(imagePath);
+    try {
+      const res = await fetch("/api/landing/save-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64: localImageBase64, imagePath, brandType }),
+      });
+      const json = await res.json();
+      if (json.error) {
+        setError(json.error);
+        return;
+      }
+      setImageConfirmed(true);
+      setLocalImageBase64(null);
+      setLocalImagePreview(null);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setImageSaving(false);
     }
   };
 
@@ -650,7 +675,50 @@ export default function LandingGeneratorPage() {
                     </div>
                   )}
 
-                  {!imageConfirmed && !imageSearchResults.length && (
+                  {/* Local image upload + upscale section */}
+                  <div className="mt-3 border border-dashed border-gray-300 rounded-lg p-3">
+                    <label className="block text-[10px] font-medium text-gray-500 mb-2">
+                      Importer depuis mon PC (pour upscale HD)
+                    </label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleLocalFileUpload}
+                      className="w-full text-xs text-gray-500 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"
+                    />
+                    {localImagePreview && (
+                      <div className="mt-2">
+                        <img
+                          src={localImagePreview}
+                          alt="Image locale"
+                          className="w-full max-h-40 object-contain rounded-lg border border-gray-200"
+                        />
+                        {upscaleProgress && (
+                          <p className="text-[10px] text-amber-600 mt-1 animate-pulse">{upscaleProgress}</p>
+                        )}
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            onClick={handleUpscale}
+                            disabled={upscaling || imageSaving}
+                            className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 disabled:opacity-50 transition-colors cursor-pointer"
+                          >
+                            {upscaling ? <Loader2 className="w-3 h-3 animate-spin" /> : <ZoomIn className="w-3 h-3" />}
+                            {upscaling ? "Upscaling…" : "Upscale HD"}
+                          </button>
+                          <button
+                            onClick={handleDeployLocalImage}
+                            disabled={imageSaving || upscaling}
+                            className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[10px] font-medium text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 disabled:opacity-50 transition-colors cursor-pointer"
+                          >
+                            {imageSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                            {imageSaving ? "Déploiement…" : "Déployer"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {!imageConfirmed && !imageSearchResults.length && !localImagePreview && (
                     <p className="text-[10px] text-amber-600 mt-2 flex items-center gap-1">
                       <AlertCircle className="w-3 h-3" />
                       Image requise avant prévisualisation et déploiement
@@ -826,7 +894,7 @@ export default function LandingGeneratorPage() {
                 src={imageSearchResults[imageModalIndex]}
                 alt={`Image ${imageModalIndex + 1}`}
                 crossOrigin="anonymous"
-                className="image-modal-main max-w-full max-h-[70vh] object-contain"
+                className="max-w-full max-h-[70vh] object-contain"
                 onError={(e) => { (e.target as HTMLImageElement).removeAttribute("crossorigin"); }}
               />
 
@@ -851,13 +919,6 @@ export default function LandingGeneratorPage() {
               )}
             </div>
 
-            {/* Upscale progress */}
-            {upscaleProgress && (
-              <div className="text-center text-amber-300 text-sm mt-3 animate-pulse">
-                {upscaleProgress}
-              </div>
-            )}
-
             {/* Action buttons */}
             <div className="flex items-center justify-center gap-3 mt-4">
               <button
@@ -867,20 +928,19 @@ export default function LandingGeneratorPage() {
                 Annuler
               </button>
               <button
-                onClick={handleUpscale}
-                disabled={upscaling || imageSaving}
-                className="px-5 py-2.5 text-sm font-medium text-white bg-amber-600 rounded-xl hover:bg-amber-700 disabled:opacity-50 transition-colors cursor-pointer flex items-center gap-2"
+                onClick={handleDownloadImage}
+                className="px-5 py-2.5 text-sm font-medium text-white bg-amber-600 rounded-xl hover:bg-amber-700 transition-colors cursor-pointer flex items-center gap-2"
               >
-                {upscaling ? <Loader2 className="w-4 h-4 animate-spin" /> : <ZoomIn className="w-4 h-4" />}
-                {upscaling ? "Upscaling…" : "Upscale HD"}
+                <Download className="w-4 h-4" />
+                Télécharger
               </button>
               <button
                 onClick={handleConfirmImage}
-                disabled={imageSaving || upscaling}
+                disabled={imageSaving}
                 className="px-5 py-2.5 text-sm font-medium text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors cursor-pointer flex items-center gap-2 shadow-lg"
               >
-                {imageSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                {imageSaving ? "Sauvegarde..." : "Confirmer et sauvegarder"}
+                {imageSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Rocket className="w-4 h-4" />}
+                {imageSaving ? "Déploiement..." : "Déployer directement"}
               </button>
             </div>
 
