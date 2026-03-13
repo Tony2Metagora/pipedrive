@@ -41,10 +41,15 @@ export async function POST(request: Request) {
 
     // Compute variables and render
     const vars = computeVariables(input, lang, brandTypeConfig.keywords);
-    const html = renderTemplate(template, vars);
-
-    // Determine output path
     const basePath = brandTypeConfig.basePath;
+
+    // Store images use GitHub raw URL to bypass Hostinger CDN cache delays
+    if (vars.STORE_IMAGE && vars.STORE_IMAGE.includes("../../assets/images/")) {
+      const repoPath = vars.STORE_IMAGE.replace("../../assets/images/", "");
+      vars.STORE_IMAGE = `https://raw.githubusercontent.com/Tony2Metagora/landing-workflows/master/${basePath}/assets/images/${encodeURIComponent(repoPath).replace(/%2F/g, "/")}`;
+    }
+
+    const html = renderTemplate(template, vars);
     const pathCode = input.urlCode || input.language;
     const outputPath = `${basePath}/${input.brandSlug}/${pathCode}/index.html`;
     const commitMessage = `Add landing page: ${input.brandName} (${pathCode})`;
