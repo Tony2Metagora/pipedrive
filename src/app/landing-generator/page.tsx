@@ -303,32 +303,13 @@ export default function LandingGeneratorPage() {
     const imageUrl = imageSearchResults[imageModalIndex];
     if (!imageUrl) return;
     setUpscaling(true);
-    setUpscaleProgress("Téléchargement de l'image…");
+    setUpscaleProgress("Upscaling en cours (30s à 2 min)…");
     setError(null);
     try {
-      // Get image as data URL (canvas or proxy)
-      let dataUrl: string | null = null;
-      try {
-        const b64 = await imageToBase64ViaCanvas(imageUrl);
-        dataUrl = `data:image/jpeg;base64,${b64}`;
-      } catch { /* try proxy */ }
-      if (!dataUrl) {
-        try {
-          const b64 = await imageToBase64ViaProxy(imageUrl);
-          dataUrl = `data:image/jpeg;base64,${b64}`;
-        } catch { /* give up */ }
-      }
-      if (!dataUrl) {
-        setError("Impossible de charger l'image pour l'upscale");
-        return;
-      }
-
-      setUpscaleProgress("Upscaling en cours (30s à 2 min)…");
-
       const res = await fetch("/api/landing/upscale", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageDataUrl: dataUrl, scale: 2 }),
+        body: JSON.stringify({ imageUrl, scale: 2 }),
       });
       const json = await res.json();
       if (json.error) {
@@ -343,7 +324,7 @@ export default function LandingGeneratorPage() {
           return next;
         });
         setUpscaleProgress("✓ Image upscalée !");
-        setTimeout(() => setUpscaleProgress(""), 2000);
+        setTimeout(() => setUpscaleProgress(""), 3000);
       }
     } catch (err) {
       setError(`Upscale: ${String(err)}`);
