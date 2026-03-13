@@ -1,0 +1,491 @@
+{
+  "meta": {
+    "description": "Configuration des variables pour le générateur de landing pages Metagora",
+    "version": "1.0",
+    "template": "landing-template.html"
+  },
+  
+  "brandTypes": {
+    "luxe": {
+      "label": "Luxe",
+      "examples": ["Louis Vuitton", "Hermès", "Dior", "Chanel", "Gucci", "Prada"],
+      "keywords": {
+        "clientType": "Client advisors",
+        "storeType": "maison de luxe",
+        "clientele": "clientèle exigeante",
+        "excellence": "excellence",
+        "pricingBadge": "Offre Boutique Luxe"
+      },
+      "basePath": "retail-luxe"
+    },
+    "premium": {
+      "label": "Premium", 
+      "examples": ["Lacoste", "Nike", "Sephora", "Apple", "Nespresso"],
+      "keywords": {
+        "clientType": "conseillers",
+        "storeType": "marque premium",
+        "clientele": "clients qualifiés",
+        "excellence": "performance",
+        "pricingBadge": "Offre Boutique Premium"
+      },
+      "basePath": "retail-premium"
+    }
+  },
+
+  "languages": {
+    "fr": {
+      "code": "fr",
+      "label": "Français",
+      "videoYoutubeId": "rq-julCOC5A",
+      "nav": {
+        "solution": "Solution",
+        "process": "Processus",
+        "features": "Fonctionnalités",
+        "pricing": "Tarifs",
+        "cta": "Demander une démo"
+      },
+      "hero": {
+        "badge": "Coaching IA pour le Retail & le Luxe",
+        "title": "L'entraînement retail qui ressemble à la <em>vraie vente.</em>",
+        "desc": "Des clients virtuels IA pour améliorer l'écoute, la posture et la performance de vos {{clientType}} — sans risque pour l'image de marque.",
+        "ctaPrimary": "Découvrir en action",
+        "ctaSecondary": "En savoir plus",
+        "meta": "Aucun matériel · Sessions < 5 min · Déploiement rapide sur tout le réseau"
+      },
+      "stats": {
+        "closing": "de taux de closing",
+        "engagement": "d'engagement formation",
+        "session": "par session"
+      },
+      "logos": {
+        "label": "Adopté par des acteurs majeurs du retail et du luxe"
+      },
+      "sections": {
+        "solution": {
+          "label": "La solution",
+          "title": "Metagora transforme la formation<br>en entraînement réel.",
+          "desc": "Permettez à vos équipes retail de s'entraîner comme en boutique, grâce à des clients virtuels intelligents et adaptatifs."
+        },
+        "problem": {
+          "label": "Le problème",
+          "title": "La formation retail classique ne suit plus le terrain.",
+          "desc": "Former des équipes retail performantes est devenu un défi structurel. L'expérience client devient inégale et la performance commerciale en souffre.",
+          "items": [
+            "Un nouveau {{clientType}} met 6 à 12 mois à être productif",
+            "70% des formations oubliées en moins d'une semaine",
+            "Les managers manquent de temps pour coacher",
+            "L'excellence se dilue d'une boutique à l'autre"
+          ]
+        },
+        "results": {
+          "label": "Résultats terrain",
+          "title": "Préparez vos {{clientType}} avant le premier vrai client.",
+          "desc": "Simulations réalistes qui construisent la confiance, affûtent le jugement et entraînent à répondre sous pression.",
+          "items": [
+            "Conversations authentiques avec notre simulation",
+            "Retours instantanés d'un coach IA adaptatif",
+            "Sessions illimitées, sans aucun risque"
+          ]
+        },
+        "process": {
+          "label": "Processus",
+          "title": "Comment ça fonctionne ?",
+          "desc": "Quatre étapes simples pour déployer l'entraînement IA dans vos boutiques.",
+          "steps": [
+            { "title": "Définissez vos scénarios", "desc": "Méthodes de vente, cérémonial, profils clients, objections, nouveautés produit." },
+            { "title": "Entraînez-vous", "desc": "Conversations réalistes avec un client virtuel, adaptées au comportement du conseiller." },
+            { "title": "Feedback immédiat", "desc": "Scoring précis : écoute active, découverte, objection, closing, posture." },
+            { "title": "Pilotez la progression", "desc": "Vision claire par individu, boutique ou réseau entier." }
+          ]
+        },
+        "comparison": {
+          "label": "Comparaison",
+          "title": "Des résultats mesurables,<br>directement sur la performance terrain.",
+          "before": {
+            "title": "Avant Metagora",
+            "items": [
+              "Onboarding long et hétérogène",
+              "Formation peu mesurable",
+              "Coaching dépendant des managers",
+              "Excellence diluée entre boutiques"
+            ]
+          },
+          "after": {
+            "title": "Avec Metagora",
+            "items": [
+              "Onboarding accéléré et standardisé",
+              "Progression mesurée à chaque session",
+              "Coaching continu, 24/7, à grande échelle",
+              "Excellence uniforme sur tout le réseau"
+            ]
+          }
+        },
+        "video": {
+          "label": "Démonstration",
+          "title": "Découvrez Metagora en action",
+          "desc": "Observez une simulation de vente avec un client exigeant."
+        },
+        "deploy": {
+          "label": "Déploiement",
+          "title": "Des résultats visibles rapidement.",
+          "desc": "Metagora s'intègre facilement dans votre organisation retail, sans perturber l'activité en boutique.",
+          "items": [
+            "Pilote en quelques jours",
+            "+ de 90 langues",
+            "Mobile, tablette et ordinateur",
+            "Intégré à tous vos outils"
+          ]
+        },
+        "pilot": {
+          "label": "Pilote",
+          "title": "Testez Metagora pour la meilleure performance",
+          "desc": "Avant un déploiement global, testez Metagora sur un périmètre maîtrisé.",
+          "items": [
+            "Pilote par boutique quelle que soit la langue",
+            "Scénarios pour optimiser vos taux de transfo, indices de vente",
+            "Aucune limite de scénario, de persona, de produits",
+            "Décision basée sur des données réelles"
+          ],
+          "tagline": "Vous avancez par preuve, pas par promesse."
+        },
+        "audience": {
+          "label": "Pour qui ?",
+          "title": "Conçu pour les organisations exigeantes.",
+          "personas": [
+            { "title": "Directeurs Retail / Réseau", "desc": "Standardiser l'excellence sur l'ensemble du réseau de boutiques." },
+            { "title": "RH / L&D", "desc": "Industrialiser le coaching et prouver l'impact avec des données concrètes." },
+            { "title": "Store Managers", "desc": "Coacher efficacement ses équipes sans y passer des heures." }
+          ]
+        },
+        "features": {
+          "label": "Fonctionnalités",
+          "title": "Une solution pensée pour le retail de {{storeType}}.",
+          "desc": "Former, perfectionner, exceller.",
+          "items": [
+            { "title": "Catalogue produits illimité", "desc": "Intégrez tous vos modèles, caractéristiques techniques, histoire et positionnement. Mises à jour en temps réel." },
+            { "title": "Multilingue natif", "desc": "Formez vos équipes dans plus de 90 langues pour accueillir une clientèle internationale avec excellence." },
+            { "title": "ROI mesurable", "desc": "Augmentation du panier moyen, réduction du taux d'abandon, satisfaction client. Résultats dès le premier mois." },
+            { "title": "Cérémonial de vente", "desc": "Valorisez le savoir-faire artisanal, l'héritage de la maison, les matériaux nobles et l'exclusivité des collections." },
+            { "title": "Cérémonial de vente adapté", "desc": "Écoute active, découverte des besoins implicites, cross-selling subtil et closing élégant." },
+            { "title": "Sans risque", "desc": "Pilote par boutique ou région, scénarios validés avec vos équipes, aucune exposition client réel." }
+          ]
+        },
+        "pricing": {
+          "label": "Tarifs",
+          "title": "Des prix adaptés à votre structure.",
+          "subtitle": "Pour une boutique XS",
+          "price": "350€",
+          "note": "À partir de — Tarif personnalisé selon le réseau",
+          "features": [
+            "Sans limite de scénario",
+            "+ de 90 langues",
+            "Ensemble de vos produits intégrés",
+            "Suivi des résultats en temps réel",
+            "Support dédié 7j/7"
+          ],
+          "cta": "Demander un devis personnalisé"
+        },
+        "partners": {
+          "label": "Partenaires techniques",
+          "title": "Propulsé par les leaders de l'IA."
+        },
+        "contact": {
+          "label": "Contact",
+          "title": "Découvrez comment Metagora<br>s'adapte à votre réseau.",
+          "desc": "Démo personnalisée · Sans engagement · Déploiement rapide"
+        }
+      },
+      "form": {
+        "title": "Inscription",
+        "nameLabel": "Nom complet",
+        "namePlaceholder": "Jean Dupont",
+        "emailLabel": "Email professionnel",
+        "emailPlaceholder": "jean.dupont@exemple.fr",
+        "companyLabel": "Entreprise",
+        "companyPlaceholder": "Nom de votre entreprise",
+        "submit": "Demander une démo"
+      },
+      "testimonial": {
+        "quote": "On sait maintenant que nos conseillers maîtrisent notre cérémonial de vente avant même de rencontrer un vrai client. Ça change tout.",
+        "initials": "DR",
+        "role": "Directeur Retail",
+        "company": "Maison de luxe — Réseau Europe"
+      },
+      "store": {
+        "headline": "Et si on commençait avec votre boutique<br>au {{storeAddress}} ?",
+        "subheadline": "Amenez votre clientelling à l'excellence de votre clientèle",
+        "kpi1": "de taux de conversion sur les clients qualifiés, à périmètre comparable",
+        "kpi2": "taux de transformation moyen en boutique luxe mode & maroquinerie — Metagora vous fait passer au niveau supérieur",
+        "hook": "3 à 5 points de transfo gagnés pour vos équipes retail — mesurables dès le premier mois.",
+        "cta": "Prendre rendez-vous"
+      },
+      "footer": {
+        "rights": "Tous droits réservés."
+      }
+    },
+    "en": {
+      "code": "en",
+      "label": "English",
+      "videoYoutubeId": "UfNSKT3IPCc",
+      "nav": {
+        "solution": "Solution",
+        "process": "Process",
+        "features": "Features",
+        "pricing": "Pricing",
+        "cta": "Request a demo"
+      },
+      "hero": {
+        "badge": "AI Coaching for Retail & Luxury",
+        "title": "Retail training that feels like <em>real selling.</em>",
+        "desc": "AI virtual clients to improve listening, posture and performance of your {{clientType}} — with no risk to brand image.",
+        "ctaPrimary": "See it in action",
+        "ctaSecondary": "Learn more",
+        "meta": "No hardware · Sessions < 5 min · Fast network-wide deployment"
+      },
+      "stats": {
+        "closing": "closing rate increase",
+        "engagement": "training engagement",
+        "session": "per session"
+      },
+      "logos": {
+        "label": "Trusted by major retail and luxury players"
+      },
+      "sections": {
+        "solution": {
+          "label": "The solution",
+          "title": "Metagora transforms training<br>into real practice.",
+          "desc": "Enable your retail teams to practice like in-store, with intelligent and adaptive virtual clients."
+        },
+        "problem": {
+          "label": "The problem",
+          "title": "Traditional retail training can't keep up.",
+          "desc": "Training high-performing retail teams has become a structural challenge. Customer experience becomes uneven and sales performance suffers.",
+          "items": [
+            "A new {{clientType}} takes 6 to 12 months to become productive",
+            "70% of training is forgotten within a week",
+            "Managers lack time to coach",
+            "Excellence dilutes from store to store"
+          ]
+        },
+        "results": {
+          "label": "Field results",
+          "title": "Prepare your {{clientType}} before the first real customer.",
+          "desc": "Realistic simulations that build confidence, sharpen judgment and train to respond under pressure.",
+          "items": [
+            "Authentic conversations with our simulation",
+            "Instant feedback from an adaptive AI coach",
+            "Unlimited sessions, zero risk"
+          ]
+        },
+        "process": {
+          "label": "Process",
+          "title": "How does it work?",
+          "desc": "Four simple steps to deploy AI training in your stores.",
+          "steps": [
+            { "title": "Define your scenarios", "desc": "Sales methods, ceremony, customer profiles, objections, new products." },
+            { "title": "Practice", "desc": "Realistic conversations with a virtual client, adapted to advisor behavior." },
+            { "title": "Instant feedback", "desc": "Precise scoring: active listening, discovery, objection handling, closing, posture." },
+            { "title": "Track progress", "desc": "Clear view by individual, store or entire network." }
+          ]
+        },
+        "comparison": {
+          "label": "Comparison",
+          "title": "Measurable results,<br>directly on field performance.",
+          "before": {
+            "title": "Before Metagora",
+            "items": [
+              "Long and inconsistent onboarding",
+              "Training hard to measure",
+              "Coaching dependent on managers",
+              "Excellence diluted between stores"
+            ]
+          },
+          "after": {
+            "title": "With Metagora",
+            "items": [
+              "Accelerated and standardized onboarding",
+              "Progress measured at each session",
+              "Continuous coaching, 24/7, at scale",
+              "Uniform excellence across the network"
+            ]
+          }
+        },
+        "video": {
+          "label": "Demo",
+          "title": "See Metagora in action",
+          "desc": "Watch a sales simulation with a demanding customer."
+        },
+        "deploy": {
+          "label": "Deployment",
+          "title": "Visible results, fast.",
+          "desc": "Metagora integrates easily into your retail organization, without disrupting store activity.",
+          "items": [
+            "Pilot in days",
+            "90+ languages",
+            "Mobile, tablet and desktop",
+            "Integrated with all your tools"
+          ]
+        },
+        "pilot": {
+          "label": "Pilot",
+          "title": "Test Metagora for best performance",
+          "desc": "Before a global rollout, test Metagora on a controlled scope.",
+          "items": [
+            "Pilot per store regardless of language",
+            "Scenarios to optimize conversion rates, sales indices",
+            "No limit on scenarios, personas, products",
+            "Decision based on real data"
+          ],
+          "tagline": "You move forward with proof, not promises."
+        },
+        "audience": {
+          "label": "For whom?",
+          "title": "Designed for demanding organizations.",
+          "personas": [
+            { "title": "Retail / Network Directors", "desc": "Standardize excellence across the entire store network." },
+            { "title": "HR / L&D", "desc": "Industrialize coaching and prove impact with concrete data." },
+            { "title": "Store Managers", "desc": "Coach teams effectively without spending hours." }
+          ]
+        },
+        "features": {
+          "label": "Features",
+          "title": "A solution designed for {{storeType}} retail.",
+          "desc": "Train, perfect, excel.",
+          "items": [
+            { "title": "Unlimited product catalog", "desc": "Integrate all your models, technical specs, history and positioning. Real-time updates." },
+            { "title": "Native multilingual", "desc": "Train your teams in 90+ languages to welcome international clientele with excellence." },
+            { "title": "Measurable ROI", "desc": "Increased average basket, reduced abandonment rate, customer satisfaction. Results from month one." },
+            { "title": "Sales ceremony", "desc": "Showcase craftsmanship, house heritage, noble materials and collection exclusivity." },
+            { "title": "Adapted sales ceremony", "desc": "Active listening, implicit needs discovery, subtle cross-selling and elegant closing." },
+            { "title": "Risk-free", "desc": "Pilot per store or region, scenarios validated with your teams, no real customer exposure." }
+          ]
+        },
+        "pricing": {
+          "label": "Pricing",
+          "title": "Pricing adapted to your structure.",
+          "subtitle": "For an XS store",
+          "price": "€350",
+          "note": "Starting from — Custom pricing based on network",
+          "features": [
+            "Unlimited scenarios",
+            "90+ languages",
+            "All your products integrated",
+            "Real-time results tracking",
+            "Dedicated support 7/7"
+          ],
+          "cta": "Request a custom quote"
+        },
+        "partners": {
+          "label": "Technology partners",
+          "title": "Powered by AI leaders."
+        },
+        "contact": {
+          "label": "Contact",
+          "title": "Discover how Metagora<br>adapts to your network.",
+          "desc": "Personalized demo · No commitment · Fast deployment"
+        }
+      },
+      "form": {
+        "title": "Sign up",
+        "nameLabel": "Full name",
+        "namePlaceholder": "John Smith",
+        "emailLabel": "Professional email",
+        "emailPlaceholder": "john.smith@example.com",
+        "companyLabel": "Company",
+        "companyPlaceholder": "Your company name",
+        "submit": "Request a demo"
+      },
+      "testimonial": {
+        "quote": "We now know our advisors master our sales ceremony before meeting a real customer. It changes everything.",
+        "initials": "RD",
+        "role": "Retail Director",
+        "company": "Luxury House — Europe Network"
+      },
+      "store": {
+        "headline": "What if we started with your store<br>at {{storeAddress}}?",
+        "subheadline": "Bring your clienteling to the excellence of your clientele",
+        "kpi1": "conversion rate increase on qualified clients, like-for-like",
+        "kpi2": "average conversion rate in luxury fashion & leather goods — Metagora takes you to the next level",
+        "hook": "3 to 5 conversion points gained for your retail teams — measurable from month one.",
+        "cta": "Book a meeting"
+      },
+      "footer": {
+        "rights": "All rights reserved."
+      }
+    }
+  },
+
+  "stores": {
+    "paris": {
+      "city": "Paris",
+      "country": "France",
+      "flagEmoji": "🇫🇷"
+    },
+    "london": {
+      "city": "London",
+      "country": "UK",
+      "flagEmoji": "🇬🇧"
+    },
+    "newyork": {
+      "city": "New York",
+      "country": "USA",
+      "flagEmoji": "🇺🇸"
+    },
+    "tokyo": {
+      "city": "Tokyo",
+      "country": "Japan",
+      "flagEmoji": "🇯🇵"
+    },
+    "shanghai": {
+      "city": "Shanghai",
+      "country": "China",
+      "flagEmoji": "🇨🇳"
+    }
+  },
+
+  "brands": {
+    "louisvuitton": {
+      "name": "Louis Vuitton",
+      "type": "luxe",
+      "stores": {
+        "paris": {
+          "name": "Louis Vuitton Maison Champs-Élysées",
+          "address": "101 avenue des Champs-Élysées, 75008 Paris",
+          "image": "boutiques/Boutique Louis Vuitton fr.jpg"
+        },
+        "london": {
+          "name": "Louis Vuitton New Bond Street",
+          "address": "17-20 New Bond Street, London W1S 2RB",
+          "image": "boutiques/Boutique Louis Vuitton uk.jpg"
+        },
+        "newyork": {
+          "name": "Louis Vuitton Fifth Avenue",
+          "address": "1 East 57th Street, New York, NY 10022",
+          "image": "boutiques/Boutique Louis Vuitton us.jpg"
+        }
+      }
+    },
+    "hermes": {
+      "name": "Hermès",
+      "type": "luxe",
+      "stores": {
+        "paris": {
+          "name": "Hermès Faubourg Saint-Honoré",
+          "address": "24 rue du Faubourg Saint-Honoré, 75008 Paris",
+          "image": "boutiques/Boutique Hermes fr.jpg"
+        }
+      }
+    },
+    "lacoste": {
+      "name": "Lacoste",
+      "type": "premium",
+      "stores": {
+        "paris": {
+          "name": "Lacoste Champs-Élysées",
+          "address": "93-95 avenue des Champs-Élysées, 75008 Paris",
+          "image": "boutiques/Boutique Lacoste fr.jpg"
+        }
+      }
+    }
+  }
+}

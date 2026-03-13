@@ -1,6 +1,10 @@
 /**
  * Middleware — protège toutes les routes sauf /login et /api/auth.
  * Vérifie la présence du cookie de session NextAuth.
+ *
+ * RBAC enforcement is done at the page/API level (not middleware)
+ * because middleware runs on the Edge and cannot call Redis.
+ * Middleware only handles authentication (session check).
  */
 
 import { NextResponse } from "next/server";

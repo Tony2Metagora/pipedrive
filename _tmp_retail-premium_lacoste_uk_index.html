@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Metagora x Lacoste — L'entraînement retail qui ressemble à la vraie vente</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=Playfair+Display:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg-primary: #FFFFFF;
+      --bg-light: #FAFAFA;
+      --bg-soft: #F5F5F5;
+      --bg-blue-pale: #E0F2FE;
+      --bg-pink-pale: #FFE5E5;
+      --bg-beige: #E8DCC8;
+      --bg-card: #FFFFFF;
+      --accent: #6366F1;
+      --accent-light: #3B82F6;
+      --accent-dark: #5558E3;
+      --accent-gradient: linear-gradient(135deg, #6366F1 0%, #3B82F6 100%);
+      --accent-gradient-light: linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(59,130,246,0.08) 100%);
+      --accent-glow: rgba(99, 102, 241, 0.2);
+      --accent-red: #DC4444;
+      --text-dark: #1A1A1A;
+      --text-body: #2D2D2D;
+      --text-secondary: #4A4A4A;
+      --text-muted: #6B7280;
+      --text-light: #94a3b8;
+      --text-white: #FFFFFF;
+      --text-accent: #6366F1;
+      --border: #E5E7EB;
+      --border-light: #F3F4F6;
+      --border-accent: rgba(99,102,241,0.25);
+      --font-display: 'Playfair Display', Georgia, serif;
+      --font-body: 'DM Sans', system-ui, sans-serif;
+      --radius-sm: 10px;
+      --radius-md: 14px;
+      --radius-lg: 20px;
+      --radius-xl: 28px;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
+      --shadow-md: 0 4px 16px rgba(0,0,0,0.06);
+      --shadow-lg: 0 12px 48px rgba(99,102,241,0.1);
+      --shadow-xl: 0 20px 60px rgba(99,102,241,0.12);
+    }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--font-body);
+      background: var(--bg-primary);
+      color: var(--text-body);
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+    .container { max-width: 1160px; margin: 0 auto; padding: 0 24px; }
+    .section { padding: 100px 0; position: relative; }
+    .section.compact { padding: 72px 0; }
+    .section-label {
+      font-family: var(--font-body);
+      font-size: 0.78rem; font-weight: 700;
+      letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--text-accent); margin-bottom: 14px; display: inline-block;
+    }
+    .section-title {
+      font-family: var(--font-display);
+      font-size: clamp(1.9rem, 3.8vw, 2.8rem);
+      font-weight: 700; line-height: 1.18;
+      color: var(--text-dark); margin-bottom: 16px;
+    }
+    .section-subtitle { font-size: 1.08rem; color: var(--text-muted); max-width: 600px; line-height: 1.7; }
+    .text-center { text-align: center; }
+    .mx-auto { margin-left: auto; margin-right: auto; }
+
+    /* NAV */
+    .nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+      padding: 14px 0; background: rgba(255,255,255,0.92);
+      backdrop-filter: blur(16px); border-bottom: 1px solid var(--border);
+      transition: box-shadow 0.3s;
+    }
+    .nav.scrolled { box-shadow: var(--shadow-sm); }
+    .nav-inner {
+      display: flex; align-items: center; justify-content: space-between;
+      max-width: 1160px; margin: 0 auto; padding: 0 24px;
+    }
+    .nav-logo { display: flex; align-items: center; text-decoration: none; gap: 14px; }
+    .nav-logo img { height: 32px; width: auto; }
+    .nav-logo .logo-separator { width: 1px; height: 28px; background: var(--border); }
+    .nav-logo .brand-text { font-family: var(--font-display); font-size: 1.35rem; font-weight: 600; color: var(--text-dark); white-space: nowrap; }
+    .nav-links { display: flex; align-items: center; gap: 30px; list-style: none; }
+    .nav-links a { color: var(--text-muted); text-decoration: none; font-size: 0.88rem; font-weight: 500; transition: color 0.2s; }
+    .nav-links a:hover { color: var(--text-dark); }
+    .nav-cta {
+      background: var(--accent); color: var(--text-white) !important;
+      padding: 10px 22px; border-radius: 100px; font-weight: 600; font-size: 0.84rem;
+      transition: background 0.2s, transform 0.2s, box-shadow 0.2s;
+    }
+    .nav-cta:hover { background: var(--accent-dark); transform: translateY(-1px); box-shadow: 0 4px 14px var(--accent-glow); }
+    @media (max-width: 768px) { .nav-links { display: none; } .nav-logo img { height: 26px; } .nav-logo .brand-text { font-size: 1.1rem; } .nav-logo .logo-separator { height: 22px; } }
+
+    /* HERO */
+    .hero {
+      padding: 140px 0 80px; position: relative; overflow: hidden;
+      background: linear-gradient(135deg, var(--bg-blue-pale) 0%, var(--bg-pink-pale) 50%, var(--bg-primary) 100%);
+    }
+    .hero::before {
+      content: ''; position: absolute; top: -300px; right: -200px;
+      width: 700px; height: 700px;
+      background: radial-gradient(circle, rgba(99,102,241,0.08) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero::after {
+      content: ''; position: absolute; bottom: -200px; left: -150px;
+      width: 500px; height: 500px;
+      background: radial-gradient(circle, rgba(220,68,68,0.06) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero-content { position: relative; z-index: 1; text-align: center; max-width: 800px; margin: 0 auto; }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--accent-gradient-light); border: 1px solid var(--border-accent);
+      padding: 7px 18px; border-radius: 100px;
+      font-size: 0.78rem; font-weight: 600; color: var(--accent);
+      margin-bottom: 28px; animation: fadeInUp 0.7s ease both;
+    }
+    .hero-badge::before {
+      content: ''; width: 7px; height: 7px; background: var(--accent);
+      border-radius: 50%; animation: pulse-dot 2s infinite;
+    }
+    @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes fadeInUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+    .hero h1 {
+      font-family: var(--font-display);
+      font-size: clamp(2.5rem, 5.5vw, 3.8rem);
+      font-weight: 700; line-height: 1.1; color: var(--text-dark);
+      margin-bottom: 20px; animation: fadeInUp 0.7s ease 0.08s both;
+    }
+    .hero h1 em {
+      font-style: normal; background: var(--accent-gradient);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .hero-desc {
+      font-size: 1.15rem; color: var(--accent-light); font-weight: 500; max-width: 580px;
+      margin: 0 auto 36px; line-height: 1.72; animation: fadeInUp 0.7s ease 0.16s both;
+    }
+    .hero-actions {
+      display: flex; gap: 14px; justify-content: center; flex-wrap: wrap;
+      animation: fadeInUp 0.7s ease 0.24s both;
+    }
+    .btn-primary {
+      background: var(--accent); color: var(--text-white);
+      padding: 15px 34px; border-radius: 100px; font-weight: 600; font-size: 0.95rem;
+      text-decoration: none; border: none; cursor: pointer;
+      transition: background 0.2s, transform 0.2s, box-shadow 0.2s;
+      display: inline-flex; align-items: center; gap: 8px;
+    }
+    .btn-primary:hover { background: var(--accent-dark); transform: translateY(-2px); box-shadow: 0 8px 28px var(--accent-glow); }
+    .btn-secondary {
+      background: var(--bg-primary); color: var(--text-body);
+      padding: 15px 34px; border-radius: 100px; font-weight: 500; font-size: 0.95rem;
+      text-decoration: none; border: 1px solid var(--border);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .btn-secondary:hover { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99,102,241,0.08); }
+    .hero-meta { margin-top: 18px; font-size: 0.8rem; color: var(--text-light); animation: fadeInUp 0.7s ease 0.32s both; }
+
+    .hero-image { margin-top: 56px; position: relative; z-index: 1; animation: fadeInUp 0.8s ease 0.4s both; }
+    .hero-image-wrapper {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      padding: 20px;
+      box-shadow: var(--shadow-xl);
+      overflow: hidden;
+    }
+    .hero-image-wrapper img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: var(--radius-lg);
+    }
+
+    /* VALUE CALLOUT */
+    .value-callout { background: var(--accent); color: var(--text-white); padding: 48px 0; text-align: center; }
+    .value-callout-inner { display: flex; align-items: center; justify-content: center; gap: 48px; flex-wrap: wrap; }
+    .value-stat { display: flex; flex-direction: column; align-items: center; }
+    .value-stat-number { font-family: var(--font-display); font-size: 2.6rem; font-weight: 700; line-height: 1.1; }
+    .value-stat-label { font-size: 0.88rem; opacity: 0.85; margin-top: 4px; font-weight: 500; }
+    .value-stat-divider { width: 1px; height: 48px; background: rgba(255,255,255,0.25); }
+    @media (max-width: 600px) { .value-stat-divider { display: none; } .value-callout-inner { gap: 28px; } }
+
+    /* LOGOS */
+    .logos-section { padding: 48px 0; border-bottom: 1px solid var(--border); }
+    .logos-label { text-align: center; font-size: 0.78rem; color: var(--text-light); text-transform: uppercase; letter-spacing: 0.12em; font-weight: 600; margin-bottom: 28px; }
+    .logos-row { display: flex; align-items: center; justify-content: center; gap: 48px; flex-wrap: wrap; }
+    .logos-row img { height: 48px; width: auto; opacity: 0.55; transition: opacity 0.2s; object-fit: contain; }
+    .logos-row img:hover { opacity: 1; }
+
+    /* FEATURE TABS */
+    .feature-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 48px; }
+    .feature-tab {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); padding: 30px 24px; text-align: left;
+      transition: border-color 0.25s, transform 0.25s, box-shadow 0.25s; cursor: default; position: relative;
+    }
+    .feature-tab::after {
+      content: ''; position: absolute; bottom: 0; left: 20px; right: 20px;
+      height: 3px; background: var(--accent-gradient); border-radius: 3px 3px 0 0;
+      opacity: 0; transition: opacity 0.25s;
+    }
+    .feature-tab:hover { border-color: var(--accent); transform: translateY(-4px); box-shadow: var(--shadow-lg); }
+    .feature-tab:hover::after { opacity: 1; }
+    .feature-tab-icon { font-size: 1.6rem; margin-bottom: 14px; }
+    .feature-tab h3 { font-family: var(--font-display); font-size: 1.1rem; font-weight: 600; color: var(--text-dark); margin-bottom: 10px; }
+    .feature-tab p { font-size: 0.88rem; color: var(--text-muted); line-height: 1.6; }
+    @media (max-width: 900px) { .feature-tabs { grid-template-columns: 1fr; } }
+
+    /* BENEFIT BLOCK */
+    .benefit-block { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; }
+    .benefit-block.reverse { direction: rtl; }
+    .benefit-block.reverse > * { direction: ltr; }
+    .benefit-text { display: flex; flex-direction: column; gap: 16px; }
+    .benefit-visual { border-radius: var(--radius-xl); overflow: hidden; box-shadow: var(--shadow-lg); }
+    .benefit-visual img { width: 100%; height: auto; display: block; }
+    .benefit-list { list-style: none; display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
+    .benefit-list li { display: flex; align-items: flex-start; gap: 12px; font-size: 0.95rem; color: var(--text-body); }
+    .benefit-list .check { width: 20px; height: 20px; background: var(--accent); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; flex-shrink: 0; margin-top: 2px; }
+    .benefit-list .check::before { content: '✓'; }
+    @media (max-width: 900px) { .benefit-block, .benefit-block.reverse { grid-template-columns: 1fr; direction: ltr; } .benefit-visual { order: -1; } .benefit-block.image-after .benefit-visual { order: 1; } }
+
+    /* PROCESS STEPS */
+    .process-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; margin-top: 48px; }
+    .process-step { text-align: center; padding: 24px 16px; }
+    .step-number {
+      width: 48px; height: 48px; background: var(--accent-gradient); color: white;
+      border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-display); font-size: 1.2rem; font-weight: 700;
+      margin: 0 auto 16px;
+    }
+    .process-step h3 { font-family: var(--font-display); font-size: 1rem; font-weight: 600; color: var(--text-dark); margin-bottom: 8px; }
+    .process-step p { font-size: 0.85rem; color: var(--text-muted); line-height: 1.55; }
+    @media (max-width: 900px) { .process-steps { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 500px) { .process-steps { grid-template-columns: 1fr; } }
+
+    /* COMPARISON */
+    .comparison-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-top: 48px; }
+    .comparison-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 32px; }
+    .comparison-card.before { border-color: #fecaca; background: #fef2f2; }
+    .comparison-card.after { border-color: #bbf7d0; background: #f0fdf4; }
+    .comparison-card h3 { font-family: var(--font-display); font-size: 1.1rem; font-weight: 600; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+    .comparison-card .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .comparison-card.before .dot { background: #ef4444; }
+    .comparison-card.after .dot { background: #22c55e; }
+    .comparison-list { list-style: none; display: flex; flex-direction: column; gap: 12px; }
+    .comparison-list li { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; }
+    .comparison-list .icon-x { color: #ef4444; font-weight: 700; }
+    .comparison-list .icon-check { color: #22c55e; font-weight: 700; }
+    @media (max-width: 700px) { .comparison-grid { grid-template-columns: 1fr; } }
+
+    /* VIDEO */
+    .video-section { background: var(--bg-soft); }
+    .video-wrapper { margin-top: 40px; border-radius: var(--radius-xl); overflow: hidden; box-shadow: var(--shadow-lg); aspect-ratio: 16/9; }
+    .video-wrapper iframe { width: 100%; height: 100%; border: none; }
+
+    /* BOUTIQUE SECTION */
+    .boutique-section { background: var(--bg-primary); }
+    .boutique-block { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; }
+    .boutique-visual {
+      border-radius: var(--radius-xl); overflow: hidden;
+      box-shadow: var(--shadow-lg); aspect-ratio: 4/3;
+    }
+    .boutique-visual img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .boutique-content { display: flex; flex-direction: column; gap: 20px; }
+    .boutique-address {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 0.9rem; color: var(--text-muted);
+    }
+    .boutique-address::before { content: '📍'; }
+    .kpi-cards { display: flex; flex-direction: column; gap: 16px; }
+    .kpi-card {
+      background: var(--accent-gradient-light); border: 1px solid var(--border-accent);
+      border-radius: var(--radius-md); padding: 20px;
+    }
+    .kpi-number { font-family: var(--font-display); font-size: 1.8rem; font-weight: 700; color: var(--accent); margin-bottom: 4px; }
+    .kpi-label { font-size: 0.85rem; color: var(--text-muted); line-height: 1.5; }
+    .boutique-hook { font-size: 1rem; color: var(--text-body); font-weight: 500; }
+    @media (max-width: 900px) { .boutique-block { grid-template-columns: 1fr; } .boutique-visual { order: -1; width: 100%; min-height: 200px; aspect-ratio: 16/9; } .boutique-visual img { width: 100%; height: 100%; object-fit: cover; } }
+
+    /* PILOT */
+    .pilot-list { list-style: none; display: flex; flex-direction: column; gap: 14px; margin: 40px auto; max-width: 500px; text-align: left; }
+    .pilot-list li { display: flex; align-items: center; gap: 12px; font-size: 0.95rem; }
+    .pilot-check { width: 22px; height: 22px; background: var(--accent); border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+    .pilot-check::before { content: '✓'; color: white; font-size: 0.75rem; font-weight: 700; }
+    .pilot-tagline { font-family: var(--font-display); font-size: 1.1rem; font-weight: 600; color: var(--accent); margin-top: 32px; }
+
+    /* TESTIMONIAL */
+    .testimonial-section { background: var(--bg-soft); }
+    .testimonial-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-xl); padding: 48px; max-width: 800px; margin: 0 auto; text-align: center; }
+    .testimonial-quote { font-family: var(--font-display); font-size: 1.4rem; font-weight: 500; color: var(--text-dark); line-height: 1.5; margin-bottom: 32px; font-style: italic; }
+    .testimonial-quote::before { content: '"'; }
+    .testimonial-quote::after { content: '"'; }
+    .testimonial-author { display: flex; align-items: center; justify-content: center; gap: 16px; }
+    .testimonial-avatar { width: 48px; height: 48px; background: var(--accent); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; }
+    .testimonial-info { text-align: left; }
+    .testimonial-info strong { display: block; font-size: 0.95rem; color: var(--text-dark); }
+    .testimonial-info span { font-size: 0.85rem; color: var(--text-muted); }
+
+    /* PERSONAS */
+    .personas-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 48px; }
+    .persona-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 32px 24px; text-align: center; transition: transform 0.2s, box-shadow 0.2s; }
+    .persona-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); }
+    .persona-icon { font-size: 2rem; margin-bottom: 16px; }
+    .persona-card h3 { font-family: var(--font-display); font-size: 1.05rem; font-weight: 600; color: var(--text-dark); margin-bottom: 8px; }
+    .persona-card p { font-size: 0.88rem; color: var(--text-muted); line-height: 1.55; }
+    @media (max-width: 800px) { .personas-grid { grid-template-columns: 1fr; } }
+
+    /* SOLUTION GRID */
+    .solution-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 48px; }
+    .solution-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 24px; text-align: left; }
+    .solution-card h4 { font-size: 0.95rem; font-weight: 600; color: var(--text-dark); margin-bottom: 8px; }
+    .solution-card p { font-size: 0.85rem; color: var(--text-muted); line-height: 1.55; }
+    @media (max-width: 900px) { .solution-grid { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 600px) { .solution-grid { grid-template-columns: 1fr; } }
+
+    /* PRICING */
+    .pricing-card { background: var(--bg-card); border: 2px solid var(--accent); border-radius: var(--radius-xl); padding: 48px 40px; max-width: 420px; margin: 48px auto 0; text-align: center; position: relative; }
+    .pricing-badge { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); background: var(--accent); color: white; padding: 6px 20px; border-radius: 100px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
+    .pricing-card h3 { font-family: var(--font-display); font-size: 1.2rem; font-weight: 600; color: var(--text-dark); margin-bottom: 6px; margin-top: 10px; }
+    .pricing-price { font-family: var(--font-display); font-size: 2.6rem; font-weight: 700; color: var(--accent); margin: 14px 0 6px; }
+    .pricing-price-sub { font-size: 0.82rem; color: var(--text-light); margin-bottom: 24px; }
+    .pricing-features { list-style: none; text-align: left; display: flex; flex-direction: column; gap: 12px; margin-bottom: 28px; }
+    .pricing-features li { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; color: var(--text-body); }
+    .pricing-features li .pf-check { color: var(--accent); font-weight: 800; font-size: 0.82rem; }
+
+    /* PARTNERS */
+    .partners-row { display: flex; align-items: center; justify-content: center; gap: 40px; flex-wrap: wrap; margin-top: 40px; }
+    .partner-item { display: flex; align-items: center; justify-content: center; width: 200px; height: 80px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); transition: opacity 0.2s, box-shadow 0.2s; opacity: 0.75; padding: 12px; }
+    .partner-item:hover { opacity: 1; box-shadow: var(--shadow-md); }
+    .partner-item img { height: 36px; width: auto; max-width: 160px; object-fit: contain; }
+
+
+    /* CTA SECTION */
+    .cta-section { background: linear-gradient(135deg, var(--bg-blue-pale) 0%, var(--bg-pink-pale) 100%); }
+    .cta-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; }
+    .cta-text { }
+    .cta-form-card { background: var(--bg-card); border-radius: var(--radius-xl); padding: 40px; box-shadow: var(--shadow-lg); }
+    .cta-form-card h3 { font-family: var(--font-display); font-size: 1.3rem; font-weight: 600; color: var(--text-dark); margin-bottom: 24px; }
+    .cta-form { display: flex; flex-direction: column; gap: 16px; }
+    .cta-form label { font-size: 0.85rem; font-weight: 500; color: var(--text-body); margin-bottom: 4px; display: block; }
+    .cta-form input { width: 100%; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 0.95rem; transition: border-color 0.2s, box-shadow 0.2s; }
+    .cta-form input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+    .btn-submit { background: var(--accent); color: white; padding: 16px 32px; border: none; border-radius: 100px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: background 0.2s, transform 0.2s; }
+    .btn-submit:hover { background: var(--accent-dark); transform: translateY(-2px); }
+    @media (max-width: 900px) { .cta-inner { grid-template-columns: 1fr; } }
+
+    /* FOOTER */
+    .footer { padding: 36px 0; border-top: 1px solid var(--border); background: var(--bg-primary); }
+    .footer-inner { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
+    .footer-logo { font-family: var(--font-display); font-size: 1.05rem; font-weight: 700; color: var(--text-dark); }
+    .footer-logo span { color: var(--accent); }
+    .footer-copy { font-size: 0.78rem; color: var(--text-light); }
+
+    /* ANIMATIONS */
+    .fade-in { opacity: 0; transform: translateY(24px); transition: opacity 0.6s ease, transform 0.6s ease; }
+    .fade-in.visible { opacity: 1; transform: translateY(0); }
+    .bg-soft { background: var(--bg-soft); }
+  </style>
+</head>
+<body>
+  <nav class="nav" id="nav">
+    <div class="nav-inner">
+      <a href="#" class="nav-logo">
+        <img src="https://metagora-tech.fr/retail-luxe/assets/images/Logo-Metagora-Black.png" alt="Metagora">
+        <span class="logo-separator"></span>
+        <span class="brand-text">For Lacoste</span>
+      </a>
+      <ul class="nav-links">
+        <li><a href="#solution">Solution</a></li>
+        <li><a href="#process">Process</a></li>
+        <li><a href="#features">Features</a></li>
+        <li><a href="#pricing">Pricing</a></li>
+        <li><a href="#contact" class="nav-cta">Request a demo</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <section class="hero" id="hero">
+    <div class="container">
+      <div class="hero-content">
+        <div class="hero-badge">AI Coaching for Retail & Luxury</div>
+        <h1>Retail training that feels like <em>real selling.</em></h1>
+        <p class="hero-desc">AI virtual clients to improve listening, posture and performance of your conseillers — with no risk to brand image.</p>
+        <div class="hero-actions">
+          <a href="#contact" class="btn-primary">See it in action →</a>
+          <a href="#solution" class="btn-secondary">Learn more</a>
+        </div>
+        <p class="hero-meta">No hardware · Sessions < 5 min · Fast network-wide deployment</p>
+      </div>
+      <div class="hero-image">
+        <div class="hero-image-wrapper">
+          <img src="https://metagora-tech.fr/retail-luxe/assets/images/hero-luxe2.png" alt="Interface de simulation de vente Metagora">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="value-callout">
+    <div class="container">
+      <div class="value-callout-inner">
+        <div class="value-stat"><div class="value-stat-number">+30%</div><div class="value-stat-label">closing rate increase</div></div>
+        <div class="value-stat-divider"></div>
+        <div class="value-stat"><div class="value-stat-number">+50%</div><div class="value-stat-label">training engagement</div></div>
+        <div class="value-stat-divider"></div>
+        <div class="value-stat"><div class="value-stat-number"><5 min</div><div class="value-stat-label">per session</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="logos-section">
+    <div class="container">
+      <p class="logos-label">Trusted by major retail and luxury players</p>
+      <div class="logos-row">
+        <img src="https://metagora-tech.fr/retail-luxe/assets/images/logo-lvmh.png" alt="LVMH" style="opacity: 0.7;">
+        <img src="https://metagora-tech.fr/retail-luxe/assets/images/logo-amazon.png" alt="Amazon">
+        <img src="https://metagora-tech.fr/retail-luxe/assets/images/logo-carrefour.png" alt="Carrefour">
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="solution">
+    <div class="container text-center">
+      <span class="section-label">The solution</span>
+      <h2 class="section-title">Metagora transforms training<br>into real practice.</h2>
+      <p class="section-subtitle mx-auto" style="text-align:center;">Enable your retail teams to practice like in-store, with intelligent and adaptive virtual clients.</p>
+      <div class="feature-tabs fade-in">
+        <div class="feature-tab">
+          <div class="feature-tab-icon">💎</div>
+          <h3>Unlimited product catalog</h3>
+          <p>Integrate all your models, technical specs, history and positioning. Real-time updates.</p>
+        </div>
+        <div class="feature-tab">
+          <div class="feature-tab-icon">🎯</div>
+          <h3>Native multilingual</h3>
+          <p>Train your teams in 90+ languages to welcome international clientele with excellence.</p>
+        </div>
+        <div class="feature-tab">
+          <div class="feature-tab-icon">💬</div>
+          <h3>Measurable ROI</h3>
+          <p>Increased average basket, reduced abandonment rate, customer satisfaction. Results from month one.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section bg-soft">
+    <div class="container">
+      <div class="benefit-block fade-in">
+        <div class="benefit-text">
+          <span class="section-label">The problem</span>
+          <h2 class="section-title">Traditional retail training can't keep up.</h2>
+          <p class="section-subtitle">Training high-performing retail teams has become a structural challenge. Customer experience becomes uneven and sales performance suffers.</p>
+          <ul class="benefit-list">
+            <li><span class="check"></span>A new conseillers takes 6 to 12 months to become productive</li>
+            <li><span class="check"></span>70% of training is forgotten within a week</li>
+            <li><span class="check"></span>Managers lack time to coach</li>
+            <li><span class="check"></span>Excellence dilutes from store to store</li>
+          </ul>
+        </div>
+        <div class="benefit-visual"><img src="https://metagora-tech.fr/retail-luxe/assets/images/Illustration%20%E2%80%94%20Probl%C3%A8mes%20formation%20traditionnelle.jpeg" alt="Problèmes formation traditionnelle"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container">
+      <div class="benefit-block reverse fade-in">
+        <div class="benefit-text">
+          <span class="section-label">Field results</span>
+          <h2 class="section-title">Prepare your conseillers before the first real customer.</h2>
+          <p class="section-subtitle">Realistic simulations that build confidence, sharpen judgment and train to respond under pressure.</p>
+          <ul class="benefit-list">
+            <li><span class="check"></span>Authentic conversations with our simulation</li>
+            <li><span class="check"></span>Instant feedback from an adaptive AI coach</li>
+            <li><span class="check"></span>Unlimited sessions, zero risk</li>
+          </ul>
+        </div>
+        <div class="benefit-visual"><img src="https://metagora-tech.fr/retail-luxe/assets/images/Illustration%20%E2%80%94%20Simulation%20conseiller%20%20client%20virtuel.jpeg" alt="Simulation conseiller client virtuel"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section bg-soft" id="process">
+    <div class="container text-center">
+      <span class="section-label">Process</span>
+      <h2 class="section-title">How does it work?</h2>
+      <p class="section-subtitle mx-auto" style="text-align:center;">Four simple steps to deploy AI training in your stores.</p>
+      <div class="process-steps fade-in">
+        <div class="process-step"><div class="step-number">1</div><h3>Define your scenarios</h3><p>Sales methods, ceremony, customer profiles, objections, new products.</p></div>
+        <div class="process-step"><div class="step-number">2</div><h3>Practice</h3><p>Realistic conversations with a virtual client, adapted to advisor behavior.</p></div>
+        <div class="process-step"><div class="step-number">3</div><h3>Instant feedback</h3><p>Precise scoring: active listening, discovery, objection handling, closing, posture.</p></div>
+        <div class="process-step"><div class="step-number">4</div><h3>Track progress</h3><p>Clear view by individual, store or entire network.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container">
+      <div class="text-center">
+        <span class="section-label">Comparison</span>
+        <h2 class="section-title">Measurable results,<br>directly on field performance.</h2>
+      </div>
+      <div class="comparison-grid fade-in">
+        <div class="comparison-card before">
+          <h3><span class="dot"></span>Before Metagora</h3>
+          <ul class="comparison-list">
+            <li><span class="icon-x">✕</span> Long and inconsistent onboarding</li>
+            <li><span class="icon-x">✕</span> Training hard to measure</li>
+            <li><span class="icon-x">✕</span> Coaching dependent on managers</li>
+            <li><span class="icon-x">✕</span> Excellence diluted between stores</li>
+          </ul>
+        </div>
+        <div class="comparison-card after">
+          <h3><span class="dot"></span>With Metagora</h3>
+          <ul class="comparison-list">
+            <li><span class="icon-check">✓</span> Accelerated and standardized onboarding</li>
+            <li><span class="icon-check">✓</span> Progress measured at each session</li>
+            <li><span class="icon-check">✓</span> Continuous coaching, 24/7, at scale</li>
+            <li><span class="icon-check">✓</span> Uniform excellence across the network</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section video-section">
+    <div class="container text-center">
+      <span class="section-label">Demo</span>
+      <h2 class="section-title">See Metagora in action</h2>
+      <p class="section-subtitle mx-auto" style="text-align:center;">Watch a sales simulation with a demanding customer.</p>
+      <div class="video-wrapper fade-in">
+        <iframe src="https://www.youtube.com/embed/UfNSKT3IPCc?rel=0&showinfo=0" title="Démonstration Metagora" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+      </div>
+    </div>
+  </section>
+
+  <section class="section bg-soft">
+    <div class="container">
+      <div class="benefit-block image-after fade-in">
+        <div class="benefit-text">
+          <span class="section-label">Deployment</span>
+          <h2 class="section-title">Visible results, fast.</h2>
+          <p class="section-subtitle">Metagora integrates easily into your retail organization, without disrupting store activity.</p>
+          <ul class="benefit-list">
+            <li><span class="check"></span>Pilot in days</li>
+            <li><span class="check"></span>90+ languages</li>
+            <li><span class="check"></span>Mobile, tablet and desktop</li>
+            <li><span class="check"></span>Integrated with all your tools</li>
+          </ul>
+        </div>
+        <div class="benefit-visual"><img src="https://metagora-tech.fr/retail-luxe/assets/images/Illustration%20%E2%80%94%20D%C3%A9ploiement%20rapide%20multi-devices.jpeg" alt="Déploiement rapide multi-devices"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Boutique Section -->
+  <section class="section boutique-section">
+    <div class="container">
+      <div class="text-center" style="margin-bottom: 48px;">
+        <span class="section-label">Lacoste Regent Street Flagship</span>
+        <h2 class="section-title">What if we started with your store<br>at 182 Regent Street, London W1B 5BT, United Kingdom?</h2>
+        <p class="section-subtitle mx-auto" style="text-align:center;">Bring your clienteling to the excellence of your clientele</p>
+      </div>
+      <div class="boutique-block fade-in">
+        <div class="boutique-visual">
+          <img src="https://raw.githubusercontent.com/Tony2Metagora/landing-workflows/master/retail-luxe/assets/images/boutiques/Boutique%20Lacoste%20uk.jpg" alt="Lacoste Regent Street Flagship">
+        </div>
+        <div class="boutique-content">
+          <p class="boutique-address">182 Regent Street, London W1B 5BT, United Kingdom</p>
+          <div class="kpi-cards">
+            <div class="kpi-card">
+              <div class="kpi-number">+3 à +5 pts</div>
+              <div class="kpi-label">conversion rate increase on qualified clients, like-for-like</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-number">10–15%</div>
+              <div class="kpi-label">average conversion rate in luxury fashion & leather goods — Metagora takes you to the next level</div>
+            </div>
+          </div>
+          <p class="boutique-hook">3 to 5 conversion points gained for your retail teams — measurable from month one.</p>
+          <a href="#contact" class="btn-primary" style="align-self: flex-start;">Book a meeting →</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pilot Section -->
+  <section class="section">
+    <div class="container text-center">
+      <span class="section-label">Pilot</span>
+      <h2 class="section-title">Test Metagora for best performance</h2>
+      <p class="section-subtitle mx-auto" style="text-align:center;">Before a global rollout, test Metagora on a controlled scope.</p>
+      <ul class="pilot-list fade-in">
+        <li><span class="pilot-check"></span>Pilot per store regardless of language</li>
+        <li><span class="pilot-check"></span>Scenarios to optimize conversion rates, sales indices</li>
+        <li><span class="pilot-check"></span>No limit on scenarios, personas, products</li>
+        <li><span class="pilot-check"></span>Decision based on real data</li>
+      </ul>
+      <p class="pilot-tagline fade-in">You move forward with proof, not promises.</p>
+    </div>
+  </section>
+
+  <section class="section testimonial-section">
+    <div class="container">
+      <div class="testimonial-card fade-in">
+        <div class="testimonial-quote">We now know our advisors master our sales ceremony before meeting a real customer. It changes everything.</div>
+        <div class="testimonial-author">
+          <div class="testimonial-avatar">RD</div>
+          <div class="testimonial-info"><strong>Retail Director</strong><span>Luxury House — Europe Network</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container text-center">
+      <span class="section-label">For whom?</span>
+      <h2 class="section-title">Designed for demanding organizations.</h2>
+      <div class="personas-grid fade-in">
+        <div class="persona-card"><div class="persona-icon">🏪</div><h3>Retail / Network Directors</h3><p>Standardize excellence across the entire store network.</p></div>
+        <div class="persona-card"><div class="persona-icon">🎓</div><h3>HR / L&D</h3><p>Industrialize coaching and prove impact with concrete data.</p></div>
+        <div class="persona-card"><div class="persona-icon">👥</div><h3>Store Managers</h3><p>Coach teams effectively without spending hours.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section bg-soft" id="features">
+    <div class="container text-center">
+      <span class="section-label">Features</span>
+      <h2 class="section-title">A solution designed for marque premium retail.</h2>
+      <p class="section-subtitle mx-auto" style="text-align:center;">Train, perfect, excel.</p>
+      <div class="solution-grid fade-in">
+        <div class="solution-card"><h4>📦 Unlimited product catalog</h4><p>Integrate all your models, technical specs, history and positioning. Real-time updates.</p></div>
+        <div class="solution-card"><h4>🌍 Native multilingual</h4><p>Train your teams in 90+ languages to welcome international clientele with excellence.</p></div>
+        <div class="solution-card"><h4>📈 Measurable ROI</h4><p>Increased average basket, reduced abandonment rate, customer satisfaction. Results from month one.</p></div>
+        <div class="solution-card"><h4>🏆 Sales ceremony</h4><p>Showcase craftsmanship, house heritage, noble materials and collection exclusivity.</p></div>
+        <div class="solution-card"><h4>🧠 Adapted sales ceremony</h4><p>Active listening, implicit needs discovery, subtle cross-selling and elegant closing.</p></div>
+        <div class="solution-card"><h4>🔒 Risk-free</h4><p>Pilot per store or region, scenarios validated with your teams, no real customer exposure.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="pricing">
+    <div class="container text-center">
+      <span class="section-label">Pricing</span>
+      <h2 class="section-title">Pricing adapted to your structure.</h2>
+      <div class="pricing-card fade-in">
+        <div class="pricing-badge">Offre Boutique Premium</div>
+        <h3>For an XS store</h3>
+        <div class="pricing-price">€350<span style="font-size:1rem; color:#94a3b8;">/mois</span></div>
+        <p class="pricing-price-sub">Starting from — Custom pricing based on network</p>
+        <ul class="pricing-features">
+          <li><span class="pf-check">✓</span> Unlimited scenarios</li>
+          <li><span class="pf-check">✓</span> 90+ languages</li>
+          <li><span class="pf-check">✓</span> All your products integrated</li>
+          <li><span class="pf-check">✓</span> Real-time results tracking</li>
+          <li><span class="pf-check">✓</span> Dedicated support 7/7</li>
+        </ul>
+        <a href="#contact" class="btn-primary" style="width:100%; justify-content:center;">Request a custom quote</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section compact bg-soft">
+    <div class="container text-center">
+      <span class="section-label">Technology partners</span>
+      <h2 class="section-title">Powered by AI leaders.</h2>
+      <div class="partners-row fade-in">
+        <div class="partner-item"><img src="https://metagora-tech.fr/retail-luxe/assets/images/logos AI/microsoft.png" alt="Microsoft"></div>
+        <div class="partner-item"><img src="https://metagora-tech.fr/retail-luxe/assets/images/logos AI/nvidia.png" alt="NVIDIA"></div>
+        <div class="partner-item"><img src="https://metagora-tech.fr/retail-luxe/assets/images/logos AI/google-cloud.png" alt="Google Cloud"></div>
+        <div class="partner-item"><img src="https://metagora-tech.fr/retail-luxe/assets/images/logos AI/elevenlabs.jpg" alt="ElevenLabs"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section cta-section" id="contact">
+    <div class="container">
+      <div class="cta-inner fade-in">
+        <div class="cta-text">
+          <span class="section-label">Contact</span>
+          <h2 class="section-title">Discover how Metagora<br>adapts to your network.</h2>
+          <p class="section-subtitle">Personalized demo · No commitment · Fast deployment</p>
+        </div>
+        <div class="cta-form-card">
+          <h3>Sign up</h3>
+          <form id="contact-form" class="cta-form" action="https://formspree.io/f/xdaznpln" method="POST">
+<input type="hidden" name="_source" id="form-source" value="">
+<input type="hidden" name="_subject" value="Nouveau lead — Lacoste">
+            <input type="hidden" name="landing_url" id="landing-url-field" value="">
+            <div>
+              <label>Full name</label>
+              <input type="text" name="name" placeholder="John Smith" required>
+            </div>
+            <div>
+              <label>Professional email</label>
+              <input type="email" name="email" placeholder="john.smith@example.com" required>
+            </div>
+            <div>
+              <label>Company</label>
+              <input type="text" name="company" placeholder="Your company name">
+            </div>
+            <button type="submit" class="btn-submit">Request a demo →</button>
+          </form>
+          <script>
+            document.getElementById('landing-url-field').value = window.location.href;
+            document.getElementById('form-source').value = window.location.href;
+          </script>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-inner">
+        <div class="footer-logo">Meta<span>gora</span></div>
+        <p class="footer-copy">© 2025 Metagora. All rights reserved.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => { if (entry.isIntersecting) entry.target.classList.add('visible'); });
+    }, { threshold: 0.1, rootMargin: '0px 0px -30px 0px' });
+    document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
+    window.addEventListener('scroll', () => {
+      document.getElementById('nav').classList.toggle('scrolled', window.scrollY > 20);
+    });
+  </script>
+
+</body>
+</html>

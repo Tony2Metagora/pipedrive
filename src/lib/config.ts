@@ -53,7 +53,12 @@ export const PIPELINES = [
 export const ALLOWED_DOMAINS = ["metagora.tech"];
 
 /** Whitelist utilisateurs (en plus du domaine) */
-export const ALLOWED_EMAILS = ["tony@metagora.tech"];
+export const ALLOWED_EMAILS = [
+  "tony@metagora.tech",
+  "yves@metagora.tech",
+  "johann@metagora.tech",
+  "mounji@metagora.tech",
+];
 
 /** Types d'activité avec icônes */
 export const ACTIVITY_TYPES = [
