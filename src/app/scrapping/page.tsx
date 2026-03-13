@@ -5,6 +5,7 @@ import {
   Search, Loader2, Save, Trash2, Download, AlertCircle, Building2,
   MapPin, Filter, ChevronDown, ChevronUp, Edit3, Check, X,
   Database, Columns3, ShieldCheck, Users2, GripVertical,
+  ArrowUp, ArrowDown, ArrowUpDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -60,13 +61,13 @@ interface ColDef {
 }
 
 const DEFAULT_COLUMNS: ColDef[] = [
+  { key: "raison_sociale", label: "Raison sociale", defaultOn: true, minW: 100, defaultW: 200 },
   { key: "enseigne", label: "Enseigne", defaultOn: true, minW: 80, defaultW: 160 },
   { key: "dirigeant_nom", label: "Nom dirigeant", defaultOn: true, minW: 80, defaultW: 140 },
   { key: "dirigeant_prenom", label: "Prénom dirigeant", defaultOn: true, minW: 80, defaultW: 130 },
   { key: "code_postal", label: "CP", defaultOn: true, minW: 50, defaultW: 65 },
   { key: "tranche_effectif", label: "Effectif", defaultOn: true, minW: 60, defaultW: 80 },
-  { key: "raison_sociale", label: "Raison sociale", defaultOn: false, minW: 100, defaultW: 200 },
-  { key: "siren", label: "SIREN", defaultOn: false, minW: 80, defaultW: 100 },
+  { key: "siren", label: "SIREN", defaultOn: true, minW: 80, defaultW: 100 },
   { key: "siret", label: "SIRET", defaultOn: false, minW: 100, defaultW: 140 },
   { key: "commune", label: "Commune", defaultOn: false, minW: 80, defaultW: 130 },
   { key: "departement", label: "Département", defaultOn: false, minW: 40, defaultW: 60 },
@@ -241,6 +242,18 @@ export default function ScrappingPage() {
     if (showColPicker) document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [showColPicker]);
+
+  // Sorting
+  const [sortKey, setSortKey] = useState<keyof ScrapingCompany | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const handleSort = (key: keyof ScrapingCompany) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
 
   // Split dirigeants modal
   const [showSplitModal, setShowSplitModal] = useState(false);
@@ -417,7 +430,7 @@ export default function ScrappingPage() {
 
   // ── Displayed data ──
   const displayedCompanies = selectedListId ? listCompanies : results;
-  const filteredCompanies = tableSearch
+  const filteredBase = tableSearch
     ? displayedCompanies.filter((c) => {
         const q = tableSearch.toLowerCase();
         return c.raison_sociale?.toLowerCase().includes(q) || c.enseigne?.toLowerCase().includes(q) ||
@@ -426,6 +439,20 @@ export default function ScrappingPage() {
           c.dirigeant_prenom?.toLowerCase().includes(q) || c.siren?.includes(q);
       })
     : displayedCompanies;
+
+  // Apply sorting
+  const filteredCompanies = sortKey
+    ? [...filteredBase].sort((a, b) => {
+        const aVal = String(a[sortKey] ?? "").toLowerCase();
+        const bVal = String(b[sortKey] ?? "").toLowerCase();
+        // Empty values always last
+        if (!aVal && bVal) return 1;
+        if (aVal && !bVal) return -1;
+        if (!aVal && !bVal) return 0;
+        const cmp = aVal.localeCompare(bVal, "fr");
+        return sortDir === "asc" ? cmp : -cmp;
+      })
+    : filteredBase;
 
   // Ordered active columns (respecting drag order)
   const colMap = new Map(DEFAULT_COLUMNS.map((c) => [c.key, c]));
@@ -660,9 +687,15 @@ export default function ScrappingPage() {
                         onDragStart={() => handleDragStart(col.key)}
                         onDragOver={(e) => handleDragOver(e, col.key)}
                         onDragEnd={handleDragEnd}>
-                        <div className="px-3 py-2 flex items-center gap-1 cursor-grab active:cursor-grabbing">
+                        <div className="px-3 py-2 flex items-center gap-1 cursor-grab active:cursor-grabbing"
+                          onClick={(e) => { if (!resizingRef.current) { e.stopPropagation(); handleSort(col.key); } }}>
                           <GripVertical className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
                           {col.label}
+                          {sortKey === col.key ? (
+                            sortDir === "asc" ? <ArrowUp className="w-3 h-3 text-indigo-500 flex-shrink-0" /> : <ArrowDown className="w-3 h-3 text-indigo-500 flex-shrink-0" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                          )}
                         </div>
                         <div className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-300 group-hover:bg-gray-300 transition-colors"
                           onMouseDown={(e) => startResize(col.key, e)}
@@ -675,10 +708,11 @@ export default function ScrappingPage() {
                 <tbody className="divide-y divide-gray-100">
                   {filteredCompanies.map((c, i) => {
                     const isMultiDir = (c.all_dirigeants?.length ?? 0) > 1;
+                    const boldCols = new Set<string>(["enseigne", "raison_sociale"]);
                     return (
                       <tr key={`${c.siren}-${i}`} className={cn("hover:bg-gray-50", isMultiDir && "bg-amber-50/40")}>
                         {orderedActiveCols.map((col) => (
-                          <td key={col.key} className={cn("px-3 py-2 overflow-hidden text-ellipsis whitespace-nowrap", isMultiDir && "font-bold")}
+                          <td key={col.key} className={cn("px-3 py-2 overflow-hidden text-ellipsis whitespace-nowrap", isMultiDir && boldCols.has(col.key) && "font-bold")}
                             style={{ maxWidth: colWidths[col.key] ?? col.defaultW }}>
                             <CellValue col={col} company={c} />
                           </td>

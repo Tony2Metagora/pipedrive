@@ -174,13 +174,19 @@ export async function POST(request: Request) {
 
     // Map to flat structure
     const companies = unique.slice(0, maxResults).map((r) => {
-      // Collect all PP dirigeants
+      // Collect all PP dirigeants — deduplicate by nom+prenom, skip empty names
       const allPP = (r.dirigeants || []).filter((d) => d.type_dirigeant === "personne physique");
-      const allDirigeants = allPP.map((d) => ({
-        prenom: d.prenoms || "",
-        nom: d.nom || "",
-        role: d.qualite || "",
-      }));
+      const seenDir = new Set<string>();
+      const allDirigeants: Array<{ prenom: string; nom: string; role: string }> = [];
+      for (const d of allPP) {
+        const nom = (d.nom || "").trim();
+        const prenom = (d.prenoms || "").trim();
+        if (!nom && !prenom) continue;
+        const key = `${nom.toLowerCase()}|${prenom.toLowerCase()}`;
+        if (seenDir.has(key)) continue;
+        seenDir.add(key);
+        allDirigeants.push({ prenom, nom, role: d.qualite || "" });
+      }
       // Primary dirigeant = first PP
       const dirigeantPrenom = allDirigeants[0]?.prenom || "";
       const dirigeantNom = allDirigeants[0]?.nom || "";
