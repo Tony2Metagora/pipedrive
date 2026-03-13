@@ -66,13 +66,17 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { imageUrl, scale } = await request.json();
-    if (!imageUrl) {
-      return NextResponse.json({ error: "imageUrl requis" }, { status: 400 });
-    }
+    const { imageUrl, imageBase64, scale } = await request.json();
 
-    // Step 1: Download the source image
-    const srcBuffer = await downloadImage(imageUrl);
+    // Step 1: Get the source image buffer
+    let srcBuffer: Buffer;
+    if (imageBase64) {
+      srcBuffer = Buffer.from(imageBase64, "base64");
+    } else if (imageUrl) {
+      srcBuffer = await downloadImage(imageUrl);
+    } else {
+      return NextResponse.json({ error: "imageUrl ou imageBase64 requis" }, { status: 400 });
+    }
 
     // Step 2: Upload to Replicate file storage
     const replicateFileUrl = await uploadToReplicate(srcBuffer, token);

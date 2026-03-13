@@ -303,13 +303,39 @@ export default function LandingGeneratorPage() {
     const imageUrl = imageSearchResults[imageModalIndex];
     if (!imageUrl) return;
     setUpscaling(true);
-    setUpscaleProgress("Upscaling en cours (30s à 2 min)…");
+    setUpscaleProgress("Capture de l'image…");
     setError(null);
     try {
+      // Capture the image from the DOM (already loaded, avoids CORS re-fetch)
+      let base64: string | null = null;
+      const imgEl = document.querySelector(".image-modal-main") as HTMLImageElement | null;
+      if (imgEl && imgEl.naturalWidth > 0) {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = imgEl.naturalWidth;
+          canvas.height = imgEl.naturalHeight;
+          canvas.getContext("2d")!.drawImage(imgEl, 0, 0);
+          base64 = canvas.toDataURL("image/jpeg", 0.92).split(",")[1];
+        } catch { /* canvas tainted — try proxy */ }
+      }
+      // Fallback: download via our server proxy
+      if (!base64) {
+        setUpscaleProgress("Téléchargement via proxy…");
+        try {
+          base64 = await imageToBase64ViaProxy(imageUrl);
+        } catch { /* give up */ }
+      }
+      if (!base64) {
+        setError("Impossible de capturer l'image pour l'upscale");
+        return;
+      }
+
+      setUpscaleProgress("Upscaling en cours (30s à 2 min)…");
+
       const res = await fetch("/api/landing/upscale", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageUrl, scale: 2 }),
+        body: JSON.stringify({ imageBase64: base64, scale: 2 }),
       });
       const json = await res.json();
       if (json.error) {
@@ -800,7 +826,7 @@ export default function LandingGeneratorPage() {
                 src={imageSearchResults[imageModalIndex]}
                 alt={`Image ${imageModalIndex + 1}`}
                 crossOrigin="anonymous"
-                className="max-w-full max-h-[70vh] object-contain"
+                className="image-modal-main max-w-full max-h-[70vh] object-contain"
                 onError={(e) => { (e.target as HTMLImageElement).removeAttribute("crossorigin"); }}
               />
 
