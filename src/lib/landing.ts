@@ -90,6 +90,7 @@ export interface VariablesJson {
 export interface LanguageConfig {
   code: string;
   label: string;
+  videoYoutubeId?: string;
   nav: Record<string, string>;
   hero: Record<string, string>;
   stats: Record<string, string>;
@@ -141,6 +142,7 @@ export function computeVariables(
     BRAND_NAME: input.brandName,
     HEADER_BRAND_TEXT: headerBrandText,
     ASSETS_PATH: assetsPath,
+    VIDEO_YOUTUBE_ID: lang.videoYoutubeId || "rq-julCOC5A",
 
     // Nav
     NAV_SOLUTION: lang.nav.solution,
