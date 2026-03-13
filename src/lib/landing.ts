@@ -239,7 +239,7 @@ export function computeVariables(
     // Store / Boutique section
     STORE_NAME: input.store.name,
     STORE_ADDRESS: input.store.address,
-    STORE_IMAGE: `${assetsPath}/${input.store.image}`,
+    STORE_IMAGE: input.store.image.startsWith("http") ? input.store.image : `${assetsPath}/${input.store.image}`,
     STORE_HEADLINE: kw(lang.store.headline).replace("{{storeAddress}}", input.store.address),
     STORE_SUBHEADLINE: kw(lang.store.subheadline),
     KPI_1_LABEL: kw(lang.store.kpi1),
