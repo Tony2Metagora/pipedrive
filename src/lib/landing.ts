@@ -126,10 +126,16 @@ export function computeVariables(
   const assetsPath = "../../assets/images";
   const headerBrandText = lang.code === "fr" ? `Pour ${input.brandName}` : `For ${input.brandName}`;
 
+  // For EN + premium: override "conseillers" → "advisors"
+  const effectiveKeywords = { ...keywords };
+  if (lang.code !== "fr" && effectiveKeywords.clientType === "conseillers") {
+    effectiveKeywords.clientType = "advisors";
+  }
+
   // Helper to replace {{clientType}} and {{storeType}} in text
   const kw = (text: string): string => {
     let result = text;
-    for (const [key, val] of Object.entries(keywords)) {
+    for (const [key, val] of Object.entries(effectiveKeywords)) {
       result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, "g"), val);
     }
     return result;
