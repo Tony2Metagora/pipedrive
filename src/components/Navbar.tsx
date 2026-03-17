@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import {
   LayoutDashboard, Upload, LogOut, TrendingUp, Users, Globe,
-  Database, Settings, ChevronDown, User,
+  Database, Settings, ChevronDown, User, Linkedin,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePermissions, canRead } from "@/hooks/usePermissions";
@@ -14,6 +14,7 @@ import type { ViewKey } from "@/lib/permissions";
 
 const NAV_ITEMS: Array<{ href: string; label: string; icon: typeof Globe; viewKey: ViewKey }> = [
   { href: "/landing-generator", label: "Landing", icon: Globe, viewKey: "landing" },
+  { href: "/linkedin", label: "LinkedIn", icon: Linkedin, viewKey: "linkedin" },
   { href: "/dashboard", label: "Affaires", icon: LayoutDashboard, viewKey: "dashboard" },
   { href: "/prospects", label: "Prospects", icon: Users, viewKey: "prospects" },
   { href: "/pipeline", label: "Pipeline", icon: TrendingUp, viewKey: "pipeline" },
@@ -48,10 +49,7 @@ export default function Navbar() {
         <div className="flex items-center justify-between h-14">
           {/* Logo */}
           <Link href="/dashboard" className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-sm">M</span>
-            </div>
-            <span className="font-semibold text-lg text-gray-900">Prospection</span>
+            <span className="font-semibold text-lg text-gray-900">Metagora</span>
           </Link>
 
           {/* Navigation */}

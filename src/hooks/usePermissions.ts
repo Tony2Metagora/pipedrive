@@ -27,6 +27,7 @@ export function usePermissions(): UserInfo {
       scrapping: "none",
       landing: "none",
       deal: "none",
+      linkedin: "none",
     },
     loading: true,
   });

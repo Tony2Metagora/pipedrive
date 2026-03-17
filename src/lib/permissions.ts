@@ -21,6 +21,7 @@ export const APP_VIEWS = [
   { key: "scrapping", label: "Scrapping", path: "/scrapping" },
   { key: "landing", label: "Landing Generator", path: "/landing-generator" },
   { key: "deal", label: "Fiche affaire", path: "/deal" },
+  { key: "linkedin", label: "LinkedIn", path: "/linkedin" },
 ] as const;
 
 export type ViewKey = (typeof APP_VIEWS)[number]["key"];
@@ -64,6 +65,7 @@ function defaultPermissions(): Record<ViewKey, PermissionLevel> {
     scrapping: "read",
     landing: "none",
     deal: "read",
+    linkedin: "none",
   };
 }
 
@@ -77,6 +79,7 @@ function adminPermissions(): Record<ViewKey, PermissionLevel> {
     scrapping: "write",
     landing: "write",
     deal: "write",
+    linkedin: "write",
   };
 }
 
@@ -157,5 +160,6 @@ export function apiPathToView(pathname: string): ViewKey | null {
   if (pathname.startsWith("/api/import")) return "import";
   if (pathname.startsWith("/api/scraping")) return "scrapping";
   if (pathname.startsWith("/api/landing") || pathname.startsWith("/api/generate")) return "landing";
+  if (pathname.startsWith("/api/linkedin")) return "linkedin";
   return null;
 }
