@@ -75,6 +75,12 @@ const ALL_CITIES = [
   { key: "newyork", label: "New York", flag: "\u{1F1FA}\u{1F1F8}", langs: ["en"], urlCode: "us" },
 ];
 
+// ─── Helpers ─────────────────────────────────────────────
+
+function proxyUrl(url: string): string {
+  return `/api/landing/image-proxy?url=${encodeURIComponent(url)}`;
+}
+
 // ─── Component ────────────────────────────────────────────
 
 export default function LandingGeneratorPage() {
@@ -91,7 +97,7 @@ export default function LandingGeneratorPage() {
   const [storeImageOriginalUrl, setStoreImageOriginalUrl] = useState("");
   const [imageConfirmed, setImageConfirmed] = useState(false);
   const [storeFinderLoading, setStoreFinderLoading] = useState(false);
-  const [imageSearchResults, setImageSearchResults] = useState<string[]>([]);
+  const [imageSearchResults, setImageSearchResults] = useState<{url: string; thumb: string}[]>([]);
   const [imageSearchLoading, setImageSearchLoading] = useState(false);
   const [imageModalOpen, setImageModalOpen] = useState(false);
   const [imageModalIndex, setImageModalIndex] = useState(0);
@@ -253,6 +259,7 @@ export default function LandingGeneratorPage() {
       if (json.error) {
         setError(json.error);
       } else {
+        // data is [{url, thumb}, ...]
         setImageSearchResults(json.data || []);
       }
     } catch (err) {
@@ -303,10 +310,10 @@ export default function LandingGeneratorPage() {
 
   // Download image from modal to user's PC
   const handleDownloadImage = () => {
-    const imageUrl = imageSearchResults[imageModalIndex];
-    if (!imageUrl) return;
+    const image = imageSearchResults[imageModalIndex];
+    if (!image) return;
     const a = document.createElement("a");
-    a.href = imageUrl;
+    a.href = image.url;
     a.target = "_blank";
     a.download = `boutique-${brandSlug || "image"}.jpg`;
     a.click();
@@ -386,8 +393,9 @@ export default function LandingGeneratorPage() {
 
   // Confirm and save the selected image
   const handleConfirmImage = async () => {
-    const imageUrl = imageSearchResults[imageModalIndex];
-    if (!imageUrl) return;
+    const image = imageSearchResults[imageModalIndex];
+    if (!image) return;
+    const imageUrl = image.url;
     setImageSaving(true);
     setError(null);
     const imagePath = `boutiques/Boutique ${brandName} ${urlCode}.jpg`;
@@ -654,14 +662,14 @@ export default function LandingGeneratorPage() {
                     <div className="mt-3">
                       <p className="text-[10px] text-gray-500 mb-2">Cliquez sur une image pour la sélectionner :</p>
                       <div className="grid grid-cols-3 gap-2">
-                        {imageSearchResults.map((url, i) => (
+                        {imageSearchResults.map((img, i) => (
                           <button
                             key={i}
                             onClick={() => openImageModal(i)}
                             className="relative aspect-video rounded-lg overflow-hidden border-2 border-gray-200 hover:border-indigo-500 transition-colors cursor-pointer group"
                           >
                             <img
-                              src={url}
+                              src={img.thumb}
                               alt={`Résultat ${i + 1}`}
                               className="w-full h-full object-cover"
                               onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
@@ -891,11 +899,9 @@ export default function LandingGeneratorPage() {
             {/* Main image */}
             <div className="relative bg-black rounded-xl overflow-hidden flex items-center justify-center" style={{ minHeight: 400 }}>
               <img
-                src={imageSearchResults[imageModalIndex]}
+                src={proxyUrl(imageSearchResults[imageModalIndex].url)}
                 alt={`Image ${imageModalIndex + 1}`}
-                crossOrigin="anonymous"
                 className="max-w-full max-h-[70vh] object-contain"
-                onError={(e) => { (e.target as HTMLImageElement).removeAttribute("crossorigin"); }}
               />
 
               {/* Prev button */}
@@ -946,7 +952,7 @@ export default function LandingGeneratorPage() {
 
             {/* Thumbnails strip */}
             <div className="flex items-center justify-center gap-2 mt-4 overflow-x-auto pb-2">
-              {imageSearchResults.map((url, i) => (
+              {imageSearchResults.map((img, i) => (
                 <button
                   key={i}
                   onClick={() => setImageModalIndex(i)}
@@ -955,7 +961,7 @@ export default function LandingGeneratorPage() {
                     i === imageModalIndex ? "border-indigo-500 ring-2 ring-indigo-500/50" : "border-white/20 opacity-60 hover:opacity-100"
                   )}
                 >
-                  <img src={url} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                  <img src={img.thumb} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                 </button>
               ))}
             </div>

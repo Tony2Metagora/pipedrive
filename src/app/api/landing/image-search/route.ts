@@ -46,7 +46,12 @@ export async function POST(request: Request) {
     }
 
     const json = await res.json();
-    const images: string[] = (json.images || []).map((img: { imageUrl: string }) => img.imageUrl);
+    const images = (json.images || []).map(
+      (img: { imageUrl: string; thumbnailUrl?: string }) => ({
+        url: img.imageUrl,
+        thumb: img.thumbnailUrl || img.imageUrl,
+      })
+    );
 
     return NextResponse.json({ data: images });
   } catch (error) {
