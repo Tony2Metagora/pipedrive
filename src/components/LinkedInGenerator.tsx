@@ -5,7 +5,7 @@ import {
   Sparkles, Loader2, Copy, Check, RefreshCw, Send,
   ImageIcon, Search, Download, AlertCircle, ChevronRight,
   Globe, Plus, Trash2, ExternalLink, CheckCircle2, Edit3,
-  Calendar, Clock,
+  Calendar, Clock, BarChart3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -19,10 +19,18 @@ interface Source {
   type: "site" | "youtube";
 }
 
+interface StatItem {
+  text: string;
+  source: string;
+  url: string;
+}
+
 interface SubjectItem {
   title: string;
   angle: string;
   source?: string;
+  url?: string;
+  stats?: StatItem[];
 }
 
 const THEMES = [
@@ -49,6 +57,7 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
   const [suggestLoading, setSuggestLoading] = useState(false);
   const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
   const [customSubject, setCustomSubject] = useState("");
+  const [statsLoadingIdx, setStatsLoadingIdx] = useState<number | null>(null);
 
   // Post
   const [generatedPost, setGeneratedPost] = useState("");
@@ -224,6 +233,29 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
       }
     } catch (err) { setError(String(err)); }
     finally { setRefineLoading(false); }
+  };
+
+  const handleSearchStats = async (subjectIdx: number) => {
+    if (!selectedTheme) return;
+    const subject = subjects[subjectIdx];
+    if (!subject) return;
+    setStatsLoadingIdx(subjectIdx);
+    setError(null);
+    try {
+      const res = await fetch("/api/linkedin/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "search-stats", theme: selectedTheme, subject: subject.title }),
+      });
+      const json = await res.json();
+      if (json.error) setError(json.error);
+      const stats = json.data?.stats || [];
+      setSubjects((prev) => prev.map((s, i) => i === subjectIdx ? { ...s, stats } : s));
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setStatsLoadingIdx(null);
+    }
   };
 
   const handleRefineHook = async (hook: string) => {
@@ -549,32 +581,73 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
           <h2 className="text-sm font-semibold text-gray-800 mb-1">Étape 3 — Choisis un sujet</h2>
           <p className="text-xs text-gray-400 mb-3">{subjects.length} sujets proposés</p>
 
-          <div className="space-y-2 mb-4 max-h-72 overflow-y-auto">
+          <div className="space-y-2 mb-4 max-h-[28rem] overflow-y-auto">
             {subjects.map((s, i) => (
-              <button
-                key={i}
-                onClick={() => { setSelectedSubject(s.title); setCustomSubject(""); }}
-                className={cn(
-                  "w-full text-left flex items-start gap-3 px-3 py-2.5 rounded-lg border transition-all cursor-pointer",
-                  selectedSubject === s.title
-                    ? "border-blue-500 bg-blue-50 text-blue-800"
-                    : "border-gray-200 bg-gray-50 text-gray-700 hover:border-blue-300 hover:bg-blue-50/50"
-                )}
-              >
-                <ChevronRight className={cn("w-4 h-4 flex-shrink-0 mt-0.5 transition-transform", selectedSubject === s.title && "text-blue-500 rotate-90")} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm">{s.title}</span>
-                    {s.source && (
-                      <span className={cn(
-                        "text-[9px] px-1.5 py-0.5 rounded-full whitespace-nowrap flex-shrink-0",
-                        s.source.includes("Temps") ? "bg-green-100 text-green-700" : "bg-purple-100 text-purple-700"
-                      )}>{s.source}</span>
+              <div key={i} className={cn(
+                "w-full text-left rounded-lg border transition-all",
+                selectedSubject === s.title
+                  ? "border-blue-500 bg-blue-50"
+                  : "border-gray-200 bg-gray-50 hover:border-blue-300 hover:bg-blue-50/50"
+              )}>
+                <button
+                  onClick={() => { setSelectedSubject(s.title); setCustomSubject(""); }}
+                  className="w-full text-left flex items-start gap-3 px-3 py-2.5 cursor-pointer"
+                >
+                  <ChevronRight className={cn("w-4 h-4 flex-shrink-0 mt-0.5 transition-transform", selectedSubject === s.title && "text-blue-500 rotate-90")} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={cn("text-sm", selectedSubject === s.title ? "text-blue-800" : "text-gray-700")}>{s.title}</span>
+                      {s.source && (
+                        <span className={cn(
+                          "text-[9px] px-1.5 py-0.5 rounded-full whitespace-nowrap flex-shrink-0",
+                          s.source.includes("Temps") ? "bg-green-100 text-green-700" : "bg-purple-100 text-purple-700"
+                        )}>{s.source}</span>
+                      )}
+                    </div>
+                    {s.angle && <span className="text-[10px] text-gray-400 block mt-0.5">{s.angle}</span>}
+                    {s.url && (
+                      <a href={s.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 text-[10px] text-blue-500 hover:text-blue-700 mt-0.5">
+                        <ExternalLink className="w-3 h-3" />{s.url.length > 60 ? s.url.slice(0, 60) + "…" : s.url}
+                      </a>
                     )}
                   </div>
-                  {s.angle && <span className="text-[10px] text-gray-400 block mt-0.5">{s.angle}</span>}
+                </button>
+
+                {/* Enrichir button + stats display */}
+                <div className="px-3 pb-2.5 pl-10">
+                  {!s.stats && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleSearchStats(i); }}
+                      disabled={statsLoadingIdx !== null}
+                      className="inline-flex items-center gap-1.5 text-[10px] font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-md px-2 py-1 cursor-pointer disabled:opacity-50 transition-colors"
+                    >
+                      {statsLoadingIdx === i ? <Loader2 className="w-3 h-3 animate-spin" /> : <BarChart3 className="w-3 h-3" />}
+                      {statsLoadingIdx === i ? "Recherche stats…" : "🔍 Enrichir avec stats"}
+                    </button>
+                  )}
+                  {s.stats && s.stats.length > 0 && (
+                    <div className="mt-1 space-y-1">
+                      <span className="text-[9px] font-semibold text-amber-700 uppercase">Stats trouvées :</span>
+                      {s.stats.map((st, j) => (
+                        <div key={j} className="flex items-start gap-1.5 text-[10px] text-gray-600 bg-white rounded px-2 py-1 border border-gray-100">
+                          <BarChart3 className="w-3 h-3 text-amber-500 flex-shrink-0 mt-0.5" />
+                          <div className="min-w-0">
+                            <span>{st.text}</span>
+                            {st.url && (
+                              <a href={st.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="ml-1 inline-flex items-center gap-0.5 text-blue-500 hover:text-blue-700">
+                                <ExternalLink className="w-2.5 h-2.5" />{st.source || "source"}
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {s.stats && s.stats.length === 0 && (
+                    <span className="text-[10px] text-gray-400 italic">Aucune stat trouvée pour ce sujet</span>
+                  )}
                 </div>
-              </button>
+              </div>
             ))}
           </div>
 

@@ -188,7 +188,8 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       }).join(", ");
 
       const sysPrompt = `Tu es un expert LinkedIn pour Tony, CEO de Metagora (startup IA retail/luxe). Style : ton direct, storytelling, données chiffrées, emojis modérés, 150-300 mots, jamais corporate.`;
-      const jsonFormat = `Réponds en JSON : {"subjects": [{"title": "...", "angle": "..."}, ...]}\nPas de markdown, juste le JSON.`;
+      const jsonFormatRT = `Réponds en JSON : {"subjects": [{"title": "...", "angle": "...", "url": "https://..."}, ...]}\nChaque sujet DOIT inclure l'URL exacte de l'article source trouvé.\nPas de markdown, juste le JSON.`;
+      const jsonFormatKB = `Réponds en JSON : {"subjects": [{"title": "...", "angle": "..."}, ...]}\nPas de markdown, juste le JSON.`;
 
       // Run BOTH in parallel:
       // A) gpt-5.4-pro + web_search → 2 sujets temps réel (slow but fresh)
@@ -199,7 +200,7 @@ Pas de markdown, pas de backticks, juste le JSON.`,
           { role: "system", content: sysPrompt },
           {
             role: "user",
-            content: `Recherche sur le web des articles récents des sources suivantes : ${sourceNames}.\nThème : "${themeInfo.emoji} ${themeInfo.name}" (${themeInfo.description}).\n\nTrouve exactement 2 sujets de posts LinkedIn inspirés d'articles RÉELS et RÉCENTS de ces sources.\nChaque sujet : titre accrocheur 10-20 mots + bref angle avec l'URL ou la source de l'article trouvé.\n\n${jsonFormat}`,
+            content: `Recherche sur le web des articles récents des sources suivantes : ${sourceNames}.\nThème : "${themeInfo.emoji} ${themeInfo.name}" (${themeInfo.description}).\n\nTrouve exactement 2 sujets de posts LinkedIn inspirés d'articles RÉELS et RÉCENTS de ces sources.\nChaque sujet DOIT contenir : titre accrocheur 10-20 mots + bref angle + l'URL EXACTE de l'article trouvé.\n\n${jsonFormatRT}`,
           },
         ], 1000, [{ type: "web_search_preview" }]),
 
@@ -208,13 +209,13 @@ Pas de markdown, pas de backticks, juste le JSON.`,
           { role: "system", content: sysPrompt },
           {
             role: "user",
-            content: `Je suis les sources suivantes : ${sourceNames}.\nThème : "${themeInfo.emoji} ${themeInfo.name}" (${themeInfo.description}).\n\nSuggère exactement 3 sujets de posts LinkedIn inspirés de ces sources et de l'actualité de ce thème.\nChaque sujet : titre accrocheur 10-20 mots + bref angle.\n\n${jsonFormat}`,
+            content: `Je suis les sources suivantes : ${sourceNames}.\nThème : "${themeInfo.emoji} ${themeInfo.name}" (${themeInfo.description}).\n\nSuggère exactement 3 sujets de posts LinkedIn inspirés de ces sources et de l'actualité de ce thème.\nChaque sujet : titre accrocheur 10-20 mots + bref angle.\n\n${jsonFormatKB}`,
           },
         ], 1000),
       ]);
 
       // Parse results
-      type Subject = { title: string; angle: string; source?: string };
+      type Subject = { title: string; angle: string; source?: string; url?: string };
       const subjects: Subject[] = [];
 
       // Parse knowledge base (fast, should always work)
@@ -226,7 +227,9 @@ Pas de markdown, pas de backticks, juste le JSON.`,
           for (const s of (Array.isArray(items) ? items : []).slice(0, 3)) {
             subjects.push({ title: s.title || s, angle: s.angle || "", source: "🧠 Base IA" });
           }
-        } catch { /* ignore parse errors */ }
+        } catch (e) { console.error("Knowledge base parse error:", e, knowledgeResult.value?.slice?.(0, 300)); }
+      } else if (knowledgeResult.status === "rejected") {
+        console.error("Knowledge base call failed:", knowledgeResult.reason);
       }
 
       // Parse real-time (slow, may timeout)
@@ -236,9 +239,11 @@ Pas de markdown, pas de backticks, juste le JSON.`,
           const parsed = JSON.parse(cleaned);
           const items = parsed.subjects || parsed;
           for (const s of (Array.isArray(items) ? items : []).slice(0, 2)) {
-            subjects.push({ title: s.title || s, angle: s.angle || "", source: "🌐 Temps réel" });
+            subjects.push({ title: s.title || s, angle: s.angle || "", source: "🌐 Temps réel", url: s.url || "" });
           }
-        } catch { /* ignore parse errors */ }
+        } catch (e) { console.error("Real-time parse error:", e, realtimeResult.value?.slice?.(0, 300)); }
+      } else if (realtimeResult.status === "rejected") {
+        console.error("Real-time (gpt-5.4-pro) call FAILED:", realtimeResult.reason);
       }
 
       // If we got nothing at all, return error
@@ -384,6 +389,48 @@ Réécris le post modifié.`,
       ], 2000);
 
       return NextResponse.json({ data: { post: refined } });
+    }
+
+    // ── search-stats: enrich a subject with stats + sources via gpt-5.4-pro web_search ──
+    if (action === "search-stats") {
+      const { theme, subject } = body;
+      const themeInfo = THEMES[theme as string];
+      if (!themeInfo || !subject) return NextResponse.json({ error: "Thème et sujet requis" }, { status: 400 });
+
+      try {
+        const raw = await askAzureAI([
+          { role: "system", content: `Tu es un expert LinkedIn data-driven. Tony, CEO de Metagora (startup IA retail/luxe), a besoin de statistiques sourcées pour enrichir ses posts.` },
+          {
+            role: "user",
+            content: `Recherche sur le web des statistiques, chiffres et données récentes en lien avec ce sujet de post LinkedIn :
+
+Sujet : "${subject}"
+Thème : "${themeInfo.emoji} ${themeInfo.name}" (${themeInfo.description})
+
+Trouve 3 à 5 statistiques pertinentes avec leurs sources.
+Chaque stat doit inclure : le chiffre, le contexte, et l'URL de la source.
+
+Réponds en JSON : {"stats": [{"text": "...", "source": "nom de la source", "url": "https://..."}]}
+Pas de markdown, juste le JSON.`,
+          },
+        ], 1000, [{ type: "web_search_preview" }]);
+
+        let stats: { text: string; source: string; url: string }[] = [];
+        if (raw) {
+          try {
+            const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+            const parsed = JSON.parse(cleaned);
+            stats = parsed.stats || [];
+          } catch (e) {
+            console.error("Stats parse error:", e, raw?.slice(0, 300));
+          }
+        }
+
+        return NextResponse.json({ data: { stats } });
+      } catch (error) {
+        console.error("search-stats error:", error);
+        return NextResponse.json({ data: { stats: [] }, error: "La recherche de stats a échoué (timeout probable)" });
+      }
     }
 
     return NextResponse.json({ error: "Action invalide" }, { status: 400 });
