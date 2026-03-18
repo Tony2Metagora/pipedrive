@@ -265,6 +265,106 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       }
     }
 
+    // ── import-event: transform a pasted post into Metagora event discourse ──
+    if (action === "import-event") {
+      const { originalPost, context } = body;
+      if (!originalPost) return NextResponse.json({ error: "Post original requis" }, { status: 400 });
+
+      const result = await askAzureFast([
+        {
+          role: "system",
+          content: `Tu es le ghostwriter LinkedIn de Tony, CEO de Metagora.
+
+${EDITORIAL_LINE}
+
+${STYLE_EXAMPLES}
+
+MISSION : Tony a assisté ou est intervenu à un événement (en ligne ou en présentiel). Quelqu'un a publié un post LinkedIn sur cet événement (qui peut ou non taguer Tony/Metagora). Tu dois transformer ce post d'inspiration en un post LinkedIn de Tony qui :
+1. Raconte SON expérience à cet événement (point de vue personnel, première personne)
+2. Met en valeur les rencontres, insights et moments marquants
+3. Fait le lien avec Metagora / Simsell quand c'est pertinent (sans forcer)
+4. Respecte fidèlement le style de Tony (ton direct, storytelling, emojis visuels)
+5. Garde les données/chiffres intéressants du post original
+6. Entre 150 et 300 mots
+7. Termine par une question ouverte pour l'engagement
+8. Hashtags pertinents en fin de post
+- IMPORTANT pour le thème "IA dans la formation" : le e-learning (SCORM, LMS) n'est PAS obsolète. Ton constructif : constat terrain + solution IA.`,
+        },
+        {
+          role: "user",
+          content: `Voici le post LinkedIn d'inspiration sur l'événement :
+---
+${originalPost}
+---
+${context ? `\nContexte supplémentaire de Tony : ${context}` : ""}
+
+Transforme-le en post LinkedIn de Tony (point de vue Metagora).
+Réponds en JSON : {"post": "le post complet", "imagePrompt": "prompt image en anglais pour Pexels/Unsplash"}
+Pas de markdown, juste le JSON.`,
+        },
+      ], 2500);
+
+      try {
+        const cleaned = result.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+        const parsed = JSON.parse(cleaned);
+        return NextResponse.json({ data: parsed });
+      } catch {
+        return NextResponse.json({ data: { post: result, imagePrompt: "" } });
+      }
+    }
+
+    // ── import-inspiration: adapt a pasted post to Tony/Metagora style ──
+    if (action === "import-inspiration") {
+      const { originalPost, theme, context } = body;
+      const themeInfo = THEMES[theme as string];
+      if (!originalPost) return NextResponse.json({ error: "Post original requis" }, { status: 400 });
+      if (!themeInfo) return NextResponse.json({ error: "Thème requis" }, { status: 400 });
+
+      const result = await askAzureFast([
+        {
+          role: "system",
+          content: `Tu es le ghostwriter LinkedIn de Tony, CEO de Metagora.
+
+${EDITORIAL_LINE}
+
+${STYLE_EXAMPLES}
+
+MISSION : Tony a trouvé un post LinkedIn inspirant et veut s'en inspirer pour écrire son propre post sur le thème "${themeInfo.emoji} ${themeInfo.name}". Tu dois :
+1. Extraire les idées clés, données, insights du post original
+2. Réécrire un post ORIGINAL pour Tony (pas un copier-coller, une vraie réécriture avec son angle et sa voix)
+3. Adapter au thème "${themeInfo.name}" : ${themeInfo.description}
+4. Ajouter la perspective Metagora / Simsell quand c'est pertinent
+5. Respecter fidèlement le style de Tony (ton direct, storytelling, emojis visuels)
+6. Entre 150 et 300 mots
+7. Commence par une accroche forte
+8. Termine par une question ouverte
+9. Hashtags pertinents en fin de post
+- IMPORTANT pour le thème "IA dans la formation" : le e-learning (SCORM, LMS) n'est PAS obsolète. Ton constructif : constat terrain + solution IA.`,
+        },
+        {
+          role: "user",
+          content: `Post d'inspiration :
+---
+${originalPost}
+---
+Thème à traiter : ${themeInfo.emoji} ${themeInfo.name}
+${context ? `\nContexte / angle souhaité par Tony : ${context}` : ""}
+
+Réécris en post LinkedIn de Tony.
+Réponds en JSON : {"post": "le post complet", "imagePrompt": "prompt image en anglais pour Pexels/Unsplash"}
+Pas de markdown, juste le JSON.`,
+        },
+      ], 2500);
+
+      try {
+        const cleaned = result.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+        const parsed = JSON.parse(cleaned);
+        return NextResponse.json({ data: parsed });
+      } catch {
+        return NextResponse.json({ data: { post: result, imagePrompt: "" } });
+      }
+    }
+
     // ── generate: full post + image prompt ───────────────
     if (action === "generate") {
       const { theme, subject } = body;

@@ -51,6 +51,18 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
   const [newSourceType, setNewSourceType] = useState<"site" | "youtube">("site");
   const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
 
+  // Mode: create or import
+  type Mode = "create" | "import";
+  type ImportType = "event" | "inspiration";
+  const [mode, setMode] = useState<Mode>("create");
+  const [importType, setImportType] = useState<ImportType>("event");
+  const [importPost, setImportPost] = useState("");
+  const [importContext, setImportContext] = useState("");
+  const [importLoading, setImportLoading] = useState(false);
+  const [importStats, setImportStats] = useState<StatItem[]>([]);
+  const [importStatsLoading, setImportStatsLoading] = useState(false);
+  const [importStatsDetail, setImportStatsDetail] = useState("");
+
   // Theme & subject
   const [selectedTheme, setSelectedTheme] = useState<string | null>(null);
   const [subjects, setSubjects] = useState<SubjectItem[]>([]);
@@ -142,6 +154,116 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
     setImagePrompt("");
     setError(null);
     setSelectedSourceIds(new Set());
+    setImportPost("");
+    setImportContext("");
+  };
+
+  const handleModeSwitch = (newMode: Mode) => {
+    setMode(newMode);
+    setSelectedTheme(null);
+    setSelectedSubject(null);
+    setSubjects([]);
+    setCustomSubject("");
+    setGeneratedPost("");
+    setHooks([]);
+    setSelectedHook(null);
+    setImagePrompt("");
+    setError(null);
+    setSelectedSourceIds(new Set());
+    setImportPost("");
+    setImportContext("");
+  };
+
+  const handleImportGenerate = async () => {
+    if (!importPost.trim()) return;
+    if (importType === "inspiration" && !selectedTheme) { setError("Choisis un thème pour l'inspiration"); return; }
+
+    setImportLoading(true);
+    setGeneratedPost("");
+    setHooks([]);
+    setSelectedHook(null);
+    setError(null);
+
+    try {
+      const action = importType === "event" ? "import-event" : "import-inspiration";
+      const res = await fetch("/api/linkedin/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          originalPost: importPost,
+          theme: selectedTheme || undefined,
+          context: importContext || undefined,
+        }),
+      });
+      const json = await res.json();
+      if (json.error) { setError(json.error); return; }
+      const post = json.data?.post || "";
+      const imgPrompt = json.data?.imagePrompt || "";
+      setGeneratedPost(post);
+      setImagePrompt(imgPrompt);
+      // Auto-generate hooks
+      if (post) {
+        setHooksLoading(true);
+        try {
+          const hRes = await fetch("/api/linkedin/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "hooks", post }),
+          });
+          const hJson = await hRes.json();
+          const hooksList = hJson.data?.hooks || [];
+          setHooks(hooksList);
+          if (hooksList.length > 0) setSelectedHook(hooksList[0]);
+        } catch { /* ignore */ }
+        finally { setHooksLoading(false); }
+      }
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
+  const handleImportSearchStats = async () => {
+    if (!generatedPost) return;
+    setImportStatsLoading(true);
+    setImportStatsDetail("🌐 Recherche web via gpt-5.4…");
+    setImportStats([]);
+    setSelectedStats(new Set());
+    try {
+      // Use the first 80 chars of the post as subject for stats search
+      const subject = generatedPost.split("\n").filter(Boolean).slice(0, 2).join(" ").slice(0, 120);
+      const res = await fetch("/api/linkedin/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "search-stats", theme: selectedTheme || "ia-formation", subject }),
+      });
+      const json = await res.json();
+      const stats = json.data?.stats || [];
+      const src = json.data?.statsSource || "web";
+      if (stats.length > 0) {
+        setImportStatsDetail(src === "web" ? `✅ ${stats.length} stats trouvées via web` : `🧠 ${stats.length} stats (base IA)`);
+      } else {
+        setImportStatsDetail("⚠️ Aucune stat trouvée");
+      }
+      setImportStats(stats);
+    } catch (err) {
+      setImportStatsDetail("❌ Erreur de recherche");
+      setError(String(err));
+    } finally {
+      setImportStatsLoading(false);
+    }
+  };
+
+  const handleImportIntegrateStats = () => {
+    if (selectedStats.size === 0 || !generatedPost) return;
+    const statsBlock = Array.from(selectedStats).map((s) => `📊 ${s}`).join("\n");
+    const lines = generatedPost.split("\n");
+    const lastNonEmpty = lines.length - 1;
+    lines.splice(Math.max(lastNonEmpty - 1, 1), 0, "\n" + statsBlock + "\n");
+    setGeneratedPost(lines.join("\n"));
+    setSelectedStats(new Set());
   };
 
   const updateStep = (idx: number, updates: Partial<LoadingStep>) => {
@@ -491,33 +613,134 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
         </div>
       )}
 
-      {/* ─── Step 1: Theme ────────────────────────────── */}
+      {/* ─── Step 1: Mode + Theme ─────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-5">
-        <h2 className="text-sm font-semibold text-gray-800 mb-1">Étape 1 — Choisis un thème</h2>
-        <p className="text-xs text-gray-400 mb-4">Basé sur ta ligne éditoriale</p>
+        <h2 className="text-sm font-semibold text-gray-800 mb-1">Étape 1 — Mode</h2>
+        <p className="text-xs text-gray-400 mb-3">Crée un post original ou importe une inspiration</p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {THEMES.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => handleSelectTheme(t.key)}
-              className={cn(
-                "text-left p-3 sm:p-4 rounded-xl border-2 transition-all cursor-pointer",
-                selectedTheme === t.key
-                  ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200"
-                  : "border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50"
-              )}
-            >
-              <span className="text-lg">{t.emoji}</span>
-              <h3 className="text-sm font-semibold text-gray-800 mt-1">{t.name}</h3>
-              <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">{t.desc}</p>
-            </button>
-          ))}
+        {/* Mode toggle */}
+        <div className="flex gap-2 mb-4">
+          <button
+            onClick={() => handleModeSwitch("create")}
+            className={cn(
+              "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border-2 text-sm font-semibold transition-all cursor-pointer",
+              mode === "create"
+                ? "border-blue-500 bg-blue-50 text-blue-800 ring-2 ring-blue-200"
+                : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
+            )}
+          >
+            <Sparkles className="w-4 h-4" />
+            Créer un post
+          </button>
+          <button
+            onClick={() => handleModeSwitch("import")}
+            className={cn(
+              "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border-2 text-sm font-semibold transition-all cursor-pointer",
+              mode === "import"
+                ? "border-purple-500 bg-purple-50 text-purple-800 ring-2 ring-purple-200"
+                : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
+            )}
+          >
+            <Download className="w-4 h-4" />
+            Importer une inspiration
+          </button>
         </div>
+
+        {/* Theme selection — shown for both modes (for create always, for import only in inspiration) */}
+        {(mode === "create" || (mode === "import" && importType === "inspiration")) && (
+          <>
+            <p className="text-[10px] text-gray-400 uppercase font-semibold mb-2">
+              {mode === "create" ? "Choisis un thème éditorial" : "Thème pour adapter l'inspiration"}
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {THEMES.map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => handleSelectTheme(t.key)}
+                  className={cn(
+                    "text-left p-3 sm:p-4 rounded-xl border-2 transition-all cursor-pointer",
+                    selectedTheme === t.key
+                      ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200"
+                      : "border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50"
+                  )}
+                >
+                  <span className="text-lg">{t.emoji}</span>
+                  <h3 className="text-sm font-semibold text-gray-800 mt-1">{t.name}</h3>
+                  <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">{t.desc}</p>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
-      {/* ─── Step 2: Sources ─────────────────────────── */}
-      {selectedTheme && (
+      {/* ─── Import mode: paste post + options ────────── */}
+      {mode === "import" && (
+        <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-5">
+          <h2 className="text-sm font-semibold text-gray-800 mb-1">Étape 2 — Importer un post</h2>
+          <p className="text-xs text-gray-400 mb-3">Copie-colle un post LinkedIn existant</p>
+
+          {/* Import type selector */}
+          <div className="flex gap-2 mb-4">
+            <button
+              onClick={() => { setImportType("event"); setSelectedTheme(null); }}
+              className={cn(
+                "flex-1 text-left p-3 rounded-xl border-2 transition-all cursor-pointer",
+                importType === "event"
+                  ? "border-amber-500 bg-amber-50 ring-1 ring-amber-200"
+                  : "border-gray-200 bg-white hover:border-gray-300"
+              )}
+            >
+              <span className="text-lg">🎤</span>
+              <h3 className="text-sm font-semibold text-gray-800 mt-1">Événement</h3>
+              <p className="text-[10px] text-gray-500 mt-1">Post d&apos;un event où Metagora était présent → le transformer en discours Metagora</p>
+            </button>
+            <button
+              onClick={() => setImportType("inspiration")}
+              className={cn(
+                "flex-1 text-left p-3 rounded-xl border-2 transition-all cursor-pointer",
+                importType === "inspiration"
+                  ? "border-emerald-500 bg-emerald-50 ring-1 ring-emerald-200"
+                  : "border-gray-200 bg-white hover:border-gray-300"
+              )}
+            >
+              <span className="text-lg">💡</span>
+              <h3 className="text-sm font-semibold text-gray-800 mt-1">Inspiration</h3>
+              <p className="text-[10px] text-gray-500 mt-1">Post inspirant → l&apos;adapter au style Tony / Metagora sur un thème choisi</p>
+            </button>
+          </div>
+
+          {/* Paste area */}
+          <textarea
+            value={importPost}
+            onChange={(e) => setImportPost(e.target.value)}
+            placeholder="Colle le post LinkedIn ici..."
+            rows={6}
+            className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-300 outline-none resize-y mb-3"
+          />
+
+          {/* Optional context */}
+          <input
+            type="text"
+            value={importContext}
+            onChange={(e) => setImportContext(e.target.value)}
+            placeholder={importType === "event" ? "Contexte : ton rôle à l'event, avec qui tu étais, ce que tu as retenu..." : "Angle souhaité, point de vue perso, ce qui t'a marqué..."}
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-300 outline-none mb-4"
+          />
+
+          <button
+            onClick={handleImportGenerate}
+            disabled={!importPost.trim() || importLoading || (importType === "inspiration" && !selectedTheme)}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-purple-600 rounded-xl hover:bg-purple-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
+          >
+            {importLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            {importLoading ? "Transformation en cours…" : importType === "event" ? "Transformer en post Metagora" : "Adapter à mon style"}
+          </button>
+        </div>
+      )}
+
+      {/* ─── Step 2 (create mode): Sources ─────────────── */}
+      {mode === "create" && selectedTheme && (
         <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-5">
           <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
             <div>
@@ -844,10 +1067,85 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
         </div>
       )}
 
+      {/* ─── Import mode: Stats enrichment ──────────────── */}
+      {mode === "import" && generatedPost && (
+        <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-5">
+          <h2 className="text-sm font-semibold text-gray-800 mb-1">Étape 3 — Enrichir avec des stats</h2>
+          <p className="text-xs text-gray-400 mb-3">Recherche de statistiques sourcées pour renforcer ton post (optionnel)</p>
+
+          {importStats.length === 0 && !importStatsLoading && (
+            <button
+              onClick={handleImportSearchStats}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg cursor-pointer transition-colors"
+            >
+              <BarChart3 className="w-4 h-4" />
+              🔍 Rechercher des stats
+            </button>
+          )}
+
+          {importStatsLoading && (
+            <div className="flex items-center gap-2 text-sm text-blue-600 py-2">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span className="font-medium">{importStatsDetail}</span>
+            </div>
+          )}
+
+          {!importStatsLoading && importStatsDetail && (
+            <p className="text-xs text-gray-500 mb-2">{importStatsDetail}</p>
+          )}
+
+          {importStats.length > 0 && (
+            <div className="space-y-1.5 mt-2">
+              {selectedStats.size > 0 && (
+                <button
+                  onClick={handleImportIntegrateStats}
+                  className="mb-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors"
+                >
+                  ✚ Intégrer {selectedStats.size} stat(s) au post
+                </button>
+              )}
+              {importStats.map((st, j) => (
+                <button
+                  key={j}
+                  onClick={() => toggleStat(st.text)}
+                  className={cn(
+                    "w-full text-left flex items-start gap-2 text-xs rounded-lg px-3 py-2 border transition-all cursor-pointer",
+                    selectedStats.has(st.text)
+                      ? "bg-blue-50 border-blue-300 text-blue-800"
+                      : "bg-white border-gray-100 text-gray-600 hover:border-blue-200"
+                  )}
+                >
+                  <div className={cn(
+                    "w-4 h-4 rounded border flex-shrink-0 mt-0.5 flex items-center justify-center",
+                    selectedStats.has(st.text) ? "bg-blue-600 border-blue-600" : "border-gray-300"
+                  )}>
+                    {selectedStats.has(st.text) && <Check className="w-3 h-3 text-white" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <span>{st.text}</span>
+                    {(st.url || st.source) && (
+                      <span className="ml-1 text-[9px]">
+                        {st.url ? (
+                          <a href={st.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-0.5 text-blue-500 hover:text-blue-700">
+                            <ExternalLink className="w-2.5 h-2.5" />{st.source || "source"}
+                          </a>
+                        ) : (
+                          <span className="text-gray-400">{st.source}</span>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ─── Step 4: Hooks ───────────────────────────── */}
       {generatedPost && (
         <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-5">
-          <h2 className="text-sm font-semibold text-gray-800 mb-1">Étape 4 — Choisis une accroche</h2>
+          <h2 className="text-sm font-semibold text-gray-800 mb-1">{mode === "import" ? "Étape 4" : "Étape 4"} — Choisis une accroche</h2>
           <p className="text-xs text-gray-400 mb-3">Les 2-3 premières lignes visibles avant "…voir plus"</p>
 
           {hooksLoading ? (
