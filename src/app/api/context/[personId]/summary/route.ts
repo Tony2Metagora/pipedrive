@@ -5,7 +5,7 @@
 
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/api-guard";
-import { askAzureAI } from "@/lib/azure-ai";
+import { askAzureFast } from "@/lib/azure-ai";
 
 export async function POST(request: Request) {
   const guard = await requireAdmin();
@@ -29,7 +29,7 @@ NEXT STEPS & ACTIONS
 
 RÈGLES : Texte brut sans formatage markdown. Pas de *, #, -. Phrases courtes et factuelles. Si une info n'est pas disponible, écris "Non mentionné".`;
 
-    const summary = await askAzureAI([
+    const summary = await askAzureFast([
       { role: "system", content: systemMessage },
       { role: "user", content: `Voici le contexte du contact :\n\n${context}` },
     ], 800) || "Impossible de générer un résumé.";

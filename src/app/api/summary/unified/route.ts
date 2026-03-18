@@ -8,7 +8,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/api-guard";
-import { askAzureAI } from "@/lib/azure-ai";
+import { askAzureFast } from "@/lib/azure-ai";
 
 interface GmailMessage {
   id: string;
@@ -165,7 +165,7 @@ RÈGLES : Phrases courtes et factuelles. Base-toi UNIQUEMENT sur le contenu des 
     const userContent = emailTexts;
 
     // 3. Call Azure OpenAI
-    const rawSummary = await askAzureAI([
+    const rawSummary = await askAzureFast([
       { role: "system", content: systemPrompt },
       { role: "user", content: userContent },
     ], 1200) || "Impossible de générer le résumé.";

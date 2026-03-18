@@ -11,7 +11,7 @@
 
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-guard";
-import { askAzureAI } from "@/lib/azure-ai";
+import { askAzureFast } from "@/lib/azure-ai";
 
 const SERPER_API_KEY = process.env.SERPER_API_KEY;
 
@@ -40,7 +40,7 @@ interface StoreResult {
 async function askStoreAI(
   messages: { role: string; content: string }[]
 ): Promise<StoreResult> {
-  const raw = await askAzureAI(messages, 800);
+  const raw = await askAzureFast(messages, 800);
 
   if (!raw || raw === "{}") {
     return { storeName: "", storeAddress: "", notFound: true };

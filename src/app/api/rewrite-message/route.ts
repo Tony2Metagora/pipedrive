@@ -6,7 +6,7 @@
 
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/api-guard";
-import { askAzureAI } from "@/lib/azure-ai";
+import { askAzureFast } from "@/lib/azure-ai";
 
 export async function POST(request: Request) {
   const guard = await requireAdmin();
@@ -29,7 +29,7 @@ REGLES :
 - Retourne UNIQUEMENT le message réécrit, rien d'autre (pas de "Voici le message réécrit :" etc.)
 - Signe "Tony" si le message original est signé`;
 
-    const rewritten = await askAzureAI([
+    const rewritten = await askAzureFast([
       { role: "system", content: systemMessage },
       { role: "user", content: `Message actuel :\n---\n${message}\n---\n\nInstruction de modification :\n${prompt}` },
     ], 1500) || message;

@@ -6,7 +6,7 @@
 
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/api-guard";
-import { askAzureAI } from "@/lib/azure-ai";
+import { askAzureFast } from "@/lib/azure-ai";
 
 export async function POST(request: Request) {
   const guard = await requireAdmin();
@@ -35,7 +35,7 @@ ${currentEmail}
 
 Instruction de modification : ${prompt}`;
 
-    const raw = (await askAzureAI([
+    const raw = (await askAzureFast([
       { role: "system", content: systemPrompt },
       { role: "user", content: userContent },
     ], 800)).replace(/[*#]/g, "");

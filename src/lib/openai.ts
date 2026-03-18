@@ -77,9 +77,9 @@ ${userPrompt ? `Instructions supplémentaires : ${userPrompt}` : "Adapte le temp
 
 Réponds UNIQUEMENT avec le texte du message, sans commentaire ni explication.`;
 
-  // Use shared askAzureAI helper (Responses API)
-  const { askAzureAI } = await import("@/lib/azure-ai");
-  return await askAzureAI([
+  // Use shared askAzureFast helper (Chat Completions, fast)
+  const { askAzureFast } = await import("@/lib/azure-ai");
+  return await askAzureFast([
     { role: "system", content: systemMessage },
     { role: "user", content: userMessage },
   ], 1000);

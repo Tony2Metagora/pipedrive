@@ -8,7 +8,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/api-guard";
-import { askAzureAI } from "@/lib/azure-ai";
+import { askAzureFast } from "@/lib/azure-ai";
 
 interface GmailMessage {
   id: string;
@@ -152,7 +152,7 @@ NEXT STEPS & ACTIONS
 RÈGLES : Texte brut sans formatage markdown. Pas de *, #, -. Phrases courtes et factuelles. Si une info n'est pas disponible, écris "Non mentionné dans les échanges".`;
 
     // 4. Call Azure OpenAI
-    const summary = await askAzureAI([
+    const summary = await askAzureFast([
       { role: "system", content: systemPrompt },
       { role: "user", content: emailsText },
     ], 600) || "Impossible de générer le résumé.";
