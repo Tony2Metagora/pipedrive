@@ -46,7 +46,7 @@ function extractTextBody(payload: GmailMessageDetail["payload"]): string {
 const ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT!;
 const API_KEY = process.env.AZURE_OPENAI_API_KEY!;
 const API_VERSION = process.env.AZURE_OPENAI_API_VERSION || "2024-12-01-preview";
-const DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.2-chat-2";
+const DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.4-pro";
 
 export async function POST(request: Request) {
   const guard = await requireAdmin();

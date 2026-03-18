@@ -154,7 +154,7 @@ RÈGLES : Texte brut sans formatage markdown. Pas de *, #, -. Phrases courtes et
     const endpoint = process.env.AZURE_OPENAI_ENDPOINT!;
     const apiKey = process.env.AZURE_OPENAI_API_KEY!;
     const apiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-12-01-preview";
-    const deployment = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.2-chat-2";
+    const deployment = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.4-pro";
 
     const aiRes = await fetch(
       `${endpoint}openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`,

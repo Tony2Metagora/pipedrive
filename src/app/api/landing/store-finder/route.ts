@@ -15,7 +15,7 @@ import { requireAuth } from "@/lib/api-guard";
 const ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT!;
 const API_KEY = process.env.AZURE_OPENAI_API_KEY!;
 const API_VERSION = process.env.AZURE_OPENAI_API_VERSION || "2024-12-01-preview";
-const DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.2-chat-2";
+const DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.4-pro";
 const SERPER_API_KEY = process.env.SERPER_API_KEY;
 
 export const dynamic = "force-dynamic";

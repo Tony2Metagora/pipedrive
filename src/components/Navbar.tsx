@@ -5,8 +5,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import {
-  LayoutDashboard, Upload, LogOut, TrendingUp, Users, Globe,
-  Database, Settings, ChevronDown, User, Linkedin,
+  LayoutDashboard, LogOut, TrendingUp, Users, Globe,
+  Database, Settings, ChevronDown, Linkedin,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePermissions, canRead } from "@/hooks/usePermissions";
@@ -18,7 +18,6 @@ const NAV_ITEMS: Array<{ href: string; label: string; icon: typeof Globe; viewKe
   { href: "/dashboard", label: "Affaires", icon: LayoutDashboard, viewKey: "dashboard" },
   { href: "/prospects", label: "Prospects", icon: Users, viewKey: "prospects" },
   { href: "/pipeline", label: "Pipeline", icon: TrendingUp, viewKey: "pipeline" },
-  { href: "/import", label: "Import", icon: Upload, viewKey: "import" },
   { href: "/scrapping", label: "Scrapping", icon: Database, viewKey: "scrapping" },
 ];
 
@@ -47,10 +46,8 @@ export default function Navbar() {
     <nav className="bg-white border-b border-gray-200 sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-14">
-          {/* Logo */}
-          <Link href="/dashboard" className="flex items-center gap-2">
-            <span className="font-semibold text-lg text-gray-900">Metagora</span>
-          </Link>
+          {/* Spacer */}
+          <div className="w-4" />
 
           {/* Navigation */}
           <div className="flex items-center gap-1">
