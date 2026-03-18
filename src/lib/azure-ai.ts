@@ -35,11 +35,11 @@ export async function askAzureAI(
   if (systemMsg) input.push({ role: "developer", content: systemMsg });
   for (const m of otherMsgs) input.push({ role: m.role, content: m.content });
 
-  const responsesUrl = `${ENDPOINT}openai/deployments/${DEPLOYMENT}/responses?api-version=2025-03-01-preview`;
+  const responsesUrl = `${ENDPOINT}openai/responses?api-version=2025-04-01-preview`;
   const responsesRes = await fetch(responsesUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json", "api-key": API_KEY },
-    body: JSON.stringify({ input, max_output_tokens: maxTokens }),
+    body: JSON.stringify({ model: DEPLOYMENT, input, max_output_tokens: maxTokens }),
   });
 
   if (!responsesRes.ok) {

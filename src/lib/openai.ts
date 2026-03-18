@@ -101,11 +101,12 @@ Réponds UNIQUEMENT avec le texte du message, sans commentaire ni explication.`;
   }
 
   // 2) Fallback to Responses API (gpt-5.4-pro etc.)
-  const responsesUrl = `${ENDPOINT}openai/deployments/${DEPLOYMENT}/responses?api-version=2025-03-01-preview`;
+  const responsesUrl = `${ENDPOINT}openai/responses?api-version=2025-04-01-preview`;
   const responsesRes = await fetch(responsesUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json", "api-key": API_KEY },
     body: JSON.stringify({
+      model: DEPLOYMENT,
       input: [
         { role: "developer", content: systemMessage },
         { role: "user", content: userMessage },
