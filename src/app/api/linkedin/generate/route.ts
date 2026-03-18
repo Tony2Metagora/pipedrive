@@ -11,11 +11,7 @@
 
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-guard";
-
-const ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT!;
-const API_KEY = process.env.AZURE_OPENAI_API_KEY!;
-const API_VERSION = process.env.AZURE_OPENAI_API_VERSION || "2024-12-01-preview";
-const DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.4-pro";
+import { askAzureAI } from "@/lib/azure-ai";
 
 export const dynamic = "force-dynamic";
 
@@ -106,29 +102,6 @@ const THEMES: Record<string, { name: string; description: string; emoji: string 
   },
 };
 
-/* ── AI helper ───────────────────────────────────────────── */
-
-async function askAI(
-  messages: { role: string; content: string }[],
-  maxTokens = 1500
-): Promise<string> {
-  const url = `${ENDPOINT}openai/deployments/${DEPLOYMENT}/chat/completions?api-version=${API_VERSION}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "api-key": API_KEY },
-    body: JSON.stringify({ messages, max_completion_tokens: maxTokens }),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    console.error("Azure OpenAI error:", res.status, err);
-    throw new Error(`Azure OpenAI ${res.status}: ${err.slice(0, 200)}`);
-  }
-
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content?.trim() || "";
-}
-
 /* ── Scrape helper — fetch page text content ─────────────── */
 
 async function scrapeUrl(url: string): Promise<string> {
@@ -175,7 +148,7 @@ export async function POST(request: Request) {
       const themeInfo = THEMES[theme as string];
       if (!themeInfo) return NextResponse.json({ error: "Thème invalide" }, { status: 400 });
 
-      const result = await askAI([
+      const result = await askAzureAI([
         {
           role: "system",
           content: `Tu es un expert LinkedIn et content strategist pour Tony, CEO de Metagora.\n\n${EDITORIAL_LINE}\n\n${STYLE_EXAMPLES}`,
@@ -223,7 +196,7 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       let allContent = scrapedContents.join("\n\n");
       if (allContent.length > 4000) allContent = allContent.slice(0, 4000) + "\n[...tronqué]";
 
-      const result = await askAI([
+      const result = await askAzureAI([
         {
           role: "system",
           content: `Tu es un expert LinkedIn pour Tony, CEO de Metagora (startup IA retail/luxe). Style : ton direct, storytelling, données chiffrées, emojis modérés, 150-300 mots, jamais corporate.`,
@@ -249,7 +222,7 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       const themeInfo = THEMES[theme as string];
       if (!themeInfo || !subject) return NextResponse.json({ error: "Thème et sujet requis" }, { status: 400 });
 
-      const result = await askAI([
+      const result = await askAzureAI([
         {
           role: "system",
           content: `Tu es le ghostwriter LinkedIn de Tony, CEO de Metagora.
@@ -294,7 +267,7 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       const { post } = body;
       if (!post) return NextResponse.json({ error: "Post requis" }, { status: 400 });
 
-      const result = await askAI([
+      const result = await askAzureAI([
         {
           role: "system",
           content: `Tu es un expert en copywriting LinkedIn.
@@ -332,7 +305,7 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       const { hook, instructions } = body;
       if (!hook || !instructions) return NextResponse.json({ error: "Hook et instructions requis" }, { status: 400 });
 
-      const refined = await askAI([
+      const refined = await askAzureAI([
         {
           role: "system",
           content: `Tu es un expert copywriting LinkedIn. Modifie l'accroche selon les instructions.\n\n${HOOKS_BEST_PRACTICES}`,
@@ -351,7 +324,7 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       const { currentPost, instructions } = body;
       if (!currentPost || !instructions) return NextResponse.json({ error: "Post actuel et instructions requis" }, { status: 400 });
 
-      const refined = await askAI([
+      const refined = await askAzureAI([
         {
           role: "system",
           content: `Tu es le ghostwriter LinkedIn de Tony, CEO de Metagora. Tu dois modifier un post LinkedIn existant selon les instructions de Tony.

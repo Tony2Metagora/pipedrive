@@ -6,11 +6,7 @@
 
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/api-guard";
-
-const ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT!;
-const API_KEY = process.env.AZURE_OPENAI_API_KEY!;
-const API_VERSION = process.env.AZURE_OPENAI_API_VERSION || "2024-12-01-preview";
-const DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.4-pro";
+import { askAzureAI } from "@/lib/azure-ai";
 
 export async function POST(request: Request) {
   const guard = await requireAdmin();
@@ -33,33 +29,10 @@ REGLES :
 - Retourne UNIQUEMENT le message réécrit, rien d'autre (pas de "Voici le message réécrit :" etc.)
 - Signe "Tony" si le message original est signé`;
 
-    const url = `${ENDPOINT}openai/deployments/${DEPLOYMENT}/chat/completions?api-version=${API_VERSION}`;
-
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "api-key": API_KEY,
-      },
-      body: JSON.stringify({
-        messages: [
-          { role: "system", content: systemMessage },
-          {
-            role: "user",
-            content: `Message actuel :\n---\n${message}\n---\n\nInstruction de modification :\n${prompt}`,
-          },
-        ],
-        max_completion_tokens: 1500,
-      }),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Azure OpenAI error: ${res.status} ${text}`);
-    }
-
-    const json = await res.json();
-    const rewritten = json.choices?.[0]?.message?.content?.trim() ?? message;
+    const rewritten = await askAzureAI([
+      { role: "system", content: systemMessage },
+      { role: "user", content: `Message actuel :\n---\n${message}\n---\n\nInstruction de modification :\n${prompt}` },
+    ], 1500) || message;
 
     return NextResponse.json({ data: { message: rewritten } });
   } catch (error) {

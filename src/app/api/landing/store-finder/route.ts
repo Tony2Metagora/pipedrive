@@ -11,11 +11,8 @@
 
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-guard";
+import { askAzureAI } from "@/lib/azure-ai";
 
-const ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT!;
-const API_KEY = process.env.AZURE_OPENAI_API_KEY!;
-const API_VERSION = process.env.AZURE_OPENAI_API_VERSION || "2024-12-01-preview";
-const DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.4-pro";
 const SERPER_API_KEY = process.env.SERPER_API_KEY;
 
 export const dynamic = "force-dynamic";
@@ -40,25 +37,10 @@ interface StoreResult {
   source?: string;
 }
 
-async function askAI(
+async function askStoreAI(
   messages: { role: string; content: string }[]
 ): Promise<StoreResult> {
-  const url = `${ENDPOINT}openai/deployments/${DEPLOYMENT}/chat/completions?api-version=${API_VERSION}`;
-
-  const aiRes = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "api-key": API_KEY },
-    body: JSON.stringify({ messages, max_completion_tokens: 800 }),
-  });
-
-  if (!aiRes.ok) {
-    const errText = await aiRes.text();
-    console.error("Azure OpenAI store-finder error:", aiRes.status, errText);
-    throw new Error(`Erreur IA : ${aiRes.status}`);
-  }
-
-  const aiJson = await aiRes.json();
-  const raw = aiJson.choices?.[0]?.message?.content?.trim() || "";
+  const raw = await askAzureAI(messages, 800);
 
   if (!raw || raw === "{}") {
     return { storeName: "", storeAddress: "", notFound: true };
@@ -156,7 +138,7 @@ export async function POST(request: Request) {
 
     // ── Attempt 1: direct AI knowledge ──
     const userContent = `Trouve la boutique flagship ou principale de "${brandName}" a ${city}.`;
-    let result = await askAI([
+    let result = await askStoreAI([
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: userContent },
     ]);
@@ -190,7 +172,7 @@ En te basant sur ces informations, trouve la boutique principale ou le magasin l
 Si aucune boutique n'existe dans cette ville précise, donne la boutique la plus connue ou le siège de la marque trouvé dans les résultats, MÊME si c'est dans une autre ville.
 N'invente rien, base-toi uniquement sur les résultats ci-dessus.`;
 
-      result = await askAI([
+      result = await askStoreAI([
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: enrichedPrompt },
       ]);
@@ -224,7 +206,7 @@ En te basant sur ces informations, trouve n'importe quelle boutique, magasin ou 
 Privilégie ${city} si possible. Sinon, donne la boutique principale ou le siège de la marque trouvé dans les résultats, même dans une autre ville.
 N'invente rien, base-toi uniquement sur les résultats ci-dessus.`;
 
-      result = await askAI([
+      result = await askStoreAI([
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: sitePrompt },
       ]);

@@ -8,6 +8,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/api-guard";
+import { askAzureAI } from "@/lib/azure-ai";
 
 interface GmailMessage {
   id: string;
@@ -42,11 +43,6 @@ function extractTextBody(payload: GmailMessageDetail["payload"]): string {
   if (payload.body?.data) return decodeBase64Url(payload.body.data);
   return "";
 }
-
-const ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT!;
-const API_KEY = process.env.AZURE_OPENAI_API_KEY!;
-const API_VERSION = process.env.AZURE_OPENAI_API_VERSION || "2024-12-01-preview";
-const DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.4-pro";
 
 export async function POST(request: Request) {
   const guard = await requireAdmin();
@@ -169,31 +165,10 @@ RÈGLES : Phrases courtes et factuelles. Base-toi UNIQUEMENT sur le contenu des 
     const userContent = emailTexts;
 
     // 3. Call Azure OpenAI
-    const url = `${ENDPOINT}openai/deployments/${DEPLOYMENT}/chat/completions?api-version=${API_VERSION}`;
-
-    const aiRes = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "api-key": API_KEY,
-      },
-      body: JSON.stringify({
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userContent },
-        ],
-        max_completion_tokens: 1200,
-      }),
-    });
-
-    if (!aiRes.ok) {
-      const errText = await aiRes.text();
-      console.error("Azure OpenAI error:", aiRes.status, errText);
-      return NextResponse.json({ error: "Erreur IA : " + aiRes.status }, { status: 500 });
-    }
-
-    const aiJson = await aiRes.json();
-    const rawSummary = aiJson.choices?.[0]?.message?.content?.trim() || "Impossible de générer le résumé.";
+    const rawSummary = await askAzureAI([
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userContent },
+    ], 1200) || "Impossible de générer le résumé.";
     const summary = rawSummary.replace(/[*#]/g, "");
 
     // Extract followup email and subject from the summary

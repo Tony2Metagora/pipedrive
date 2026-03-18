@@ -82,28 +82,52 @@ ${userPrompt ? `Instructions supplémentaires : ${userPrompt}` : "Adapte le temp
 
 Réponds UNIQUEMENT avec le texte du message, sans commentaire ni explication.`;
 
-  const url = `${ENDPOINT}openai/deployments/${DEPLOYMENT}/chat/completions?api-version=${API_VERSION}`;
+  const messages = [
+    { role: "system", content: systemMessage },
+    { role: "user", content: userMessage },
+  ];
 
-  const res = await fetch(url, {
+  // 1) Try chat/completions first
+  const chatUrl = `${ENDPOINT}openai/deployments/${DEPLOYMENT}/chat/completions?api-version=${API_VERSION}`;
+  const chatRes = await fetch(chatUrl, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "api-key": API_KEY,
-    },
+    headers: { "Content-Type": "application/json", "api-key": API_KEY },
+    body: JSON.stringify({ messages, max_completion_tokens: 1000 }),
+  });
+
+  if (chatRes.ok) {
+    const json = await chatRes.json();
+    return json.choices?.[0]?.message?.content?.trim() ?? "";
+  }
+
+  // 2) Fallback to Responses API (gpt-5.4-pro etc.)
+  const responsesUrl = `${ENDPOINT}openai/deployments/${DEPLOYMENT}/responses?api-version=2025-03-01-preview`;
+  const responsesRes = await fetch(responsesUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "api-key": API_KEY },
     body: JSON.stringify({
-      messages: [
-        { role: "system", content: systemMessage },
+      input: [
+        { role: "developer", content: systemMessage },
         { role: "user", content: userMessage },
       ],
-      max_completion_tokens: 1000,
+      max_output_tokens: 1000,
     }),
   });
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Azure OpenAI error: ${res.status} ${text}`);
+  if (!responsesRes.ok) {
+    const text = await responsesRes.text();
+    throw new Error(`Azure OpenAI error: ${responsesRes.status} ${text}`);
   }
 
-  const json = await res.json();
-  return json.choices?.[0]?.message?.content?.trim() ?? "";
+  const rData = await responsesRes.json();
+  if (Array.isArray(rData.output)) {
+    for (const item of rData.output) {
+      if (item.type === "message" && Array.isArray(item.content)) {
+        for (const c of item.content) {
+          if (c.type === "output_text" && c.text) return c.text.trim();
+        }
+      }
+    }
+  }
+  return rData.output_text?.trim() ?? "";
 }

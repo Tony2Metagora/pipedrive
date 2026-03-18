@@ -5,11 +5,7 @@
 
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/api-guard";
-
-const ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT!;
-const API_KEY = process.env.AZURE_OPENAI_API_KEY!;
-const API_VERSION = process.env.AZURE_OPENAI_API_VERSION || "2024-12-01-preview";
-const DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.4-pro";
+import { askAzureAI } from "@/lib/azure-ai";
 
 export async function POST(request: Request) {
   const guard = await requireAdmin();
@@ -33,30 +29,10 @@ NEXT STEPS & ACTIONS
 
 RÈGLES : Texte brut sans formatage markdown. Pas de *, #, -. Phrases courtes et factuelles. Si une info n'est pas disponible, écris "Non mentionné".`;
 
-    const url = `${ENDPOINT}openai/deployments/${DEPLOYMENT}/chat/completions?api-version=${API_VERSION}`;
-
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "api-key": API_KEY,
-      },
-      body: JSON.stringify({
-        messages: [
-          { role: "system", content: systemMessage },
-          { role: "user", content: `Voici le contexte du contact :\n\n${context}` },
-        ],
-        max_completion_tokens: 800,
-      }),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Azure OpenAI error: ${res.status} ${text}`);
-    }
-
-    const json = await res.json();
-    const summary = json.choices?.[0]?.message?.content?.trim() ?? "Impossible de générer un résumé.";
+    const summary = await askAzureAI([
+      { role: "system", content: systemMessage },
+      { role: "user", content: `Voici le contexte du contact :\n\n${context}` },
+    ], 800) || "Impossible de générer un résumé.";
 
     return NextResponse.json({ data: { summary } });
   } catch (error) {

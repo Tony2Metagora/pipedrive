@@ -8,6 +8,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/api-guard";
+import { askAzureAI } from "@/lib/azure-ai";
 
 interface GmailMessage {
   id: string;
@@ -151,36 +152,10 @@ NEXT STEPS & ACTIONS
 RÈGLES : Texte brut sans formatage markdown. Pas de *, #, -. Phrases courtes et factuelles. Si une info n'est pas disponible, écris "Non mentionné dans les échanges".`;
 
     // 4. Call Azure OpenAI
-    const endpoint = process.env.AZURE_OPENAI_ENDPOINT!;
-    const apiKey = process.env.AZURE_OPENAI_API_KEY!;
-    const apiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-12-01-preview";
-    const deployment = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.4-pro";
-
-    const aiRes = await fetch(
-      `${endpoint}openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "api-key": apiKey,
-        },
-        body: JSON.stringify({
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: emailsText },
-          ],
-          max_completion_tokens: 600,
-        }),
-      }
-    );
-
-    if (!aiRes.ok) {
-      console.error("Azure OpenAI error:", aiRes.status, await aiRes.text());
-      return NextResponse.json({ error: "Erreur IA" }, { status: 500 });
-    }
-
-    const aiJson = await aiRes.json();
-    const summary = aiJson.choices?.[0]?.message?.content || "Impossible de générer le résumé.";
+    const summary = await askAzureAI([
+      { role: "system", content: systemPrompt },
+      { role: "user", content: emailsText },
+    ], 600) || "Impossible de générer le résumé.";
 
     return NextResponse.json({
       data: {

@@ -6,11 +6,7 @@
 
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/api-guard";
-
-const ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT!;
-const API_KEY = process.env.AZURE_OPENAI_API_KEY!;
-const API_VERSION = process.env.AZURE_OPENAI_API_VERSION || "2024-12-01-preview";
-const DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.4-pro";
+import { askAzureAI } from "@/lib/azure-ai";
 
 export async function POST(request: Request) {
   const guard = await requireAdmin();
@@ -39,31 +35,10 @@ ${currentEmail}
 
 Instruction de modification : ${prompt}`;
 
-    const url = `${ENDPOINT}openai/deployments/${DEPLOYMENT}/chat/completions?api-version=${API_VERSION}`;
-
-    const aiRes = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "api-key": API_KEY,
-      },
-      body: JSON.stringify({
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userContent },
-        ],
-        max_completion_tokens: 800,
-      }),
-    });
-
-    if (!aiRes.ok) {
-      const errText = await aiRes.text();
-      console.error("Azure OpenAI refine error:", aiRes.status, errText);
-      return NextResponse.json({ error: "Erreur IA : " + aiRes.status }, { status: 500 });
-    }
-
-    const aiJson = await aiRes.json();
-    const raw = (aiJson.choices?.[0]?.message?.content?.trim() || "").replace(/[*#]/g, "");
+    const raw = (await askAzureAI([
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userContent },
+    ], 800)).replace(/[*#]/g, "");
 
     // Extract subject if present
     let refinedSubject = currentSubject;
