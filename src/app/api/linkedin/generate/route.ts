@@ -102,33 +102,32 @@ const THEMES: Record<string, { name: string; description: string; emoji: string 
   },
 };
 
-/* ── Scrape helper — fetch page text content ─────────────── */
+const SERPER_API_KEY = process.env.SERPER_API_KEY;
 
-async function scrapeUrl(url: string): Promise<string> {
+/* ── Google Search helper via Serper API ─────────────────── */
+
+async function searchSource(url: string, theme: string): Promise<string> {
+  if (!SERPER_API_KEY) return "";
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 6000);
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml",
-      },
-      signal: controller.signal,
+    // Extract domain for site: search
+    const domain = new URL(url).hostname.replace("www.", "");
+    const query = `site:${domain} ${theme} 2026`;
+    const res = await fetch("https://google.serper.dev/search", {
+      method: "POST",
+      headers: { "X-API-KEY": SERPER_API_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ q: query, num: 5 }),
     });
-    clearTimeout(timer);
-    if (!res.ok) return `[Erreur ${res.status} pour ${url}]`;
-    const html = await res.text();
-    // Strip HTML tags, scripts, styles — keep text
-    const text = html
-      .replace(/<script[\s\S]*?<\/script>/gi, "")
-      .replace(/<style[\s\S]*?<\/style>/gi, "")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-    // Limit to ~2000 chars to stay within token budget
-    return text.slice(0, 2000);
-  } catch (e) {
-    return `[Impossible de lire ${url}: ${String(e)}]`;
+    if (!res.ok) return "";
+    const json = await res.json();
+    const parts: string[] = [];
+    if (json.organic) {
+      for (const r of json.organic.slice(0, 5)) {
+        if (r.title && r.snippet) parts.push(`• ${r.title}\n  ${r.snippet}`);
+      }
+    }
+    return parts.length > 0 ? `── ${domain} ──\n${parts.join("\n")}` : "";
+  } catch {
+    return "";
   }
 }
 
@@ -177,34 +176,38 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       }
     }
 
-    // ── scrape-suggest: scrape sources + suggest 10 subjects ──
+    // ── scrape-suggest: Google Search sources + suggest 10 subjects ──
     if (action === "scrape-suggest") {
       const { theme, sourceUrls } = body;
       const themeInfo = THEMES[theme as string];
       if (!themeInfo) return NextResponse.json({ error: "Thème invalide" }, { status: 400 });
       if (!sourceUrls?.length) return NextResponse.json({ error: "Aucune source sélectionnée" }, { status: 400 });
 
-      // Scrape sources in parallel (max 3)
-      const scrapedContents = await Promise.all(
-        (sourceUrls as string[]).slice(0, 3).map(async (url: string) => {
-          const text = await scrapeUrl(url);
-          return `── ${url} ──\n${text}`;
-        })
+      // Search recent articles from each source via Google (Serper)
+      const searchKeywords = `${themeInfo.name} ${themeInfo.description}`.slice(0, 60);
+      const searchResults = await Promise.all(
+        (sourceUrls as string[]).slice(0, 5).map((url: string) => searchSource(url, searchKeywords))
       );
+      const allContent = searchResults.filter(Boolean).join("\n\n");
 
-      // Limit total scraped content to ~4000 chars
-      let allContent = scrapedContents.join("\n\n");
-      if (allContent.length > 4000) allContent = allContent.slice(0, 4000) + "\n[...tronqué]";
+      // Fallback A: if no search results, use source names only
+      let userPrompt: string;
+      if (allContent.length > 50) {
+        userPrompt = `Articles récents trouvés pour le thème "${themeInfo.emoji} ${themeInfo.name}" :\n\n${allContent.slice(0, 5000)}\n\nÀ partir de ces articles, suggère exactement 10 sujets de posts LinkedIn.\nChaque sujet : titre accrocheur 10-20 mots + bref angle/source.\n\nRéponds en JSON : {"subjects": [{"title": "...", "angle": "..."}, ...]}\nPas de markdown, juste le JSON.`;
+      } else {
+        // Fallback: no search results, use source names
+        const sourceNames = (sourceUrls as string[]).map((u: string) => {
+          try { return new URL(u).hostname.replace("www.", ""); } catch { return u; }
+        }).join(", ");
+        userPrompt = `Je suis les sources suivantes : ${sourceNames}.\nThème : "${themeInfo.emoji} ${themeInfo.name}" (${themeInfo.description}).\n\nSuggère exactement 10 sujets de posts LinkedIn inspirés de ces sources et de l'actualité de ce thème.\nChaque sujet : titre accrocheur 10-20 mots + bref angle.\n\nRéponds en JSON : {"subjects": [{"title": "...", "angle": "..."}, ...]}\nPas de markdown, juste le JSON.`;
+      }
 
       const result = await askAzureAI([
         {
           role: "system",
           content: `Tu es un expert LinkedIn pour Tony, CEO de Metagora (startup IA retail/luxe). Style : ton direct, storytelling, données chiffrées, emojis modérés, 150-300 mots, jamais corporate.`,
         },
-        {
-          role: "user",
-          content: `Sources scrappées pour le thème "${themeInfo.emoji} ${themeInfo.name}" :\n\n${allContent}\n\nSuggère exactement 10 sujets de posts LinkedIn inspirés de ces sources.\nChaque sujet : titre accrocheur 10-20 mots + bref angle/source.\n\nRéponds en JSON : {"subjects": [{"title": "...", "angle": "..."}, ...]}\nPas de markdown, juste le JSON.`,
-        },
+        { role: "user", content: userPrompt },
       ], 2000);
 
       try {
