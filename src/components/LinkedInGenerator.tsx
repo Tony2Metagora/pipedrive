@@ -22,6 +22,7 @@ interface Source {
 interface SubjectItem {
   title: string;
   angle: string;
+  source?: string;
 }
 
 const THEMES = [
@@ -561,8 +562,16 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
                 )}
               >
                 <ChevronRight className={cn("w-4 h-4 flex-shrink-0 mt-0.5 transition-transform", selectedSubject === s.title && "text-blue-500 rotate-90")} />
-                <div className="min-w-0">
-                  <span className="text-sm block">{s.title}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm">{s.title}</span>
+                    {s.source && (
+                      <span className={cn(
+                        "text-[9px] px-1.5 py-0.5 rounded-full whitespace-nowrap flex-shrink-0",
+                        s.source.includes("Temps") ? "bg-green-100 text-green-700" : "bg-purple-100 text-purple-700"
+                      )}>{s.source}</span>
+                    )}
+                  </div>
                   {s.angle && <span className="text-[10px] text-gray-400 block mt-0.5">{s.angle}</span>}
                 </div>
               </button>

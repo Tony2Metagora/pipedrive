@@ -11,7 +11,7 @@
 
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-guard";
-import { askAzureAI } from "@/lib/azure-ai";
+import { askAzureAI, askAzureFast } from "@/lib/azure-ai";
 
 export const dynamic = "force-dynamic";
 
@@ -147,7 +147,7 @@ export async function POST(request: Request) {
       const themeInfo = THEMES[theme as string];
       if (!themeInfo) return NextResponse.json({ error: "Thème invalide" }, { status: 400 });
 
-      const result = await askAzureAI([
+      const result = await askAzureFast([
         {
           role: "system",
           content: `Tu es un expert LinkedIn et content strategist pour Tony, CEO de Metagora.\n\n${EDITORIAL_LINE}\n\n${STYLE_EXAMPLES}`,
@@ -176,47 +176,77 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       }
     }
 
-    // ── scrape-suggest: Google Search sources + suggest 10 subjects ──
+    // ── scrape-suggest: parallel (web_search real-time + fast knowledge base) ──
     if (action === "scrape-suggest") {
       const { theme, sourceUrls } = body;
       const themeInfo = THEMES[theme as string];
       if (!themeInfo) return NextResponse.json({ error: "Thème invalide" }, { status: 400 });
       if (!sourceUrls?.length) return NextResponse.json({ error: "Aucune source sélectionnée" }, { status: 400 });
 
-      // Search recent articles from each source via Google (Serper)
-      const searchKeywords = `${themeInfo.name} ${themeInfo.description}`.slice(0, 60);
-      const searchResults = await Promise.all(
-        (sourceUrls as string[]).slice(0, 5).map((url: string) => searchSource(url, searchKeywords))
-      );
-      const allContent = searchResults.filter(Boolean).join("\n\n");
+      const sourceNames = (sourceUrls as string[]).map((u: string) => {
+        try { return new URL(u).hostname.replace("www.", ""); } catch { return u; }
+      }).join(", ");
 
-      // Fallback A: if no search results, use source names only
-      let userPrompt: string;
-      if (allContent.length > 50) {
-        userPrompt = `Articles récents trouvés pour le thème "${themeInfo.emoji} ${themeInfo.name}" :\n\n${allContent.slice(0, 5000)}\n\nÀ partir de ces articles, suggère exactement 10 sujets de posts LinkedIn.\nChaque sujet : titre accrocheur 10-20 mots + bref angle/source.\n\nRéponds en JSON : {"subjects": [{"title": "...", "angle": "..."}, ...]}\nPas de markdown, juste le JSON.`;
-      } else {
-        // Fallback: no search results, use source names
-        const sourceNames = (sourceUrls as string[]).map((u: string) => {
-          try { return new URL(u).hostname.replace("www.", ""); } catch { return u; }
-        }).join(", ");
-        userPrompt = `Je suis les sources suivantes : ${sourceNames}.\nThème : "${themeInfo.emoji} ${themeInfo.name}" (${themeInfo.description}).\n\nSuggère exactement 10 sujets de posts LinkedIn inspirés de ces sources et de l'actualité de ce thème.\nChaque sujet : titre accrocheur 10-20 mots + bref angle.\n\nRéponds en JSON : {"subjects": [{"title": "...", "angle": "..."}, ...]}\nPas de markdown, juste le JSON.`;
+      const sysPrompt = `Tu es un expert LinkedIn pour Tony, CEO de Metagora (startup IA retail/luxe). Style : ton direct, storytelling, données chiffrées, emojis modérés, 150-300 mots, jamais corporate.`;
+      const jsonFormat = `Réponds en JSON : {"subjects": [{"title": "...", "angle": "..."}, ...]}\nPas de markdown, juste le JSON.`;
+
+      // Run BOTH in parallel:
+      // A) gpt-5.4-pro + web_search → 2 sujets temps réel (slow but fresh)
+      // B) gpt-5.2-chat → 3 sujets base de connaissances (fast)
+      const [realtimeResult, knowledgeResult] = await Promise.allSettled([
+        // A) Real-time: GPT-5.4-pro with web_search tool
+        askAzureAI([
+          { role: "system", content: sysPrompt },
+          {
+            role: "user",
+            content: `Recherche sur le web des articles récents des sources suivantes : ${sourceNames}.\nThème : "${themeInfo.emoji} ${themeInfo.name}" (${themeInfo.description}).\n\nTrouve exactement 2 sujets de posts LinkedIn inspirés d'articles RÉELS et RÉCENTS de ces sources.\nChaque sujet : titre accrocheur 10-20 mots + bref angle avec l'URL ou la source de l'article trouvé.\n\n${jsonFormat}`,
+          },
+        ], 1000, [{ type: "web_search_preview" }]),
+
+        // B) Knowledge base: GPT-5.2-chat (fast)
+        askAzureFast([
+          { role: "system", content: sysPrompt },
+          {
+            role: "user",
+            content: `Je suis les sources suivantes : ${sourceNames}.\nThème : "${themeInfo.emoji} ${themeInfo.name}" (${themeInfo.description}).\n\nSuggère exactement 3 sujets de posts LinkedIn inspirés de ces sources et de l'actualité de ce thème.\nChaque sujet : titre accrocheur 10-20 mots + bref angle.\n\n${jsonFormat}`,
+          },
+        ], 1000),
+      ]);
+
+      // Parse results
+      type Subject = { title: string; angle: string; source?: string };
+      const subjects: Subject[] = [];
+
+      // Parse knowledge base (fast, should always work)
+      if (knowledgeResult.status === "fulfilled" && knowledgeResult.value) {
+        try {
+          const cleaned = knowledgeResult.value.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+          const parsed = JSON.parse(cleaned);
+          const items = parsed.subjects || parsed;
+          for (const s of (Array.isArray(items) ? items : []).slice(0, 3)) {
+            subjects.push({ title: s.title || s, angle: s.angle || "", source: "🧠 Base IA" });
+          }
+        } catch { /* ignore parse errors */ }
       }
 
-      const result = await askAzureAI([
-        {
-          role: "system",
-          content: `Tu es un expert LinkedIn pour Tony, CEO de Metagora (startup IA retail/luxe). Style : ton direct, storytelling, données chiffrées, emojis modérés, 150-300 mots, jamais corporate.`,
-        },
-        { role: "user", content: userPrompt },
-      ], 2000);
-
-      try {
-        const cleaned = result.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-        const parsed = JSON.parse(cleaned);
-        return NextResponse.json({ data: parsed });
-      } catch {
-        return NextResponse.json({ data: { subjects: [] }, raw: result });
+      // Parse real-time (slow, may timeout)
+      if (realtimeResult.status === "fulfilled" && realtimeResult.value) {
+        try {
+          const cleaned = realtimeResult.value.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+          const parsed = JSON.parse(cleaned);
+          const items = parsed.subjects || parsed;
+          for (const s of (Array.isArray(items) ? items : []).slice(0, 2)) {
+            subjects.push({ title: s.title || s, angle: s.angle || "", source: "🌐 Temps réel" });
+          }
+        } catch { /* ignore parse errors */ }
       }
+
+      // If we got nothing at all, return error
+      if (subjects.length === 0) {
+        return NextResponse.json({ data: { subjects: [] }, error: "Aucun sujet généré" });
+      }
+
+      return NextResponse.json({ data: { subjects } });
     }
 
     // ── generate: full post + image prompt ───────────────
@@ -225,7 +255,7 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       const themeInfo = THEMES[theme as string];
       if (!themeInfo || !subject) return NextResponse.json({ error: "Thème et sujet requis" }, { status: 400 });
 
-      const result = await askAzureAI([
+      const result = await askAzureFast([
         {
           role: "system",
           content: `Tu es le ghostwriter LinkedIn de Tony, CEO de Metagora.
@@ -270,7 +300,7 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       const { post } = body;
       if (!post) return NextResponse.json({ error: "Post requis" }, { status: 400 });
 
-      const result = await askAzureAI([
+      const result = await askAzureFast([
         {
           role: "system",
           content: `Tu es un expert en copywriting LinkedIn.
@@ -308,7 +338,7 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       const { hook, instructions } = body;
       if (!hook || !instructions) return NextResponse.json({ error: "Hook et instructions requis" }, { status: 400 });
 
-      const refined = await askAzureAI([
+      const refined = await askAzureFast([
         {
           role: "system",
           content: `Tu es un expert copywriting LinkedIn. Modifie l'accroche selon les instructions.\n\n${HOOKS_BEST_PRACTICES}`,
@@ -327,7 +357,7 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       const { currentPost, instructions } = body;
       if (!currentPost || !instructions) return NextResponse.json({ error: "Post actuel et instructions requis" }, { status: 400 });
 
-      const refined = await askAzureAI([
+      const refined = await askAzureFast([
         {
           role: "system",
           content: `Tu es le ghostwriter LinkedIn de Tony, CEO de Metagora. Tu dois modifier un post LinkedIn existant selon les instructions de Tony.
