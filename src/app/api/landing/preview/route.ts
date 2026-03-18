@@ -41,10 +41,17 @@ export async function POST(request: Request) {
     const absoluteAssetsBase = `https://metagora-tech.fr/retail-luxe/assets/images`;
     html = html.replace(/\.\.\/\.\.\/assets\/images/g, absoluteAssetsBase);
 
-    // If original store image URL provided, replace the repo path with it (image may not be synced yet)
-    if (storeImageOriginalUrl && input.store?.image) {
+    // Replace store image URL for preview:
+    // - If original URL provided, use it directly (image may not be synced yet)
+    // - Otherwise, proxy the Hostinger URL through our image-proxy to avoid cross-origin issues in iframe
+    if (input.store?.image) {
       const repoImageUrl = `${absoluteAssetsBase}/${input.store.image}`;
-      html = html.split(repoImageUrl).join(storeImageOriginalUrl);
+      if (storeImageOriginalUrl) {
+        html = html.split(repoImageUrl).join(storeImageOriginalUrl);
+      } else {
+        const proxyUrl = `/api/landing/image-proxy?url=${encodeURIComponent(repoImageUrl)}`;
+        html = html.split(repoImageUrl).join(proxyUrl);
+      }
     }
     const pathCode = input.urlCode || input.language;
     const outputPath = `${basePath}/${input.brandSlug}/${pathCode}/index.html`;
