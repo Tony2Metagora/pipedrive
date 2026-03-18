@@ -35,7 +35,7 @@ interface SubjectItem {
 
 const THEMES = [
   { key: "journal-ceo", emoji: "1️⃣", name: "Journal d'un CEO", desc: "Rencontres retail/luxe, bonnes pratiques, personnes et marques inspirantes", color: "amber" },
-  { key: "ia-formation", emoji: "2️⃣", name: "IA dans la formation", desc: "15 ans d'expertise learning → interactif boosté IA, visions & connaissances", color: "blue" },
+  { key: "ia-formation", emoji: "2️⃣", name: "IA dans la formation", desc: "E-learning (SCORM/LMS) = réalité de 90% des entreprises. L'IA l'enrichit, pas le remplace. Constat + solutions.", color: "blue" },
   { key: "ia-operationnelle", emoji: "3️⃣", name: "IA Opérationnelle", desc: "Vulgarisation IA (agentique, LLM) → exploitation réelle chez Metagora", color: "emerald" },
 ];
 
@@ -58,6 +58,8 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
   const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
   const [customSubject, setCustomSubject] = useState("");
   const [statsLoadingIdx, setStatsLoadingIdx] = useState<number | null>(null);
+  const [statsSearchDetail, setStatsSearchDetail] = useState("");
+  const [selectedStats, setSelectedStats] = useState<Set<string>>(new Set());
 
   // Decomposed loading state
   interface LoadingStep {
@@ -304,6 +306,8 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
     const subject = subjects[subjectIdx];
     if (!subject) return;
     setStatsLoadingIdx(subjectIdx);
+    setStatsSearchDetail("🌐 Recherche web via gpt-5.4…");
+    setSelectedStats(new Set());
     setError(null);
     try {
       const res = await fetch("/api/linkedin/generate", {
@@ -312,14 +316,40 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
         body: JSON.stringify({ action: "search-stats", theme: selectedTheme, subject: subject.title }),
       });
       const json = await res.json();
-      if (json.error) setError(json.error);
       const stats = json.data?.stats || [];
+      const src = json.data?.statsSource || "web";
+      if (stats.length > 0) {
+        setStatsSearchDetail(src === "web" ? `✅ ${stats.length} stats trouvées via web` : `🧠 ${stats.length} stats (base IA, web indisponible)`);
+      } else {
+        setStatsSearchDetail("⚠️ Aucune stat trouvée");
+      }
+      if (json.error) setError(json.error);
       setSubjects((prev) => prev.map((s, i) => i === subjectIdx ? { ...s, stats } : s));
     } catch (err) {
+      setStatsSearchDetail("❌ Erreur de recherche");
       setError(String(err));
     } finally {
       setStatsLoadingIdx(null);
     }
+  };
+
+  const toggleStat = (statText: string) => {
+    setSelectedStats((prev) => {
+      const next = new Set(prev);
+      if (next.has(statText)) next.delete(statText); else next.add(statText);
+      return next;
+    });
+  };
+
+  const handleIntegrateStats = () => {
+    if (selectedStats.size === 0 || !generatedPost) return;
+    const statsBlock = Array.from(selectedStats).map((s) => `📊 ${s}`).join("\n");
+    // Insert stats before the last paragraph (usually the question + hashtags)
+    const lines = generatedPost.split("\n");
+    const lastNonEmpty = lines.length - 1;
+    lines.splice(Math.max(lastNonEmpty - 1, 1), 0, "\n" + statsBlock + "\n");
+    setGeneratedPost(lines.join("\n"));
+    setSelectedStats(new Set());
   };
 
   const handleRefineHook = async (hook: string) => {
@@ -707,36 +737,75 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
 
                 {/* Enrichir button + stats display */}
                 <div className="px-3 pb-2.5 pl-10">
-                  {!s.stats && (
+                  {!s.stats && statsLoadingIdx !== i && (
                     <button
                       onClick={(e) => { e.stopPropagation(); handleSearchStats(i); }}
                       disabled={statsLoadingIdx !== null}
                       className="inline-flex items-center gap-1.5 text-[10px] font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-md px-2 py-1 cursor-pointer disabled:opacity-50 transition-colors"
                     >
-                      {statsLoadingIdx === i ? <Loader2 className="w-3 h-3 animate-spin" /> : <BarChart3 className="w-3 h-3" />}
-                      {statsLoadingIdx === i ? "Recherche stats…" : "🔍 Enrichir avec stats"}
+                      <BarChart3 className="w-3 h-3" />
+                      🔍 Enrichir avec stats
                     </button>
+                  )}
+                  {statsLoadingIdx === i && (
+                    <div className="flex items-center gap-2 text-[10px] text-blue-600 py-1">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      <span className="font-medium">{statsSearchDetail}</span>
+                    </div>
                   )}
                   {s.stats && s.stats.length > 0 && (
                     <div className="mt-1 space-y-1">
-                      <span className="text-[9px] font-semibold text-amber-700 uppercase">Stats trouvées :</span>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-semibold text-amber-700 uppercase">{statsSearchDetail || `${s.stats.length} stats trouvées`}</span>
+                        {generatedPost && selectedStats.size > 0 && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleIntegrateStats(); }}
+                            className="text-[9px] font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded px-2 py-0.5 cursor-pointer transition-colors"
+                          >
+                            ✚ Intégrer {selectedStats.size} stat(s) au post
+                          </button>
+                        )}
+                      </div>
                       {s.stats.map((st, j) => (
-                        <div key={j} className="flex items-start gap-1.5 text-[10px] text-gray-600 bg-white rounded px-2 py-1 border border-gray-100">
-                          <BarChart3 className="w-3 h-3 text-amber-500 flex-shrink-0 mt-0.5" />
-                          <div className="min-w-0">
+                        <button
+                          key={j}
+                          onClick={(e) => { e.stopPropagation(); toggleStat(st.text); }}
+                          className={cn(
+                            "w-full text-left flex items-start gap-1.5 text-[10px] rounded px-2 py-1.5 border transition-all cursor-pointer",
+                            selectedStats.has(st.text)
+                              ? "bg-blue-50 border-blue-300 text-blue-800"
+                              : "bg-white border-gray-100 text-gray-600 hover:border-blue-200"
+                          )}
+                        >
+                          <div className={cn(
+                            "w-3.5 h-3.5 rounded border flex-shrink-0 mt-0.5 flex items-center justify-center",
+                            selectedStats.has(st.text) ? "bg-blue-600 border-blue-600" : "border-gray-300"
+                          )}>
+                            {selectedStats.has(st.text) && <Check className="w-2.5 h-2.5 text-white" />}
+                          </div>
+                          <div className="min-w-0 flex-1">
                             <span>{st.text}</span>
-                            {st.url && (
-                              <a href={st.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="ml-1 inline-flex items-center gap-0.5 text-blue-500 hover:text-blue-700">
-                                <ExternalLink className="w-2.5 h-2.5" />{st.source || "source"}
-                              </a>
+                            {(st.url || st.source) && (
+                              <span className="ml-1 text-[9px]">
+                                {st.url ? (
+                                  <a href={st.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-0.5 text-blue-500 hover:text-blue-700">
+                                    <ExternalLink className="w-2.5 h-2.5" />{st.source || "source"}
+                                  </a>
+                                ) : (
+                                  <span className="text-gray-400">{st.source}</span>
+                                )}
+                              </span>
                             )}
                           </div>
-                        </div>
+                        </button>
                       ))}
                     </div>
                   )}
                   {s.stats && s.stats.length === 0 && (
-                    <span className="text-[10px] text-gray-400 italic">Aucune stat trouvée pour ce sujet</span>
+                    <div className="flex items-center gap-1.5 text-[10px] text-gray-400 italic py-1">
+                      <AlertCircle className="w-3 h-3" />
+                      <span>{statsSearchDetail || "Aucune stat trouvée pour ce sujet"}</span>
+                    </div>
                   )}
                 </div>
               </div>
@@ -804,22 +873,21 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
 
           {/* Refine hook */}
           {selectedHook && (
-            <div className="flex flex-col sm:flex-row gap-2 mt-2">
-              <input
-                type="text"
+            <div className="flex flex-col gap-2 mt-2">
+              <textarea
                 value={hookRefineInput}
                 onChange={(e) => setHookRefineInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleRefineHook(selectedHook); } }}
-                placeholder="Modifier l'accroche..."
-                className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-300 outline-none"
+                placeholder="Colle ta nouvelle accroche ici, ou décris comment modifier l'accroche sélectionnée..."
+                rows={3}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-300 outline-none resize-y"
               />
               <button
                 onClick={() => handleRefineHook(selectedHook)}
                 disabled={!hookRefineInput || hookRefineLoading}
-                className="flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 cursor-pointer"
+                className="self-end flex items-center justify-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 cursor-pointer"
               >
                 {hookRefineLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                Modifier
+                Appliquer
               </button>
             </div>
           )}

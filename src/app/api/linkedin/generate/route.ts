@@ -22,7 +22,7 @@ Ton LinkedIn : "Journal d'un geek fraîchement passionné de retail" — il sort
 
 3 THÈMES ÉDITORIAUX :
 1️⃣ Journal d'un CEO : Rencontres retail/luxe, bonnes pratiques partagées au détour de rencontres de personnes et marques inspirantes.
-2️⃣ IA dans la formation : 15 ans d'expertise learning. Le e-learning cède la place à l'interactif boosté IA – visions & connaissances.
+2️⃣ IA dans la formation : 15 ans d'expertise learning. Le e-learning (SCORM, LMS) reste la réalité de 90% des entreprises — l'IA vient l'enrichir, pas le remplacer. Constat terrain + solutions concrètes.
 3️⃣ IA Opérationnelle : Vulgarisation IA (agentique, LLM, etc.) jusqu'à l'exploitation réelle chez Metagora (emails, projets, tâches).
 
 CONTEXTE : Metagora propose Simsell, un simulateur IA de vente pour les vendeurs retail/luxe. Clients virtuels IA, scoring, feedback personnalisé.
@@ -92,7 +92,7 @@ const THEMES: Record<string, { name: string; description: string; emoji: string 
   },
   "ia-formation": {
     name: "IA dans la formation",
-    description: "15 ans d'expertise learning, e-learning → interactif IA, visions & connaissances",
+    description: "15 ans d'expertise learning. Le e-learning (SCORM/LMS) est la réalité de 90% des entreprises — l'IA l'enrichit et le complète. Constat terrain + solutions concrètes, jamais de critique du e-learning existant.",
     emoji: "2️⃣",
   },
   "ia-operationnelle": {
@@ -288,6 +288,7 @@ CONSIGNES IMPÉRATIVES :
 - Ajoute des hashtags pertinents à la fin.
 - N'utilise JAMAIS de jargon corporate vide.
 - Écris en FRANÇAIS.
+- IMPORTANT pour le thème "IA dans la formation" : le e-learning (SCORM, LMS) n'est PAS obsolète ni à critiquer. 90% des entreprises utilisent encore ce modèle. Le ton doit être constructif : constat terrain (les entreprises sont coincées avec SCORM) + solution (l'IA vient enrichir et compléter le e-learning existant, pas le remplacer). Le e-learning sert à ancrer les connaissances. Pas de discours "le e-learning est mort" mais plutôt "comment l'IA transforme le e-learning".
 
 En plus du post, propose un prompt d'image d'illustration en anglais (1 phrase, descriptif visuel pour Pexels/Unsplash).`,
         },
@@ -354,16 +355,25 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       const { hook, instructions } = body;
       if (!hook || !instructions) return NextResponse.json({ error: "Hook et instructions requis" }, { status: 400 });
 
-      const refined = await askAzureFast([
-        {
-          role: "system",
-          content: `Tu es un expert copywriting LinkedIn. Modifie l'accroche selon les instructions.\n\n${HOOKS_BEST_PRACTICES}`,
-        },
-        {
-          role: "user",
-          content: `Accroche actuelle :\n"${hook}"\n\nModification demandée : ${instructions}\n\nRetourne UNIQUEMENT l'accroche modifiée, rien d'autre.`,
-        },
-      ], 500);
+      // Detect if user pasted a full replacement hook vs gave modification instructions
+      const isDirectReplacement = instructions.length > 60 && !instructions.toLowerCase().includes("modifie") && !instructions.toLowerCase().includes("change") && !instructions.toLowerCase().includes("remplace") && !instructions.toLowerCase().includes("rends") && !instructions.toLowerCase().includes("ajoute");
+
+      let refined: string;
+      if (isDirectReplacement) {
+        // User pasted the new hook directly — use it as-is
+        refined = instructions;
+      } else {
+        refined = await askAzureFast([
+          {
+            role: "system",
+            content: `Tu es un expert copywriting LinkedIn. Modifie l'accroche selon les instructions de Tony.\n\n${HOOKS_BEST_PRACTICES}`,
+          },
+          {
+            role: "user",
+            content: `Accroche actuelle :\n"${hook}"\n\nModification demandée : ${instructions}\n\nRetourne UNIQUEMENT l'accroche modifiée, rien d'autre.`,
+          },
+        ], 500);
+      }
 
       return NextResponse.json({ data: { hook: refined } });
     }
