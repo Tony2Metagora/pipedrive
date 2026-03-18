@@ -1,12 +1,12 @@
 /**
- * API Route — LinkedIn Post Generator
- * POST: uses Azure OpenAI to generate LinkedIn posts based on editorial line,
- *       selected theme, and writing style examples.
- *
- * Actions:
- *   - "suggest": suggest 5 post subjects for a given theme
- *   - "generate": generate a full LinkedIn post draft
- *   - "refine": refine/modify an existing post based on user instructions
+ * API Route — LinkedIn Post Generator (v2)
+ * POST actions:
+ *   - "suggest"         : suggest 5 post subjects for a theme (no sources)
+ *   - "scrape-suggest"  : scrape selected source URLs + suggest 10 subjects
+ *   - "generate"        : generate full post + image prompt from subject
+ *   - "hooks"           : generate 5 hook variants for a post
+ *   - "refine-hook"     : refine a hook via user instructions
+ *   - "refine"          : refine/modify an existing post
  */
 
 import { NextResponse } from "next/server";
@@ -76,7 +76,19 @@ POST QUI N'A PAS MARCHÉ (190 impressions, 3 likes) — trop formaté, trop "lis
 "🧠Le QCM mesure ce qu'on sait. Mais le QBM mesure ce qu'on sait faire quand ça dérape..."
 → Éviter ce format trop structuré/didactique. Préférer le storytelling et l'anecdote.`;
 
-const THEMES = {
+const HOOKS_BEST_PRACTICES = `BONNES PRATIQUES ACCROCHES LINKEDIN :
+- L'accroche = les 2-3 premières lignes visibles avant "…voir plus"
+- Doit créer curiosité, tension, émotion ou surprise
+- Techniques efficaces :
+  • Fait choc / statistique inattendue ("49% des GenZ achètent des dupes")
+  • Citation provocante ("Tu ne feras jamais carrière dans la vente")
+  • Question rhétorique percutante ("Et si le retail de demain se formait sans formateur ?")
+  • Anecdote accrocheuse ("Le 11 décembre, j'ai découvert un truc dingue…")
+  • Contre-intuition ("L'IA ne remplace pas les vendeurs. Elle les rend meilleurs.")
+- Éviter : les accroches génériques, les listes, le jargon, les emojis dès le 1er mot
+- Max 2-3 lignes, phrases courtes et impactantes`;
+
+const THEMES: Record<string, { name: string; description: string; emoji: string }> = {
   "journal-ceo": {
     name: "Journal d'un CEO",
     description: "Rencontres retail/luxe, bonnes pratiques, personnes et marques inspirantes",
@@ -117,6 +129,33 @@ async function askAI(
   return data.choices?.[0]?.message?.content?.trim() || "";
 }
 
+/* ── Scrape helper — fetch page text content ─────────────── */
+
+async function scrapeUrl(url: string): Promise<string> {
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+      },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return `[Erreur ${res.status} pour ${url}]`;
+    const html = await res.text();
+    // Strip HTML tags, scripts, styles — keep text
+    const text = html
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[\s\S]*?<\/style>/gi, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    // Limit to ~3000 chars to stay within token budget
+    return text.slice(0, 3000);
+  } catch (e) {
+    return `[Impossible de lire ${url}: ${String(e)}]`;
+  }
+}
+
 /* ── POST handler ────────────────────────────────────────── */
 
 export async function POST(request: Request) {
@@ -125,23 +164,18 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const { action, theme, subject, currentPost, instructions } = body;
+    const { action } = body;
 
+    // ── suggest: 5 subjects without sources ──────────────
     if (action === "suggest") {
-      // Suggest 5 post subjects for a given theme
-      const themeInfo = THEMES[theme as keyof typeof THEMES];
-      if (!themeInfo) {
-        return NextResponse.json({ error: "Thème invalide" }, { status: 400 });
-      }
+      const { theme } = body;
+      const themeInfo = THEMES[theme as string];
+      if (!themeInfo) return NextResponse.json({ error: "Thème invalide" }, { status: 400 });
 
       const result = await askAI([
         {
           role: "system",
-          content: `Tu es un expert LinkedIn et content strategist pour Tony, CEO de Metagora (startup IA retail/luxe).
-
-${EDITORIAL_LINE}
-
-${STYLE_EXAMPLES}`,
+          content: `Tu es un expert LinkedIn et content strategist pour Tony, CEO de Metagora.\n\n${EDITORIAL_LINE}\n\n${STYLE_EXAMPLES}`,
         },
         {
           role: "user",
@@ -167,17 +201,67 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       }
     }
 
-    if (action === "generate") {
-      // Generate a full LinkedIn post
-      const themeInfo = THEMES[theme as keyof typeof THEMES];
-      if (!themeInfo || !subject) {
-        return NextResponse.json({ error: "Thème et sujet requis" }, { status: 400 });
-      }
+    // ── scrape-suggest: scrape sources + suggest 10 subjects ──
+    if (action === "scrape-suggest") {
+      const { theme, sourceUrls } = body;
+      const themeInfo = THEMES[theme as string];
+      if (!themeInfo) return NextResponse.json({ error: "Thème invalide" }, { status: 400 });
+      if (!sourceUrls?.length) return NextResponse.json({ error: "Aucune source sélectionnée" }, { status: 400 });
 
-      const post = await askAI([
+      // Scrape all sources in parallel
+      const scrapedContents = await Promise.all(
+        (sourceUrls as string[]).slice(0, 5).map(async (url: string) => {
+          const text = await scrapeUrl(url);
+          return `── Source: ${url} ──\n${text}`;
+        })
+      );
+
+      const allContent = scrapedContents.join("\n\n");
+
+      const result = await askAI([
         {
           role: "system",
-          content: `Tu es le ghostwriter LinkedIn de Tony, CEO de Metagora. Tu dois rédiger un post LinkedIn en son nom.
+          content: `Tu es un expert LinkedIn et content strategist pour Tony, CEO de Metagora.\n\n${EDITORIAL_LINE}\n\n${STYLE_EXAMPLES}`,
+        },
+        {
+          role: "user",
+          content: `J'ai scrappé ces sources web pour le thème "${themeInfo.emoji} ${themeInfo.name}" :
+
+${allContent}
+
+À partir de ces contenus, suggère exactement 10 sujets de posts LinkedIn pertinents.
+
+Chaque sujet doit :
+- Être inspiré d'un fait, chiffre ou tendance trouvé dans les sources
+- Avoir un angle storytelling ou data fort
+- Correspondre au style de Tony
+- Être formulé comme un titre accrocheur de 10-20 mots
+- Indiquer brièvement l'angle/source d'inspiration
+
+Réponds en JSON : {"subjects": [{"title": "...", "angle": "bref résumé de l'angle/source"}, ...]}
+Pas de markdown, pas de backticks, juste le JSON.`,
+        },
+      ], 2000);
+
+      try {
+        const cleaned = result.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+        const parsed = JSON.parse(cleaned);
+        return NextResponse.json({ data: parsed });
+      } catch {
+        return NextResponse.json({ data: { subjects: [] }, raw: result });
+      }
+    }
+
+    // ── generate: full post + image prompt ───────────────
+    if (action === "generate") {
+      const { theme, subject } = body;
+      const themeInfo = THEMES[theme as string];
+      if (!themeInfo || !subject) return NextResponse.json({ error: "Thème et sujet requis" }, { status: 400 });
+
+      const result = await askAI([
+        {
+          role: "system",
+          content: `Tu es le ghostwriter LinkedIn de Tony, CEO de Metagora.
 
 ${EDITORIAL_LINE}
 
@@ -190,25 +274,91 @@ CONSIGNES IMPÉRATIVES :
 - Termine par une question ouverte pour l'engagement.
 - Ajoute des hashtags pertinents à la fin.
 - N'utilise JAMAIS de jargon corporate vide.
-- Écris en FRANÇAIS.`,
+- Écris en FRANÇAIS.
+
+En plus du post, propose un prompt d'image d'illustration en anglais (1 phrase, descriptif visuel pour Pexels/Unsplash).`,
         },
         {
           role: "user",
-          content: `Rédige un post LinkedIn sur le thème "${themeInfo.emoji} ${themeInfo.name}" avec le sujet suivant :
+          content: `Rédige un post LinkedIn sur le thème "${themeInfo.emoji} ${themeInfo.name}" avec le sujet :
 "${subject}"
 
-Écris le post complet, prêt à copier-coller sur LinkedIn.`,
+Réponds en JSON : {"post": "le post complet", "imagePrompt": "prompt image en anglais"}
+Pas de markdown, pas de backticks, juste le JSON.`,
         },
-      ], 2000);
+      ], 2500);
 
-      return NextResponse.json({ data: { post } });
+      try {
+        const cleaned = result.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+        const parsed = JSON.parse(cleaned);
+        return NextResponse.json({ data: parsed });
+      } catch {
+        // Fallback: return as plain post
+        return NextResponse.json({ data: { post: result, imagePrompt: "" } });
+      }
     }
 
-    if (action === "refine") {
-      // Refine an existing post
-      if (!currentPost || !instructions) {
-        return NextResponse.json({ error: "Post actuel et instructions requis" }, { status: 400 });
+    // ── hooks: generate 5 hook variants ──────────────────
+    if (action === "hooks") {
+      const { post } = body;
+      if (!post) return NextResponse.json({ error: "Post requis" }, { status: 400 });
+
+      const result = await askAI([
+        {
+          role: "system",
+          content: `Tu es un expert en copywriting LinkedIn.
+
+${HOOKS_BEST_PRACTICES}
+
+${STYLE_EXAMPLES}`,
+        },
+        {
+          role: "user",
+          content: `Voici un post LinkedIn :
+---
+${post}
+---
+
+Génère exactement 5 accroches alternatives (les 2-3 premières lignes du post, avant "…voir plus").
+Chaque accroche doit utiliser une technique différente et être percutante.
+
+Réponds en JSON : {"hooks": ["accroche 1", "accroche 2", "accroche 3", "accroche 4", "accroche 5"]}
+Pas de markdown, pas de backticks, juste le JSON.`,
+        },
+      ], 1000);
+
+      try {
+        const cleaned = result.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+        const parsed = JSON.parse(cleaned);
+        return NextResponse.json({ data: parsed });
+      } catch {
+        return NextResponse.json({ data: { hooks: result.split("\n").filter(Boolean).slice(0, 5) } });
       }
+    }
+
+    // ── refine-hook: modify a hook via prompt ────────────
+    if (action === "refine-hook") {
+      const { hook, instructions } = body;
+      if (!hook || !instructions) return NextResponse.json({ error: "Hook et instructions requis" }, { status: 400 });
+
+      const refined = await askAI([
+        {
+          role: "system",
+          content: `Tu es un expert copywriting LinkedIn. Modifie l'accroche selon les instructions.\n\n${HOOKS_BEST_PRACTICES}`,
+        },
+        {
+          role: "user",
+          content: `Accroche actuelle :\n"${hook}"\n\nModification demandée : ${instructions}\n\nRetourne UNIQUEMENT l'accroche modifiée, rien d'autre.`,
+        },
+      ], 500);
+
+      return NextResponse.json({ data: { hook: refined } });
+    }
+
+    // ── refine: modify existing post ─────────────────────
+    if (action === "refine") {
+      const { currentPost, instructions } = body;
+      if (!currentPost || !instructions) return NextResponse.json({ error: "Post actuel et instructions requis" }, { status: 400 });
 
       const refined = await askAI([
         {
