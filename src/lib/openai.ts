@@ -3,11 +3,6 @@
  * Utilisé uniquement côté serveur (API routes).
  */
 
-const ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT!;
-const API_KEY = process.env.AZURE_OPENAI_API_KEY!;
-const API_VERSION = process.env.AZURE_OPENAI_API_VERSION || "2024-12-01-preview";
-const DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.4-pro";
-
 /** Description de Metagora pour le system prompt */
 const METAGORA_CONTEXT = `
 Metagora est une startup française spécialisée dans la formation commerciale immersive par l'IA.
@@ -82,53 +77,10 @@ ${userPrompt ? `Instructions supplémentaires : ${userPrompt}` : "Adapte le temp
 
 Réponds UNIQUEMENT avec le texte du message, sans commentaire ni explication.`;
 
-  const messages = [
+  // Use shared askAzureAI helper (Responses API)
+  const { askAzureAI } = await import("@/lib/azure-ai");
+  return await askAzureAI([
     { role: "system", content: systemMessage },
     { role: "user", content: userMessage },
-  ];
-
-  // 1) Try chat/completions first
-  const chatUrl = `${ENDPOINT}openai/deployments/${DEPLOYMENT}/chat/completions?api-version=${API_VERSION}`;
-  const chatRes = await fetch(chatUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "api-key": API_KEY },
-    body: JSON.stringify({ messages, max_completion_tokens: 1000 }),
-  });
-
-  if (chatRes.ok) {
-    const json = await chatRes.json();
-    return json.choices?.[0]?.message?.content?.trim() ?? "";
-  }
-
-  // 2) Fallback to Responses API (gpt-5.4-pro etc.)
-  const responsesUrl = `${ENDPOINT}openai/responses?api-version=2025-04-01-preview`;
-  const responsesRes = await fetch(responsesUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "api-key": API_KEY },
-    body: JSON.stringify({
-      model: DEPLOYMENT,
-      input: [
-        { role: "developer", content: systemMessage },
-        { role: "user", content: userMessage },
-      ],
-      max_output_tokens: 1000,
-    }),
-  });
-
-  if (!responsesRes.ok) {
-    const text = await responsesRes.text();
-    throw new Error(`Azure OpenAI error: ${responsesRes.status} ${text}`);
-  }
-
-  const rData = await responsesRes.json();
-  if (Array.isArray(rData.output)) {
-    for (const item of rData.output) {
-      if (item.type === "message" && Array.isArray(item.content)) {
-        for (const c of item.content) {
-          if (c.type === "output_text" && c.text) return c.text.trim();
-        }
-      }
-    }
-  }
-  return rData.output_text?.trim() ?? "";
+  ], 1000);
 }
