@@ -122,7 +122,7 @@ async function askAI(
   if (!res.ok) {
     const err = await res.text();
     console.error("Azure OpenAI error:", res.status, err);
-    throw new Error(`Azure OpenAI ${res.status}`);
+    throw new Error(`Azure OpenAI ${res.status}: ${err.slice(0, 200)}`);
   }
 
   const data = await res.json();
@@ -211,38 +211,26 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       if (!themeInfo) return NextResponse.json({ error: "Thème invalide" }, { status: 400 });
       if (!sourceUrls?.length) return NextResponse.json({ error: "Aucune source sélectionnée" }, { status: 400 });
 
-      // Scrape all sources in parallel
+      // Scrape sources in parallel (max 3)
       const scrapedContents = await Promise.all(
-        (sourceUrls as string[]).slice(0, 5).map(async (url: string) => {
+        (sourceUrls as string[]).slice(0, 3).map(async (url: string) => {
           const text = await scrapeUrl(url);
-          return `── Source: ${url} ──\n${text}`;
+          return `── ${url} ──\n${text}`;
         })
       );
 
-      const allContent = scrapedContents.join("\n\n");
+      // Limit total scraped content to ~4000 chars
+      let allContent = scrapedContents.join("\n\n");
+      if (allContent.length > 4000) allContent = allContent.slice(0, 4000) + "\n[...tronqué]";
 
       const result = await askAI([
         {
           role: "system",
-          content: `Tu es un expert LinkedIn et content strategist pour Tony, CEO de Metagora.\n\n${EDITORIAL_LINE}\n\n${STYLE_EXAMPLES}`,
+          content: `Tu es un expert LinkedIn pour Tony, CEO de Metagora (startup IA retail/luxe). Style : ton direct, storytelling, données chiffrées, emojis modérés, 150-300 mots, jamais corporate.`,
         },
         {
           role: "user",
-          content: `J'ai scrappé ces sources web pour le thème "${themeInfo.emoji} ${themeInfo.name}" :
-
-${allContent}
-
-À partir de ces contenus, suggère exactement 10 sujets de posts LinkedIn pertinents.
-
-Chaque sujet doit :
-- Être inspiré d'un fait, chiffre ou tendance trouvé dans les sources
-- Avoir un angle storytelling ou data fort
-- Correspondre au style de Tony
-- Être formulé comme un titre accrocheur de 10-20 mots
-- Indiquer brièvement l'angle/source d'inspiration
-
-Réponds en JSON : {"subjects": [{"title": "...", "angle": "bref résumé de l'angle/source"}, ...]}
-Pas de markdown, pas de backticks, juste le JSON.`,
+          content: `Sources scrappées pour le thème "${themeInfo.emoji} ${themeInfo.name}" :\n\n${allContent}\n\nSuggère exactement 10 sujets de posts LinkedIn inspirés de ces sources.\nChaque sujet : titre accrocheur 10-20 mots + bref angle/source.\n\nRéponds en JSON : {"subjects": [{"title": "...", "angle": "..."}, ...]}\nPas de markdown, juste le JSON.`,
         },
       ], 2000);
 

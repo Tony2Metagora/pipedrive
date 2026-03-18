@@ -309,10 +309,13 @@ export default function LinkedInCalendar() {
                       key={p.id}
                       onClick={() => setSelectedPost(p)}
                       className={cn(
-                        "w-full mt-0.5 px-1 py-0.5 rounded text-left truncate cursor-pointer transition-colors",
+                        "w-full mt-0.5 px-1 py-0.5 sm:py-1 rounded text-left cursor-pointer transition-colors",
                         tc.bg, tc.text, "hover:opacity-80"
                       )}
                     >
+                      <span className="text-[8px] sm:text-[10px] flex items-center gap-0.5 opacity-70">
+                        {p.publishTime} {tc.label.split(" ")[0]}
+                      </span>
                       <span className="text-[9px] sm:text-[10px] font-medium block truncate">
                         {p.title}
                       </span>
