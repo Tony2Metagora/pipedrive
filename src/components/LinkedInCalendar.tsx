@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
-  ChevronLeft, ChevronRight, Loader2, Trash2, Clock, Eye, X,
+  ChevronLeft, ChevronRight, Loader2, Trash2, Clock, Eye, X, Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -28,11 +28,25 @@ const THEME_COLORS: Record<string, { bg: string; text: string; dot: string; labe
 
 const DAY_NAMES = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 
+const THEME_OPTIONS = [
+  { key: "journal-ceo", label: "1️⃣ Journal d'un CEO" },
+  { key: "ia-formation", label: "2️⃣ IA dans la formation" },
+  { key: "ia-operationnelle", label: "3️⃣ IA Opérationnelle" },
+];
+
 export default function LinkedInCalendar() {
   const [posts, setPosts] = useState<CalendarPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState(() => new Date());
   const [selectedPost, setSelectedPost] = useState<CalendarPost | null>(null);
+
+  // Manual post creation
+  const [showAddPost, setShowAddPost] = useState(false);
+  const [newPostTitle, setNewPostTitle] = useState("");
+  const [newPostTheme, setNewPostTheme] = useState("journal-ceo");
+  const [newPostDate, setNewPostDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [newPostTime, setNewPostTime] = useState("09:00");
+  const [addPostLoading, setAddPostLoading] = useState(false);
 
   // ─── Load posts ───────────────────────────────────────
 
@@ -111,6 +125,35 @@ export default function LinkedInCalendar() {
 
   const monthNames = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
 
+  const handleAddManualPost = async () => {
+    if (!newPostTitle.trim()) return;
+    setAddPostLoading(true);
+    try {
+      const res = await fetch("/api/linkedin/posts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: newPostTitle.trim(),
+          content: newPostTitle.trim(),
+          theme: newPostTheme,
+          hook: "",
+          publishDate: newPostDate,
+          publishTime: newPostTime,
+        }),
+      });
+      const json = await res.json();
+      if (json.data) {
+        setPosts((prev) => [...prev, json.data]);
+        setNewPostTitle("");
+        setShowAddPost(false);
+      }
+    } catch (err) {
+      console.error("Add post error:", err);
+    } finally {
+      setAddPostLoading(false);
+    }
+  };
+
   const handleDelete = async (id: string) => {
     if (!confirm("Supprimer ce post ?")) return;
     try {
@@ -139,11 +182,18 @@ export default function LinkedInCalendar() {
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <h2 className="text-lg sm:text-xl font-bold text-gray-900">
           {monthNames[month]} {year}
         </h2>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowAddPost(!showAddPost)}
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Ajouter
+          </button>
           <button
             onClick={() => setCurrentDate(new Date(year, month - 1, 1))}
             className="p-1.5 rounded-lg hover:bg-gray-100 cursor-pointer"
@@ -164,6 +214,58 @@ export default function LinkedInCalendar() {
           </button>
         </div>
       </div>
+
+      {/* Add post form */}
+      {showAddPost && (
+        <div className="mb-4 p-4 bg-white rounded-xl border border-gray-200 space-y-3">
+          <p className="text-sm font-semibold text-gray-800">Ajouter un post manuellement</p>
+          <input
+            type="text"
+            value={newPostTitle}
+            onChange={(e) => setNewPostTitle(e.target.value)}
+            placeholder="Titre du post"
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-300"
+          />
+          <div className="flex flex-col sm:flex-row gap-2">
+            <select
+              value={newPostTheme}
+              onChange={(e) => setNewPostTheme(e.target.value)}
+              className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-300 bg-white"
+            >
+              {THEME_OPTIONS.map((t) => (
+                <option key={t.key} value={t.key}>{t.label}</option>
+              ))}
+            </select>
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={newPostDate}
+                onChange={(e) => setNewPostDate(e.target.value)}
+                className="px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-300"
+              />
+              <input
+                type="time"
+                value={newPostTime}
+                onChange={(e) => setNewPostTime(e.target.value)}
+                className="px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-300"
+              />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleAddManualPost}
+              disabled={!newPostTitle.trim() || addPostLoading}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
+            >
+              {addPostLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              Ajouter
+            </button>
+            <button onClick={() => setShowAddPost(false)} className="px-4 py-2 text-sm text-gray-500 bg-gray-100 rounded-lg hover:bg-gray-200 cursor-pointer">
+              Annuler
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Calendar grid */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">

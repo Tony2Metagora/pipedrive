@@ -133,13 +133,16 @@ async function askAI(
 
 async function scrapeUrl(url: string): Promise<string> {
   try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
     const res = await fetch(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml",
       },
-      signal: AbortSignal.timeout(10000),
+      signal: controller.signal,
     });
+    clearTimeout(timer);
     if (!res.ok) return `[Erreur ${res.status} pour ${url}]`;
     const html = await res.text();
     // Strip HTML tags, scripts, styles — keep text
@@ -149,8 +152,8 @@ async function scrapeUrl(url: string): Promise<string> {
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ")
       .trim();
-    // Limit to ~3000 chars to stay within token budget
-    return text.slice(0, 3000);
+    // Limit to ~2000 chars to stay within token budget
+    return text.slice(0, 2000);
   } catch (e) {
     return `[Impossible de lire ${url}: ${String(e)}]`;
   }

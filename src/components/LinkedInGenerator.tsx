@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Sparkles, Loader2, Copy, Check, RefreshCw, Send,
   ImageIcon, Search, Download, AlertCircle, ChevronRight,
-  Globe, Plus, Trash2, ExternalLink, CheckCircle2,
+  Globe, Plus, Trash2, ExternalLink, CheckCircle2, Edit3,
   Calendar, Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -40,6 +40,7 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
   const [newSourceUrl, setNewSourceUrl] = useState("");
   const [newSourceThemes, setNewSourceThemes] = useState<Set<string>>(new Set());
   const [newSourceType, setNewSourceType] = useState<"site" | "youtube">("site");
+  const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
 
   // Theme & subject
   const [selectedTheme, setSelectedTheme] = useState<string | null>(null);
@@ -294,6 +295,31 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
     } catch (err) { setError(String(err)); }
   };
 
+  const handleToggleSourceTheme = async (sourceId: string, themeKey: string) => {
+    const source = sources.find((s) => s.id === sourceId);
+    if (!source) return;
+    const hasTheme = source.themes.includes(themeKey);
+    // Must keep at least 1 theme
+    if (hasTheme && source.themes.length <= 1) return;
+    const newThemes = hasTheme ? source.themes.filter((t) => t !== themeKey) : [...source.themes, themeKey];
+    try {
+      await fetch("/api/linkedin/sources", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: sourceId, themes: newThemes }),
+      });
+      setSources((prev) => prev.map((s) => s.id === sourceId ? { ...s, themes: newThemes } : s));
+    } catch (err) { setError(String(err)); }
+  };
+
+  const handleSelectAllSources = () => {
+    if (selectedSourceIds.size === themeSources.length) {
+      setSelectedSourceIds(new Set());
+    } else {
+      setSelectedSourceIds(new Set(themeSources.map((s) => s.id)));
+    }
+  };
+
   const handleSchedulePost = async () => {
     if (!generatedPost || !scheduleDate || !scheduleTime) return;
     setScheduleLoading(true);
@@ -366,18 +392,28 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
       {/* ─── Step 2: Sources ─────────────────────────── */}
       {selectedTheme && (
         <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-5">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
             <div>
               <h2 className="text-sm font-semibold text-gray-800">Étape 2 — Sources</h2>
               <p className="text-xs text-gray-400">Coche les sources à analyser (optionnel)</p>
             </div>
-            <button
-              onClick={() => setShowAddSource(!showAddSource)}
-              className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800 cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Ajouter
-            </button>
+            <div className="flex items-center gap-3">
+              {themeSources.length > 0 && (
+                <button
+                  onClick={handleSelectAllSources}
+                  className="text-xs font-medium text-gray-500 hover:text-gray-700 cursor-pointer"
+                >
+                  {selectedSourceIds.size === themeSources.length ? "Tout décocher" : "Tout cocher"}
+                </button>
+              )}
+              <button
+                onClick={() => setShowAddSource(!showAddSource)}
+                className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Ajouter
+              </button>
+            </div>
           </div>
 
           {/* Add source form */}
@@ -430,28 +466,65 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
           ) : themeSources.length === 0 ? (
             <p className="text-xs text-gray-400 py-3">Aucune source pour ce thème. Ajoute-en une !</p>
           ) : (
-            <div className="space-y-1 max-h-60 overflow-y-auto">
+            <div className="space-y-1.5 max-h-72 overflow-y-auto">
               {themeSources.map((s) => (
-                <div key={s.id} className="flex items-center gap-2 group">
-                  <input
-                    type="checkbox"
-                    checked={selectedSourceIds.has(s.id)}
-                    onChange={() => {
-                      const next = new Set(selectedSourceIds);
-                      next.has(s.id) ? next.delete(s.id) : next.add(s.id);
-                      setSelectedSourceIds(next);
-                    }}
-                    className="rounded flex-shrink-0"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm text-gray-700 truncate block">{s.name}</span>
+                <div key={s.id} className="group">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedSourceIds.has(s.id)}
+                      onChange={() => {
+                        const next = new Set(selectedSourceIds);
+                        next.has(s.id) ? next.delete(s.id) : next.add(s.id);
+                        setSelectedSourceIds(next);
+                      }}
+                      className="rounded flex-shrink-0"
+                    />
+                    <div className="flex-1 min-w-0 flex items-center gap-1.5 flex-wrap">
+                      <span className="text-sm text-gray-700 truncate">{s.name}</span>
+                      {s.themes.map((tk) => {
+                        const t = THEMES.find((th) => th.key === tk);
+                        return t ? (
+                          <span key={tk} className={cn(
+                            "text-[9px] font-semibold px-1.5 py-0.5 rounded-full",
+                            tk === "journal-ceo" ? "bg-amber-100 text-amber-700" :
+                            tk === "ia-formation" ? "bg-blue-100 text-blue-700" :
+                            "bg-emerald-100 text-emerald-700"
+                          )}>{t.emoji}</span>
+                        ) : null;
+                      })}
+                    </div>
+                    <button onClick={() => setEditingSourceId(editingSourceId === s.id ? null : s.id)} className="text-gray-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 flex-shrink-0 cursor-pointer" title="Modifier les thèmes">
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                    <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-gray-300 hover:text-blue-500 flex-shrink-0">
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                    <button onClick={() => handleDeleteSource(s.id)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 flex-shrink-0 cursor-pointer">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
-                  <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-gray-300 hover:text-blue-500 flex-shrink-0">
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
-                  <button onClick={() => handleDeleteSource(s.id)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 flex-shrink-0 cursor-pointer">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {/* Inline theme editing */}
+                  {editingSourceId === s.id && (
+                    <div className="ml-6 mt-1 flex flex-wrap gap-1.5 pb-1">
+                      {THEMES.map((t) => (
+                        <button
+                          key={t.key}
+                          onClick={() => handleToggleSourceTheme(s.id, t.key)}
+                          className={cn(
+                            "text-[10px] font-medium px-2 py-0.5 rounded-full border transition-colors cursor-pointer",
+                            s.themes.includes(t.key)
+                              ? t.key === "journal-ceo" ? "bg-amber-100 text-amber-700 border-amber-300" :
+                                t.key === "ia-formation" ? "bg-blue-100 text-blue-700 border-blue-300" :
+                                "bg-emerald-100 text-emerald-700 border-emerald-300"
+                              : "bg-gray-50 text-gray-400 border-gray-200 hover:border-gray-300"
+                          )}
+                        >
+                          {t.emoji} {t.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
