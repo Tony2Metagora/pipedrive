@@ -192,15 +192,15 @@ export default function LinkedInPage() {
   return (
     <>
       <Navbar />
-      <div className="max-w-4xl mx-auto px-4 py-8">
+      <div className="max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
         {/* Header */}
-        <div className="flex items-center gap-3 mb-8">
-          <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
-            <Linkedin className="w-5 h-5 text-blue-600" />
+        <div className="flex items-center gap-3 mb-6 sm:mb-8">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0">
+            <Linkedin className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-gray-900">LinkedIn Post Generator</h1>
-            <p className="text-sm text-gray-500">Génère des posts LinkedIn à partir de ta ligne éditoriale</p>
+            <h1 className="text-lg sm:text-xl font-bold text-gray-900">LinkedIn Post Generator</h1>
+            <p className="text-xs sm:text-sm text-gray-500">Génère des posts LinkedIn à partir de ta ligne éditoriale</p>
           </div>
         </div>
 
@@ -220,7 +220,7 @@ export default function LinkedInPage() {
           <h2 className="text-sm font-semibold text-gray-800 mb-1">Étape 1 — Choisis un thème</h2>
           <p className="text-xs text-gray-400 mb-4">Basé sur ta ligne éditoriale</p>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {THEMES.map((t) => (
               <button
                 key={t.key}
@@ -352,19 +352,19 @@ export default function LinkedInPage() {
               <label className="block text-xs font-medium text-gray-600 mb-2">
                 Demander une modification à l&apos;IA
               </label>
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <input
                   type="text"
                   value={refineInstructions}
                   onChange={(e) => setRefineInstructions(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleRefine(); } }}
-                  placeholder="Ex: Rends-le plus punchy, ajoute une anecdote perso, raccourcis-le..."
+                  placeholder="Ex: Rends-le plus punchy, ajoute une anecdote perso..."
                   className="flex-1 px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-300 focus:border-blue-400 outline-none"
                 />
                 <button
                   onClick={handleRefine}
                   disabled={!refineInstructions || refineLoading}
-                  className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors cursor-pointer"
+                  className="flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors cursor-pointer"
                 >
                   {refineLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                   Modifier
@@ -382,19 +382,19 @@ export default function LinkedInPage() {
           </div>
           <p className="text-xs text-gray-400 mb-4">Recherche une image libre de droits (Pexels)</p>
 
-          <div className="flex gap-2 mb-4">
+          <div className="flex flex-col sm:flex-row gap-2 mb-4">
             <input
               type="text"
               value={imageQuery}
               onChange={(e) => setImageQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleImageSearch(); } }}
-              placeholder="Ex: retail store luxury, team meeting, AI technology..."
+              placeholder="Ex: retail store luxury, team meeting..."
               className="flex-1 px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-300 focus:border-blue-400 outline-none"
             />
             <button
               onClick={handleImageSearch}
               disabled={!imageQuery.trim() || imageLoading}
-              className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium text-white bg-gray-800 rounded-lg hover:bg-gray-900 disabled:opacity-50 transition-colors cursor-pointer"
+              className="flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-medium text-white bg-gray-800 rounded-lg hover:bg-gray-900 disabled:opacity-50 transition-colors cursor-pointer"
             >
               {imageLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
               Rechercher
@@ -402,7 +402,7 @@ export default function LinkedInPage() {
           </div>
 
           {imageResults.length > 0 && (
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
               {imageResults.map((img, i) => (
                 <div key={i} className="group relative rounded-lg overflow-hidden border border-gray-200">
                   <img

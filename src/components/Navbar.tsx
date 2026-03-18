@@ -6,18 +6,18 @@ import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import {
   LayoutDashboard, LogOut, TrendingUp, Users, Globe,
-  Database, Settings, ChevronDown, Linkedin,
+  Database, Settings, ChevronDown, Linkedin, Menu, X,
+  BarChart3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePermissions, canRead } from "@/hooks/usePermissions";
 import type { ViewKey } from "@/lib/permissions";
 
-const NAV_ITEMS: Array<{ href: string; label: string; icon: typeof Globe; viewKey: ViewKey }> = [
+const NAV_ITEMS: Array<{ href: string; label: string; icon: typeof Globe; viewKey: ViewKey; mobileOnly?: boolean }> = [
   { href: "/landing-generator", label: "Landing", icon: Globe, viewKey: "landing" },
   { href: "/linkedin", label: "LinkedIn", icon: Linkedin, viewKey: "linkedin" },
   { href: "/dashboard", label: "Affaires", icon: LayoutDashboard, viewKey: "dashboard" },
   { href: "/prospects", label: "Prospects", icon: Users, viewKey: "prospects" },
-  { href: "/pipeline", label: "Pipeline", icon: TrendingUp, viewKey: "pipeline" },
   { href: "/scrapping", label: "Scrapping", icon: Database, viewKey: "scrapping" },
 ];
 
@@ -25,9 +25,11 @@ export default function Navbar() {
   const pathname = usePathname();
   const { permissions, isAdmin, loading, name } = usePermissions();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const mobileRef = useRef<HTMLDivElement>(null);
 
-  // Close menu on outside click
+  // Close user menu on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setUserMenuOpen(false);
@@ -36,7 +38,17 @@ export default function Navbar() {
     return () => document.removeEventListener("mousedown", handler);
   }, [userMenuOpen]);
 
-  const visibleItems = loading
+  // Close mobile menu on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (mobileRef.current && !mobileRef.current.contains(e.target as Node)) setMobileMenuOpen(false);
+    };
+    if (mobileMenuOpen) document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [mobileMenuOpen]);
+
+  // Desktop: filter nav items by permissions (exclude Pipeline/Analytics — it goes in user menu)
+  const desktopItems = loading
     ? NAV_ITEMS
     : NAV_ITEMS.filter((item) => canRead(permissions, item.viewKey));
 
@@ -46,12 +58,76 @@ export default function Navbar() {
     <nav className="bg-white border-b border-gray-200 sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-14">
-          {/* Spacer */}
-          <div className="w-4" />
 
-          {/* Navigation */}
-          <div className="flex items-center gap-1">
-            {visibleItems.map((item) => {
+          {/* ══ MOBILE: LinkedIn link (always visible) + burger ══ */}
+          <div className="flex md:hidden items-center gap-2 flex-1">
+            <Link
+              href="/linkedin"
+              className={cn(
+                "flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+                pathname.startsWith("/linkedin")
+                  ? "bg-blue-50 text-blue-700"
+                  : "text-gray-600 hover:bg-gray-100"
+              )}
+            >
+              <Linkedin className="w-4 h-4" />
+              LinkedIn
+            </Link>
+          </div>
+
+          {/* Mobile burger button */}
+          <div className="md:hidden relative" ref={mobileRef}>
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="p-2 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors cursor-pointer"
+            >
+              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
+
+            {/* Mobile dropdown */}
+            {mobileMenuOpen && (
+              <div className="absolute right-0 top-full mt-1 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-50">
+                {/* Analytics */}
+                <Link
+                  href="/pipeline"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={cn(
+                    "flex items-center gap-2.5 px-4 py-2.5 text-sm transition-colors",
+                    pathname.startsWith("/pipeline")
+                      ? "bg-indigo-50 text-indigo-700"
+                      : "text-gray-700 hover:bg-gray-50"
+                  )}
+                >
+                  <BarChart3 className="w-4 h-4" />
+                  Analytics
+                </Link>
+
+                <div className="border-t border-gray-100 my-1" />
+
+                {/* User info */}
+                <div className="px-4 py-2">
+                  <p className="text-sm font-medium text-gray-900">{displayName}</p>
+                </div>
+
+                {/* Logout */}
+                <button
+                  onClick={() => { setMobileMenuOpen(false); signOut({ callbackUrl: "/login" }); }}
+                  className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Déconnexion
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* ══ DESKTOP: full nav ══ */}
+          {/* Spacer left */}
+          <div className="hidden md:block w-4" />
+
+          {/* Navigation links (desktop only) */}
+          <div className="hidden md:flex items-center gap-1">
+            {desktopItems.map((item) => {
               const isActive = pathname.startsWith(item.href);
               return (
                 <Link
@@ -71,8 +147,8 @@ export default function Navbar() {
             })}
           </div>
 
-          {/* User dropdown menu */}
-          <div className="relative" ref={menuRef}>
+          {/* User dropdown (desktop only) */}
+          <div className="hidden md:block relative" ref={menuRef}>
             <button
               onClick={() => setUserMenuOpen(!userMenuOpen)}
               className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
@@ -80,15 +156,28 @@ export default function Navbar() {
               <div className="w-7 h-7 bg-indigo-600 rounded-full flex items-center justify-center">
                 <span className="text-white text-xs font-bold">{displayName.charAt(0).toUpperCase()}</span>
               </div>
-              <span className="hidden sm:inline">{displayName}</span>
+              <span>{displayName}</span>
               <ChevronDown className={cn("w-3.5 h-3.5 text-gray-400 transition-transform", userMenuOpen && "rotate-180")} />
             </button>
             {userMenuOpen && (
               <div className="absolute right-0 top-full mt-1 w-52 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
                 <div className="px-4 py-2 border-b border-gray-100">
                   <p className="text-sm font-medium text-gray-900">{displayName}</p>
-                  <p className="text-xs text-gray-400 truncate">{loading ? "…" : ""}</p>
                 </div>
+                {/* Analytics (desktop: in user menu) */}
+                <Link
+                  href="/pipeline"
+                  onClick={() => setUserMenuOpen(false)}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2 text-sm transition-colors",
+                    pathname.startsWith("/pipeline")
+                      ? "bg-indigo-50 text-indigo-700"
+                      : "text-gray-700 hover:bg-gray-50"
+                  )}
+                >
+                  <BarChart3 className="w-4 h-4" />
+                  Analytics
+                </Link>
                 {isAdmin && (
                   <Link
                     href="/admin"

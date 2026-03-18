@@ -130,57 +130,57 @@ export default function PipelinePage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Pipeline</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Analytics</h1>
+          <p className="text-xs sm:text-sm text-gray-500 mt-1">
             Vue d&apos;ensemble des affaires par pipeline et étape
           </p>
         </div>
       </div>
 
       {/* Totaux globaux */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center">
-              <Hash className="w-5 h-5 text-indigo-600" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-6">
+        <div className="bg-white rounded-xl border border-gray-200 p-3 sm:p-5">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-indigo-50 flex items-center justify-center flex-shrink-0">
+              <Hash className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-600" />
             </div>
-            <div>
-              <p className="text-sm text-gray-500">Affaires ouvertes</p>
-              <p className="text-2xl font-bold text-gray-900">{grandTotalDeals}</p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-emerald-50 flex items-center justify-center">
-              <DollarSign className="w-5 h-5 text-emerald-600" />
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">Valeur totale (ouvertes)</p>
-              <p className="text-2xl font-bold text-gray-900">{formatCurrency(grandTotalValue)}</p>
+            <div className="min-w-0">
+              <p className="text-xs sm:text-sm text-gray-500 truncate">Affaires ouvertes</p>
+              <p className="text-lg sm:text-2xl font-bold text-gray-900">{grandTotalDeals}</p>
             </div>
           </div>
         </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-yellow-50 flex items-center justify-center">
-              <Trophy className="w-5 h-5 text-yellow-600" />
+        <div className="bg-white rounded-xl border border-gray-200 p-3 sm:p-5">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0">
+              <DollarSign className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600" />
             </div>
-            <div>
-              <p className="text-sm text-gray-500">Gagné</p>
-              <p className="text-2xl font-bold text-yellow-600">{formatCurrency(totalWonValue)}</p>
-              <p className="text-xs text-gray-400">{wonDeals.length} affaire{wonDeals.length !== 1 ? "s" : ""}</p>
+            <div className="min-w-0">
+              <p className="text-xs sm:text-sm text-gray-500 truncate">Valeur totale</p>
+              <p className="text-lg sm:text-2xl font-bold text-gray-900">{formatCurrency(grandTotalValue)}</p>
             </div>
           </div>
         </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center">
-              <TrendingUp className="w-5 h-5 text-amber-600" />
+        <div className="bg-white rounded-xl border border-gray-200 p-3 sm:p-5">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-yellow-50 flex items-center justify-center flex-shrink-0">
+              <Trophy className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-600" />
             </div>
-            <div>
-              <p className="text-sm text-gray-500">Valeur moyenne</p>
-              <p className="text-2xl font-bold text-gray-900">
+            <div className="min-w-0">
+              <p className="text-xs sm:text-sm text-gray-500 truncate">Gagné</p>
+              <p className="text-lg sm:text-2xl font-bold text-yellow-600">{formatCurrency(totalWonValue)}</p>
+              <p className="text-[10px] sm:text-xs text-gray-400">{wonDeals.length} affaire{wonDeals.length !== 1 ? "s" : ""}</p>
+            </div>
+          </div>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-3 sm:p-5">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-amber-50 flex items-center justify-center flex-shrink-0">
+              <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-amber-600" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs sm:text-sm text-gray-500 truncate">Valeur moyenne</p>
+              <p className="text-lg sm:text-2xl font-bold text-gray-900">
                 {grandTotalDeals > 0 ? formatCurrency(grandTotalValue / grandTotalDeals) : "—"}
               </p>
             </div>
@@ -202,27 +202,27 @@ export default function PipelinePage() {
                 onClick={() =>
                   setExpandedPipeline(isExpanded ? null : pipeline.pipelineId)
                 }
-                className="w-full flex items-center justify-between p-5 hover:bg-gray-50 transition-colors cursor-pointer"
+                className="w-full flex items-center justify-between p-3 sm:p-5 hover:bg-gray-50 transition-colors cursor-pointer"
               >
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center">
-                    <TrendingUp className="w-5 h-5 text-indigo-600" />
+                <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+                  <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0">
+                    <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-600" />
                   </div>
-                  <div className="text-left">
-                    <h2 className="text-base font-semibold text-gray-900">
+                  <div className="text-left min-w-0">
+                    <h2 className="text-sm sm:text-base font-semibold text-gray-900 truncate">
                       {pipeline.pipelineName}
                     </h2>
-                    <p className="text-sm text-gray-500">
+                    <p className="text-xs sm:text-sm text-gray-500">
                       {pipeline.totalDeals} affaire{pipeline.totalDeals !== 1 ? "s" : ""}
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-6">
+                <div className="flex items-center gap-3 sm:gap-6 flex-shrink-0">
                   <div className="text-right">
-                    <p className="text-lg font-bold text-gray-900">
+                    <p className="text-sm sm:text-lg font-bold text-gray-900">
                       {formatCurrency(pipeline.totalValue)}
                     </p>
-                    <p className="text-xs text-gray-400">valeur totale</p>
+                    <p className="text-[10px] sm:text-xs text-gray-400">valeur totale</p>
                   </div>
                   {isExpanded ? (
                     <ChevronUp className="w-5 h-5 text-gray-400" />
@@ -318,27 +318,27 @@ export default function PipelinePage() {
                                 href={`/deal/${deal.id}`}
                                 className="flex items-center justify-between px-8 py-2.5 hover:bg-gray-100 transition-colors border-b border-gray-100 last:border-0"
                               >
-                                <div className="flex items-center gap-3 min-w-0">
-                                  <span className="text-sm font-medium text-gray-800 truncate">
+                                <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                                  <span className="text-xs sm:text-sm font-medium text-gray-800 truncate">
                                     {deal.title}
                                   </span>
                                   {deal.org_name && (
-                                    <span className="flex items-center gap-1 text-xs text-gray-400">
+                                    <span className="hidden sm:flex items-center gap-1 text-xs text-gray-400">
                                       <Building2 className="w-3 h-3" />
                                       {deal.org_name}
                                     </span>
                                   )}
                                   {deal.person_name && (
-                                    <span className="flex items-center gap-1 text-xs text-gray-400">
+                                    <span className="hidden sm:flex items-center gap-1 text-xs text-gray-400">
                                       <User className="w-3 h-3" />
                                       {deal.person_name}
                                     </span>
                                   )}
                                 </div>
-                                <div className="flex items-center gap-3 flex-shrink-0">
+                                <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
                                   <span
                                     className={cn(
-                                      "text-sm font-semibold",
+                                      "text-xs sm:text-sm font-semibold",
                                       deal.value > 0
                                         ? "text-emerald-600"
                                         : "text-gray-400"
@@ -346,7 +346,7 @@ export default function PipelinePage() {
                                   >
                                     {formatCurrency(deal.value || 0)}
                                   </span>
-                                  <ExternalLink className="w-3.5 h-3.5 text-gray-300" />
+                                  <ExternalLink className="w-3.5 h-3.5 text-gray-300 hidden sm:block" />
                                 </div>
                               </Link>
                             ))}
@@ -372,17 +372,17 @@ export default function PipelinePage() {
                           onClick={() => hasWon && setExpandedWon(isWonExpanded ? null : pipeline.pipelineId)}
                           disabled={!hasWon}
                           className={cn(
-                            "w-full flex items-center gap-4 px-5 py-3 border-b border-gray-50 transition-colors bg-yellow-50/40",
+                            "w-full flex items-center gap-2 sm:gap-4 px-3 sm:px-5 py-3 border-b border-gray-50 transition-colors bg-yellow-50/40",
                             hasWon ? "hover:bg-yellow-50 cursor-pointer" : "opacity-50 cursor-default"
                           )}
                         >
-                          <div className="w-32 text-left flex items-center gap-1.5">
+                          <div className="w-20 sm:w-32 text-left flex items-center gap-1.5 flex-shrink-0">
                             <Trophy className="w-3.5 h-3.5 text-yellow-600" />
-                            <p className={cn("text-sm font-medium", hasWon ? "text-yellow-700" : "text-gray-400")}>
+                            <p className={cn("text-xs sm:text-sm font-medium", hasWon ? "text-yellow-700" : "text-gray-400")}>
                               Gagné
                             </p>
                           </div>
-                          <div className="flex-1">
+                          <div className="flex-1 hidden sm:block">
                             <div className="h-6 bg-gray-100 rounded-full overflow-hidden relative">
                               <div
                                 className="h-full bg-gradient-to-r from-yellow-400 to-yellow-500 rounded-full transition-all duration-500"
@@ -395,7 +395,10 @@ export default function PipelinePage() {
                               )}
                             </div>
                           </div>
-                          <div className="w-28 text-right">
+                          <div className="sm:hidden text-xs text-gray-500 flex-shrink-0">
+                            {hasWon ? `${pipelineWonDeals.length}` : "0"}
+                          </div>
+                          <div className="w-20 sm:w-28 text-right flex-shrink-0">
                             <p className={cn("text-sm font-semibold", wonValue > 0 ? "text-yellow-600" : "text-gray-400")}>
                               {formatCurrency(wonValue)}
                             </p>
@@ -413,25 +416,25 @@ export default function PipelinePage() {
                                 href={`/dashboard?deal=${deal.id}`}
                                 className="flex items-center justify-between px-8 py-2.5 hover:bg-yellow-100/60 transition-colors border-b border-yellow-100 last:border-0"
                               >
-                                <div className="flex items-center gap-3 min-w-0">
+                                <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                                   <Trophy className="w-3.5 h-3.5 text-yellow-500 flex-shrink-0" />
-                                  <span className="text-sm font-medium text-gray-800 truncate">{deal.title}</span>
+                                  <span className="text-xs sm:text-sm font-medium text-gray-800 truncate">{deal.title}</span>
                                   {deal.org_name && (
-                                    <span className="flex items-center gap-1 text-xs text-gray-400">
+                                    <span className="hidden sm:flex items-center gap-1 text-xs text-gray-400">
                                       <Building2 className="w-3 h-3" />{deal.org_name}
                                     </span>
                                   )}
                                   {deal.person_name && (
-                                    <span className="flex items-center gap-1 text-xs text-gray-400">
+                                    <span className="hidden sm:flex items-center gap-1 text-xs text-gray-400">
                                       <User className="w-3 h-3" />{deal.person_name}
                                     </span>
                                   )}
                                 </div>
-                                <div className="flex items-center gap-3 flex-shrink-0">
-                                  <span className={cn("text-sm font-semibold", deal.value > 0 ? "text-yellow-600" : "text-gray-400")}>
+                                <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+                                  <span className={cn("text-xs sm:text-sm font-semibold", deal.value > 0 ? "text-yellow-600" : "text-gray-400")}>
                                     {formatCurrency(deal.value || 0)}
                                   </span>
-                                  <ExternalLink className="w-3.5 h-3.5 text-gray-300" />
+                                  <ExternalLink className="w-3.5 h-3.5 text-gray-300 hidden sm:block" />
                                 </div>
                               </Link>
                             ))}
