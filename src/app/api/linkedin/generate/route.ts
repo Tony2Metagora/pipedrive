@@ -176,8 +176,8 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       }
     }
 
-    // ── scrape-suggest: parallel (web_search real-time + fast knowledge base) ──
-    if (action === "scrape-suggest") {
+    // ── suggest-fast: 3 sujets via gpt-5.2-chat (Base IA, ~5s) ──
+    if (action === "suggest-fast") {
       const { theme, sourceUrls } = body;
       const themeInfo = THEMES[theme as string];
       if (!themeInfo) return NextResponse.json({ error: "Thème invalide" }, { status: 400 });
@@ -188,70 +188,81 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       }).join(", ");
 
       const sysPrompt = `Tu es un expert LinkedIn pour Tony, CEO de Metagora (startup IA retail/luxe). Style : ton direct, storytelling, données chiffrées, emojis modérés, 150-300 mots, jamais corporate.`;
-      const jsonFormatRT = `Réponds en JSON : {"subjects": [{"title": "...", "angle": "...", "url": "https://..."}, ...]}\nChaque sujet DOIT inclure l'URL exacte de l'article source trouvé.\nPas de markdown, juste le JSON.`;
-      const jsonFormatKB = `Réponds en JSON : {"subjects": [{"title": "...", "angle": "..."}, ...]}\nPas de markdown, juste le JSON.`;
+      const jsonFormat = `Réponds en JSON : {"subjects": [{"title": "...", "angle": "..."}, ...]}\nPas de markdown, juste le JSON.`;
 
-      // Run BOTH in parallel:
-      // A) gpt-5.4-pro + web_search → 2 sujets temps réel (slow but fresh)
-      // B) gpt-5.2-chat → 3 sujets base de connaissances (fast)
-      const [realtimeResult, knowledgeResult] = await Promise.allSettled([
-        // A) Real-time: GPT-5.4-pro with web_search tool
-        askAzureAI([
-          { role: "system", content: sysPrompt },
-          {
-            role: "user",
-            content: `Recherche sur le web des articles récents des sources suivantes : ${sourceNames}.\nThème : "${themeInfo.emoji} ${themeInfo.name}" (${themeInfo.description}).\n\nTrouve exactement 2 sujets de posts LinkedIn inspirés d'articles RÉELS et RÉCENTS de ces sources.\nChaque sujet DOIT contenir : titre accrocheur 10-20 mots + bref angle + l'URL EXACTE de l'article trouvé.\n\n${jsonFormatRT}`,
-          },
-        ], 1000, [{ type: "web_search_preview" }]),
+      const t0 = Date.now();
+      const raw = await askAzureFast([
+        { role: "system", content: sysPrompt },
+        {
+          role: "user",
+          content: `Je suis les sources suivantes : ${sourceNames}.\nThème : "${themeInfo.emoji} ${themeInfo.name}" (${themeInfo.description}).\n\nSuggère exactement 3 sujets de posts LinkedIn inspirés de ces sources et de l'actualité de ce thème.\nChaque sujet : titre accrocheur 10-20 mots + bref angle.\n\n${jsonFormat}`,
+        },
+      ], 1000);
+      const durationMs = Date.now() - t0;
 
-        // B) Knowledge base: GPT-5.2-chat (fast)
-        askAzureFast([
-          { role: "system", content: sysPrompt },
-          {
-            role: "user",
-            content: `Je suis les sources suivantes : ${sourceNames}.\nThème : "${themeInfo.emoji} ${themeInfo.name}" (${themeInfo.description}).\n\nSuggère exactement 3 sujets de posts LinkedIn inspirés de ces sources et de l'actualité de ce thème.\nChaque sujet : titre accrocheur 10-20 mots + bref angle.\n\n${jsonFormatKB}`,
-          },
-        ], 1000),
-      ]);
-
-      // Parse results
-      type Subject = { title: string; angle: string; source?: string; url?: string };
+      type Subject = { title: string; angle: string; source?: string };
       const subjects: Subject[] = [];
+      try {
+        const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+        const parsed = JSON.parse(cleaned);
+        const items = parsed.subjects || parsed;
+        for (const s of (Array.isArray(items) ? items : []).slice(0, 3)) {
+          subjects.push({ title: s.title || s, angle: s.angle || "", source: "🧠 Base IA" });
+        }
+      } catch (e) { console.error("suggest-fast parse error:", e, raw?.slice(0, 300)); }
 
-      // Parse knowledge base (fast, should always work)
-      if (knowledgeResult.status === "fulfilled" && knowledgeResult.value) {
-        try {
-          const cleaned = knowledgeResult.value.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-          const parsed = JSON.parse(cleaned);
-          const items = parsed.subjects || parsed;
-          for (const s of (Array.isArray(items) ? items : []).slice(0, 3)) {
-            subjects.push({ title: s.title || s, angle: s.angle || "", source: "🧠 Base IA" });
-          }
-        } catch (e) { console.error("Knowledge base parse error:", e, knowledgeResult.value?.slice?.(0, 300)); }
-      } else if (knowledgeResult.status === "rejected") {
-        console.error("Knowledge base call failed:", knowledgeResult.reason);
-      }
+      return NextResponse.json({
+        data: { subjects, model: "gpt-5.2-chat", durationMs, sourceCount: (sourceUrls as string[]).length },
+      });
+    }
 
-      // Parse real-time (slow, may timeout)
-      if (realtimeResult.status === "fulfilled" && realtimeResult.value) {
+    // ── suggest-realtime: 2 sujets via gpt-5.4-pro + web_search (~30-50s) ──
+    if (action === "suggest-realtime") {
+      const { theme, sourceUrls } = body;
+      const themeInfo = THEMES[theme as string];
+      if (!themeInfo) return NextResponse.json({ error: "Thème invalide" }, { status: 400 });
+      if (!sourceUrls?.length) return NextResponse.json({ error: "Aucune source sélectionnée" }, { status: 400 });
+
+      const sourceNames = (sourceUrls as string[]).map((u: string) => {
+        try { return new URL(u).hostname.replace("www.", ""); } catch { return u; }
+      }).join(", ");
+
+      const sysPrompt = `Tu es un expert LinkedIn pour Tony, CEO de Metagora (startup IA retail/luxe). Style : ton direct, storytelling, données chiffrées, emojis modérés, 150-300 mots, jamais corporate.`;
+      const jsonFormat = `Réponds en JSON : {"subjects": [{"title": "...", "angle": "...", "url": "https://..."}, ...]}\nChaque sujet DOIT inclure l'URL exacte de l'article source trouvé.\nPas de markdown, juste le JSON.`;
+
+      const t0 = Date.now();
+      try {
+        const raw = await askAzureAI([
+          { role: "system", content: sysPrompt },
+          {
+            role: "user",
+            content: `Recherche sur le web des articles récents des sources suivantes : ${sourceNames}.\nThème : "${themeInfo.emoji} ${themeInfo.name}" (${themeInfo.description}).\n\nTrouve exactement 2 sujets de posts LinkedIn inspirés d'articles RÉELS et RÉCENTS de ces sources.\nChaque sujet DOIT contenir : titre accrocheur 10-20 mots + bref angle + l'URL EXACTE de l'article trouvé.\n\n${jsonFormat}`,
+          },
+        ], 1000, [{ type: "web_search_preview" }]);
+        const durationMs = Date.now() - t0;
+
+        type Subject = { title: string; angle: string; source?: string; url?: string };
+        const subjects: Subject[] = [];
         try {
-          const cleaned = realtimeResult.value.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+          const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
           const parsed = JSON.parse(cleaned);
           const items = parsed.subjects || parsed;
           for (const s of (Array.isArray(items) ? items : []).slice(0, 2)) {
             subjects.push({ title: s.title || s, angle: s.angle || "", source: "🌐 Temps réel", url: s.url || "" });
           }
-        } catch (e) { console.error("Real-time parse error:", e, realtimeResult.value?.slice?.(0, 300)); }
-      } else if (realtimeResult.status === "rejected") {
-        console.error("Real-time (gpt-5.4-pro) call FAILED:", realtimeResult.reason);
-      }
+        } catch (e) { console.error("suggest-realtime parse error:", e, raw?.slice(0, 300)); }
 
-      // If we got nothing at all, return error
-      if (subjects.length === 0) {
-        return NextResponse.json({ data: { subjects: [] }, error: "Aucun sujet généré" });
+        return NextResponse.json({
+          data: { subjects, model: "gpt-5.4-pro", durationMs, sourceCount: (sourceUrls as string[]).length },
+        });
+      } catch (error) {
+        const durationMs = Date.now() - t0;
+        console.error("suggest-realtime FAILED:", error);
+        return NextResponse.json({
+          data: { subjects: [], model: "gpt-5.4-pro", durationMs, sourceCount: (sourceUrls as string[]).length },
+          error: `Recherche temps réel échouée (${Math.round(durationMs / 1000)}s)`,
+        });
       }
-
-      return NextResponse.json({ data: { subjects } });
     }
 
     // ── generate: full post + image prompt ───────────────
@@ -391,46 +402,69 @@ Réécris le post modifié.`,
       return NextResponse.json({ data: { post: refined } });
     }
 
-    // ── search-stats: enrich a subject with stats + sources via gpt-5.4-pro web_search ──
+    // ── search-stats: enrich a subject with stats + sources ──
+    // Strategy: try gpt-5.4-pro web_search first, fallback to gpt-5.2-chat knowledge base
     if (action === "search-stats") {
       const { theme, subject } = body;
       const themeInfo = THEMES[theme as string];
       if (!themeInfo || !subject) return NextResponse.json({ error: "Thème et sujet requis" }, { status: 400 });
 
+      const statsJsonFormat = `Réponds en JSON : {"stats": [{"text": "chiffre + contexte en 1 phrase", "source": "nom de la source", "url": "https://..."}]}\nPas de markdown, juste le JSON.`;
+      const statsPrompt = `Trouve 3 à 5 statistiques, chiffres clés ou données récentes en lien avec ce sujet de post LinkedIn.
+Sujet : "${subject}"
+Thème : ${themeInfo.name} (${themeInfo.description})
+Domaine : IA, retail, luxe, formation, e-learning, digital learning.
+Cherche des études, rapports, articles de presse avec des pourcentages, montants, tendances chiffrées.
+${statsJsonFormat}`;
+
+      type Stat = { text: string; source: string; url: string };
+      let stats: Stat[] = [];
+      let statsSource: "web" | "knowledge" = "web";
+
+      // 1) Try gpt-5.4-pro + web_search
       try {
         const raw = await askAzureAI([
-          { role: "system", content: `Tu es un expert LinkedIn data-driven. Tony, CEO de Metagora (startup IA retail/luxe), a besoin de statistiques sourcées pour enrichir ses posts.` },
-          {
-            role: "user",
-            content: `Recherche sur le web des statistiques, chiffres et données récentes en lien avec ce sujet de post LinkedIn :
-
-Sujet : "${subject}"
-Thème : "${themeInfo.emoji} ${themeInfo.name}" (${themeInfo.description})
-
-Trouve 3 à 5 statistiques pertinentes avec leurs sources.
-Chaque stat doit inclure : le chiffre, le contexte, et l'URL de la source.
-
-Réponds en JSON : {"stats": [{"text": "...", "source": "nom de la source", "url": "https://..."}]}
-Pas de markdown, juste le JSON.`,
-          },
+          { role: "system", content: `Tu es un data analyst expert. Tu cherches des statistiques sourcées pour enrichir des posts LinkedIn.` },
+          { role: "user", content: statsPrompt },
         ], 1000, [{ type: "web_search_preview" }]);
 
-        let stats: { text: string; source: string; url: string }[] = [];
         if (raw) {
           try {
             const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
             const parsed = JSON.parse(cleaned);
             stats = parsed.stats || [];
           } catch (e) {
-            console.error("Stats parse error:", e, raw?.slice(0, 300));
+            console.error("Stats web parse error:", e, raw?.slice(0, 300));
           }
         }
-
-        return NextResponse.json({ data: { stats } });
       } catch (error) {
-        console.error("search-stats error:", error);
-        return NextResponse.json({ data: { stats: [] }, error: "La recherche de stats a échoué (timeout probable)" });
+        console.error("search-stats web_search failed:", error);
       }
+
+      // 2) Fallback: gpt-5.2-chat knowledge base if web returned nothing
+      if (stats.length === 0) {
+        statsSource = "knowledge";
+        try {
+          const raw = await askAzureFast([
+            { role: "system", content: `Tu es un data analyst expert avec une vaste base de connaissances sur l'IA, le retail, le luxe, la formation et le e-learning. Tu cites toujours tes sources (nom du rapport/étude, année).` },
+            { role: "user", content: `${statsPrompt}\nIMPORTANT : si tu n'as pas l'URL exacte, mets le nom du rapport/étude et l'année dans le champ "source" et laisse "url" vide.` },
+          ], 1000);
+
+          if (raw) {
+            try {
+              const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+              const parsed = JSON.parse(cleaned);
+              stats = (parsed.stats || []).map((s: Stat) => ({ ...s, source: s.source ? `${s.source} 🧠` : "🧠 Base IA" }));
+            } catch (e) {
+              console.error("Stats knowledge parse error:", e, raw?.slice(0, 300));
+            }
+          }
+        } catch (error) {
+          console.error("search-stats knowledge fallback failed:", error);
+        }
+      }
+
+      return NextResponse.json({ data: { stats, statsSource } });
     }
 
     return NextResponse.json({ error: "Action invalide" }, { status: 400 });

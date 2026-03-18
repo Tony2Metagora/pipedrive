@@ -59,6 +59,14 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
   const [customSubject, setCustomSubject] = useState("");
   const [statsLoadingIdx, setStatsLoadingIdx] = useState<number | null>(null);
 
+  // Decomposed loading state
+  interface LoadingStep {
+    label: string;
+    status: "pending" | "loading" | "done" | "error";
+    detail?: string;
+  }
+  const [loadingSteps, setLoadingSteps] = useState<LoadingStep[]>([]);
+
   // Post
   const [generatedPost, setGeneratedPost] = useState("");
   const [generateLoading, setGenerateLoading] = useState(false);
@@ -134,35 +142,91 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
     setSelectedSourceIds(new Set());
   };
 
+  const updateStep = (idx: number, updates: Partial<LoadingStep>) => {
+    setLoadingSteps((prev) => prev.map((s, i) => i === idx ? { ...s, ...updates } : s));
+  };
+
   const handleScrapeAndSuggest = async () => {
     if (!selectedTheme) return;
     const selectedUrls = themeSources.filter((s) => selectedSourceIds.has(s.id)).map((s) => s.url);
+    const sourceCount = selectedUrls.length;
 
     setSuggestLoading(true);
     setSubjects([]);
     setError(null);
 
     try {
-      if (selectedUrls.length > 0) {
-        const res = await fetch("/api/linkedin/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "scrape-suggest", theme: selectedTheme, sourceUrls: selectedUrls }),
-        });
-        const json = await res.json();
-        if (json.error) { setError(json.error); return; }
-        const items = json.data?.subjects || [];
-        setSubjects(items.map((s: SubjectItem | string) => typeof s === "string" ? { title: s, angle: "" } : s));
+      if (sourceCount > 0) {
+        // Decomposed parallel loading: 2 separate API calls
+        setLoadingSteps([
+          { label: `🧠 Base IA (gpt-5.2) — ${sourceCount} source(s)`, status: "loading" },
+          { label: `🌐 Temps réel (gpt-5.4 + web) — ${sourceCount} source(s)`, status: "loading" },
+        ]);
+
+        const allSubjects: SubjectItem[] = [];
+        const payload = { theme: selectedTheme, sourceUrls: selectedUrls };
+
+        // Launch both in parallel
+        const [fastRes, realtimeRes] = await Promise.allSettled([
+          // Fast: gpt-5.2-chat (~5s)
+          (async () => {
+            const res = await fetch("/api/linkedin/generate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ...payload, action: "suggest-fast" }),
+            });
+            const json = await res.json();
+            const items: SubjectItem[] = (json.data?.subjects || []).map((s: SubjectItem | string) =>
+              typeof s === "string" ? { title: s, angle: "", source: "🧠 Base IA" } : s
+            );
+            const ms = json.data?.durationMs || 0;
+            updateStep(0, { status: "done", detail: `${items.length} sujets en ${(ms / 1000).toFixed(1)}s` });
+            return items;
+          })(),
+
+          // Real-time: gpt-5.4-pro + web_search (~30-50s)
+          (async () => {
+            const res = await fetch("/api/linkedin/generate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ...payload, action: "suggest-realtime" }),
+            });
+            const json = await res.json();
+            const items: SubjectItem[] = (json.data?.subjects || []).map((s: SubjectItem | string) =>
+              typeof s === "string" ? { title: s, angle: "", source: "🌐 Temps réel" } : s
+            );
+            const ms = json.data?.durationMs || 0;
+            if (items.length > 0) {
+              updateStep(1, { status: "done", detail: `${items.length} sujets en ${(ms / 1000).toFixed(1)}s` });
+            } else {
+              updateStep(1, { status: "error", detail: json.error || `Aucun résultat (${(ms / 1000).toFixed(1)}s)` });
+            }
+            return items;
+          })(),
+        ]);
+
+        // Collect results — fast first (appears sooner)
+        if (fastRes.status === "fulfilled") allSubjects.push(...fastRes.value);
+        else updateStep(0, { status: "error", detail: "Erreur réseau" });
+
+        if (realtimeRes.status === "fulfilled") allSubjects.push(...realtimeRes.value);
+        else updateStep(1, { status: "error", detail: "Timeout ou erreur réseau" });
+
+        // Progressively add fast subjects as soon as they arrive
+        setSubjects(allSubjects);
       } else {
+        // No sources selected — simple suggest via gpt-5.2-chat
+        setLoadingSteps([{ label: "🧠 Génération de sujets (gpt-5.2)", status: "loading" }]);
         const res = await fetch("/api/linkedin/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "suggest", theme: selectedTheme }),
         });
         const json = await res.json();
-        if (json.error) { setError(json.error); return; }
+        if (json.error) { setError(json.error); updateStep(0, { status: "error", detail: json.error }); return; }
         const items = json.data?.subjects || [];
         setSubjects(items.map((s: string) => ({ title: s, angle: "" })));
+        updateStep(0, { status: "done", detail: `${items.length} sujets` });
       }
     } catch (err) {
       setError(String(err));
@@ -570,8 +634,36 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
             className="mt-4 w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
           >
             {suggestLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            {suggestLoading ? "Analyse en cours…" : selectedSourceIds.size > 0 ? `Analyser ${selectedSourceIds.size} source(s) → 10 sujets` : "Suggérer des sujets (sans sources)"}
+            {suggestLoading ? "Analyse en cours…" : selectedSourceIds.size > 0 ? `Analyser ${selectedSourceIds.size} source(s) → 5 sujets` : "Suggérer des sujets (sans sources)"}
           </button>
+
+          {/* Decomposed loading progress */}
+          {suggestLoading && loadingSteps.length > 0 && (
+            <div className="mt-3 space-y-2 bg-gray-50 rounded-lg p-3 border border-gray-200">
+              <p className="text-[10px] text-gray-400 uppercase font-semibold mb-1">Progression de l&apos;analyse</p>
+              {loadingSteps.map((step, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs">
+                  {step.status === "loading" && <Loader2 className="w-3.5 h-3.5 text-blue-500 animate-spin flex-shrink-0" />}
+                  {step.status === "done" && <CheckCircle2 className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />}
+                  {step.status === "error" && <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />}
+                  {step.status === "pending" && <Clock className="w-3.5 h-3.5 text-gray-300 flex-shrink-0" />}
+                  <span className={cn(
+                    "font-medium",
+                    step.status === "loading" ? "text-blue-700" :
+                    step.status === "done" ? "text-green-700" :
+                    step.status === "error" ? "text-red-500" :
+                    "text-gray-400"
+                  )}>{step.label}</span>
+                  {step.detail && (
+                    <span className={cn(
+                      "text-[10px] ml-auto",
+                      step.status === "done" ? "text-green-500" : step.status === "error" ? "text-red-400" : "text-gray-400"
+                    )}>{step.detail}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
