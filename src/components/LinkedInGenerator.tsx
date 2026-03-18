@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Sparkles, Loader2, Copy, Check, RefreshCw, Send,
   ImageIcon, Search, Download, AlertCircle, ChevronRight,
@@ -38,6 +38,22 @@ const THEMES = [
   { key: "ia-formation", emoji: "2️⃣", name: "IA dans la formation", desc: "E-learning (SCORM/LMS) = réalité de 90% des entreprises. L'IA l'enrichit, pas le remplace. Constat + solutions.", color: "blue" },
   { key: "ia-operationnelle", emoji: "3️⃣", name: "IA Opérationnelle", desc: "Vulgarisation IA (agentique, LLM) → exploitation réelle chez Metagora", color: "emerald" },
 ];
+
+// ─── Reusable elapsed timer hook ─────────────────────────
+function useElapsedTimer(active: boolean) {
+  const [elapsed, setElapsed] = useState(0);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (active) {
+      setElapsed(0);
+      intervalRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
+    } else {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    }
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, [active]);
+  return elapsed;
+}
 
 export default function LinkedInGenerator({ onPostValidated }: { onPostValidated?: () => void }) {
   // Sources
@@ -111,6 +127,55 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
 
   // Error
   const [error, setError] = useState<string | null>(null);
+
+  // ─── Progress helpers ──────────────────────────────────
+  // Analysis phases for Option C (simulated steps)
+  const getAnalysisPhase = (elapsed: number, model: "fast" | "realtime") => {
+    if (model === "fast") {
+      if (elapsed < 3) return "Connexion aux sources…";
+      if (elapsed < 6) return "Analyse du contenu…";
+      if (elapsed < 10) return "Extraction des sujets…";
+      return "Finalisation…";
+    }
+    // realtime (gpt-5.4 + web)
+    if (elapsed < 5) return "Connexion aux sources…";
+    if (elapsed < 15) return "Recherche web en cours…";
+    if (elapsed < 25) return "Analyse des résultats…";
+    if (elapsed < 40) return "Extraction des sujets…";
+    return "Finalisation…";
+  };
+
+  // Stats search phases for Option A (timer + phases)
+  const getStatsPhase = (elapsed: number) => {
+    if (elapsed < 5) return "🔍 Lancement recherche web…";
+    if (elapsed < 15) return "📡 Analyse des résultats…";
+    if (elapsed < 25) return "📊 Extraction des statistiques…";
+    return "⏳ Vérification des sources…";
+  };
+
+  // Generate post phases
+  const getGeneratePhase = (elapsed: number) => {
+    if (elapsed < 3) return "Préparation du prompt…";
+    if (elapsed < 8) return "Rédaction du post…";
+    if (elapsed < 15) return "Structuration & hashtags…";
+    return "Finalisation…";
+  };
+
+  // Hook refine phases
+  const getHookRefinePhase = (elapsed: number) => {
+    if (elapsed < 2) return "Analyse de l'accroche…";
+    if (elapsed < 5) return "Réécriture en cours…";
+    return "Finalisation…";
+  };
+
+  // Elapsed timers for each operation
+  const suggestElapsed = useElapsedTimer(suggestLoading);
+  const statsElapsed = useElapsedTimer(statsLoadingIdx !== null);
+  const importStatsElapsed = useElapsedTimer(importStatsLoading);
+  const generateElapsed = useElapsedTimer(generateLoading);
+  const hookRefineElapsed = useElapsedTimer(hookRefineLoading);
+  const importElapsed = useElapsedTimer(importLoading);
+  const refineElapsed = useElapsedTimer(refineLoading);
 
   // ─── Load sources ─────────────────────────────────────
 
@@ -736,6 +801,17 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
             {importLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
             {importLoading ? "Transformation en cours…" : importType === "event" ? "Transformer en post Metagora" : "Adapter à mon style"}
           </button>
+          {importLoading && (
+            <div className="mt-2 space-y-1">
+              <div className="flex items-center gap-2 text-xs text-purple-600">
+                <span className="font-medium">{getGeneratePhase(importElapsed)}</span>
+                <span className="ml-auto tabular-nums text-purple-400">{importElapsed}s</span>
+              </div>
+              <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                <div className="h-full bg-purple-400 rounded-full transition-all duration-1000" style={{ width: `${Math.min(95, Math.round((importElapsed / 15) * 100))}%` }} />
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -890,31 +966,46 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
             {suggestLoading ? "Analyse en cours…" : selectedSourceIds.size > 0 ? `Analyser ${selectedSourceIds.size} source(s) → 5 sujets` : "Suggérer des sujets (sans sources)"}
           </button>
 
-          {/* Decomposed loading progress */}
+          {/* Decomposed loading progress with phases + timer + % */}
           {suggestLoading && loadingSteps.length > 0 && (
-            <div className="mt-3 space-y-2 bg-gray-50 rounded-lg p-3 border border-gray-200">
-              <p className="text-[10px] text-gray-400 uppercase font-semibold mb-1">Progression de l&apos;analyse</p>
-              {loadingSteps.map((step, i) => (
-                <div key={i} className="flex items-center gap-2 text-xs">
-                  {step.status === "loading" && <Loader2 className="w-3.5 h-3.5 text-blue-500 animate-spin flex-shrink-0" />}
-                  {step.status === "done" && <CheckCircle2 className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />}
-                  {step.status === "error" && <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />}
-                  {step.status === "pending" && <Clock className="w-3.5 h-3.5 text-gray-300 flex-shrink-0" />}
-                  <span className={cn(
-                    "font-medium",
-                    step.status === "loading" ? "text-blue-700" :
-                    step.status === "done" ? "text-green-700" :
-                    step.status === "error" ? "text-red-500" :
-                    "text-gray-400"
-                  )}>{step.label}</span>
-                  {step.detail && (
-                    <span className={cn(
-                      "text-[10px] ml-auto",
-                      step.status === "done" ? "text-green-500" : step.status === "error" ? "text-red-400" : "text-gray-400"
-                    )}>{step.detail}</span>
-                  )}
-                </div>
-              ))}
+            <div className="mt-3 space-y-3 bg-gray-50 rounded-lg p-3 border border-gray-200">
+              <p className="text-[10px] text-gray-400 uppercase font-semibold mb-1">Progression de l&apos;analyse — {suggestElapsed}s</p>
+              {loadingSteps.map((step, i) => {
+                const model = i === 0 ? "fast" as const : "realtime" as const;
+                const estTotal = model === "fast" ? 12 : 45;
+                const pct = step.status === "done" ? 100 : step.status === "error" ? 100 : Math.min(95, Math.round((suggestElapsed / estTotal) * 100));
+                return (
+                  <div key={i}>
+                    <div className="flex items-center gap-2 text-xs">
+                      {step.status === "loading" && <Loader2 className="w-3.5 h-3.5 text-blue-500 animate-spin flex-shrink-0" />}
+                      {step.status === "done" && <CheckCircle2 className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />}
+                      {step.status === "error" && <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />}
+                      {step.status === "pending" && <Clock className="w-3.5 h-3.5 text-gray-300 flex-shrink-0" />}
+                      <span className={cn(
+                        "font-medium",
+                        step.status === "loading" ? "text-blue-700" :
+                        step.status === "done" ? "text-green-700" :
+                        step.status === "error" ? "text-red-500" :
+                        "text-gray-400"
+                      )}>{step.label}</span>
+                      <span className={cn(
+                        "text-[10px] ml-auto tabular-nums",
+                        step.status === "done" ? "text-green-500" : step.status === "error" ? "text-red-400" : "text-blue-400"
+                      )}>
+                        {step.detail || (step.status === "loading" ? `${pct}%` : "")}
+                      </span>
+                    </div>
+                    {step.status === "loading" && (
+                      <>
+                        <div className="ml-6 mt-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                          <div className="h-full bg-blue-400 rounded-full transition-all duration-1000" style={{ width: `${pct}%` }} />
+                        </div>
+                        <p className="ml-6 mt-0.5 text-[10px] text-gray-400 italic">{getAnalysisPhase(suggestElapsed, model)}</p>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -935,7 +1026,14 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
                   : "border-gray-200 bg-gray-50 hover:border-blue-300 hover:bg-blue-50/50"
               )}>
                 <button
-                  onClick={() => { setSelectedSubject(s.title); setCustomSubject(""); }}
+                  onClick={() => {
+                    setSelectedSubject(s.title);
+                    setCustomSubject("");
+                    // Auto-select all stats for this subject
+                    if (s.stats && s.stats.length > 0) {
+                      setSelectedStats(new Set(s.stats.map((st) => st.text)));
+                    }
+                  }}
                   className="w-full text-left flex items-start gap-3 px-3 py-2.5 cursor-pointer"
                 >
                   <ChevronRight className={cn("w-4 h-4 flex-shrink-0 mt-0.5 transition-transform", selectedSubject === s.title && "text-blue-500 rotate-90")} />
@@ -971,9 +1069,15 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
                     </button>
                   )}
                   {statsLoadingIdx === i && (
-                    <div className="flex items-center gap-2 text-[10px] text-blue-600 py-1">
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                      <span className="font-medium">{statsSearchDetail}</span>
+                    <div className="py-1 space-y-1">
+                      <div className="flex items-center gap-2 text-[10px] text-blue-600">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        <span className="font-medium">{getStatsPhase(statsElapsed)}</span>
+                        <span className="ml-auto tabular-nums text-blue-400">{statsElapsed}s</span>
+                      </div>
+                      <div className="h-1 bg-gray-200 rounded-full overflow-hidden">
+                        <div className="h-full bg-blue-400 rounded-full transition-all duration-1000" style={{ width: `${Math.min(95, Math.round((statsElapsed / 35) * 100))}%` }} />
+                      </div>
                     </div>
                   )}
                   {s.stats && s.stats.length > 0 && (
@@ -1064,6 +1168,17 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
             {generateLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
             {generateLoading ? "Rédaction en cours…" : "Générer le post"}
           </button>
+          {generateLoading && (
+            <div className="mt-2 space-y-1">
+              <div className="flex items-center gap-2 text-xs text-blue-600">
+                <span className="font-medium">{getGeneratePhase(generateElapsed)}</span>
+                <span className="ml-auto tabular-nums text-blue-400">{generateElapsed}s</span>
+              </div>
+              <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                <div className="h-full bg-blue-400 rounded-full transition-all duration-1000" style={{ width: `${Math.min(95, Math.round((generateElapsed / 15) * 100))}%` }} />
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1084,9 +1199,15 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
           )}
 
           {importStatsLoading && (
-            <div className="flex items-center gap-2 text-sm text-blue-600 py-2">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span className="font-medium">{importStatsDetail}</span>
+            <div className="py-2 space-y-1.5">
+              <div className="flex items-center gap-2 text-sm text-blue-600">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span className="font-medium">{getStatsPhase(importStatsElapsed)}</span>
+                <span className="ml-auto tabular-nums text-xs text-blue-400">{importStatsElapsed}s</span>
+              </div>
+              <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                <div className="h-full bg-blue-400 rounded-full transition-all duration-1000" style={{ width: `${Math.min(95, Math.round((importStatsElapsed / 35) * 100))}%` }} />
+              </div>
             </div>
           )}
 
@@ -1176,17 +1297,22 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
                 value={hookRefineInput}
                 onChange={(e) => setHookRefineInput(e.target.value)}
                 placeholder="Colle ta nouvelle accroche ici, ou décris comment modifier l'accroche sélectionnée..."
-                rows={3}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-300 outline-none resize-y"
+                rows={5}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-300 outline-none resize-y leading-relaxed"
               />
-              <button
-                onClick={() => handleRefineHook(selectedHook)}
-                disabled={!hookRefineInput || hookRefineLoading}
-                className="self-end flex items-center justify-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 cursor-pointer"
-              >
-                {hookRefineLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                Appliquer
-              </button>
+              <div className="flex items-center gap-3 self-end">
+                {hookRefineLoading && (
+                  <span className="text-[10px] text-amber-500 tabular-nums">{getHookRefinePhase(hookRefineElapsed)} — {hookRefineElapsed}s</span>
+                )}
+                <button
+                  onClick={() => handleRefineHook(selectedHook)}
+                  disabled={!hookRefineInput || hookRefineLoading}
+                  className="flex items-center justify-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 cursor-pointer"
+                >
+                  {hookRefineLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  Appliquer
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -1248,6 +1374,12 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
                 Modifier
               </button>
             </div>
+            {refineLoading && (
+              <div className="mt-2 flex items-center gap-2 text-xs text-amber-600">
+                <span className="font-medium">{getGeneratePhase(refineElapsed)}</span>
+                <span className="ml-auto tabular-nums text-amber-400">{refineElapsed}s</span>
+              </div>
+            )}
           </div>
 
           {/* Validate / Schedule */}

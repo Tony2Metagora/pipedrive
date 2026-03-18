@@ -523,7 +523,15 @@ Réécris le post modifié.`,
       const statsPrompt = `Trouve 3 à 5 statistiques, chiffres clés ou données récentes en lien avec ce sujet de post LinkedIn.
 Sujet : "${subject}"
 Thème : ${themeInfo.name} (${themeInfo.description})
-Domaine : IA, retail, luxe, formation, e-learning, digital learning.
+Domaine : IA, retail, luxe, formation, e-learning, digital learning, upskilling.
+
+ORIENTATION OBLIGATOIRE DES STATS :
+- Privilégie les stats qui montrent l'impact de l'IA dans la formation / l'upskilling
+- Gains opérationnels concrets : productivité, temps de formation réduit, performance des vendeurs
+- Économies de coûts : ROI de la formation IA, réduction des coûts de formation, scalabilité
+- Chiffres qui prouvent que l'IA transforme positivement la formation (pas qu'elle la remplace)
+- Exemples : "X% de réduction du temps de formation", "ROI de X€ pour 1€ investi en IA learning", "X% d'amélioration de la rétention"
+
 Cherche des études, rapports, articles de presse avec des pourcentages, montants, tendances chiffrées.
 ${statsJsonFormat}`;
 
