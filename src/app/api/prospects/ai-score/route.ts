@@ -85,7 +85,12 @@ export async function POST(request: Request) {
   }));
 
   const BATCH_SIZE = 10;
-  const totalBatches = Math.ceil(prospectData.length / BATCH_SIZE);
+  const PARALLEL = 4;
+  const batches: { idx: number; data: typeof prospectData }[] = [];
+  for (let i = 0; i < prospectData.length; i += BATCH_SIZE) {
+    batches.push({ idx: batches.length + 1, data: prospectData.slice(i, i + BATCH_SIZE) });
+  }
+  const totalBatches = batches.length;
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -93,30 +98,21 @@ export async function POST(request: Request) {
         controller.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
       };
 
-      send("progress", { current: 0, total: toScore.length, batches: totalBatches, message: "Démarrage analyse IA..." });
+      send("progress", { current: 0, total: totalBatches, message: `Démarrage analyse IA — ${totalBatches} batches (×${PARALLEL} en parallèle)...` });
 
       const allResults: { id: string; ai_score: string; ai_comment: string; resume_entreprise: string }[] = [];
+      let completedBatches = 0;
 
-      for (let batchStart = 0; batchStart < prospectData.length; batchStart += BATCH_SIZE) {
-        const batchIdx = Math.floor(batchStart / BATCH_SIZE) + 1;
-        const batch = prospectData.slice(batchStart, batchStart + BATCH_SIZE);
+      /** Process a single batch */
+      const processBatch = async (batch: typeof batches[0]) => {
+        const userContent = `Analyse ces ${batch.data.length} prospects et donne un score + commentaire + résumé entreprise pour chacun :
 
-        send("progress", {
-          current: batchStart,
-          total: toScore.length,
-          batches: totalBatches,
-          batch: batchIdx,
-          message: `Analyse batch ${batchIdx}/${totalBatches} (${batch.length} prospects)...`,
-        });
-
-        try {
-          const userContent = `Analyse ces ${batch.length} prospects et donne un score + commentaire + résumé entreprise pour chacun :
-
-${JSON.stringify(batch, null, 1)}
+${JSON.stringify(batch.data, null, 1)}
 
 Réponds en JSON : [{"id": "xxx", "ai_score": 3, "ai_comment": "...", "resume_entreprise": "..."}]
 Pas de markdown, pas de backticks, juste le JSON array.`;
 
+        try {
           const result = await askAzureAI([
             { role: "system", content: SYSTEM_PROMPT },
             { role: "user", content: userContent },
@@ -135,13 +131,29 @@ Pas de markdown, pas de backticks, juste le JSON array.`;
             }
           }
         } catch (err) {
-          console.error(`[AI Score] Batch ${batchIdx} error:`, err);
-          send("progress", { current: batchStart + batch.length, total: toScore.length, message: `Erreur batch ${batchIdx}, continue...` });
+          console.error(`[AI Score] Batch ${batch.idx} error:`, err);
         }
+        completedBatches++;
+        send("progress", {
+          current: completedBatches,
+          total: totalBatches,
+          message: `Batch ${completedBatches}/${totalBatches} terminé`,
+        });
+      };
+
+      // Run batches in parallel windows of PARALLEL
+      for (let i = 0; i < batches.length; i += PARALLEL) {
+        const window = batches.slice(i, i + PARALLEL);
+        send("progress", {
+          current: completedBatches,
+          total: totalBatches,
+          message: `Batches ${completedBatches + 1}-${Math.min(completedBatches + window.length, totalBatches)}/${totalBatches} en cours...`,
+        });
+        await Promise.all(window.map(processBatch));
       }
 
       // Save results
-      send("progress", { current: toScore.length, total: toScore.length, message: "Sauvegarde des résultats..." });
+      send("progress", { current: totalBatches, total: totalBatches, message: "Sauvegarde des résultats..." });
 
       let updated = 0;
       try {
