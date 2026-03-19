@@ -9,6 +9,7 @@
 import { readBlob, writeBlob, withLock } from "@/lib/blob-store";
 import { requireAuth } from "@/lib/api-guard";
 import { askAzureFast } from "@/lib/azure-ai";
+import type { ScoringCorrection } from "@/app/api/prospects/scoring-memory/route";
 
 interface ProspectRow {
   id: string;
@@ -31,7 +32,7 @@ interface ProspectRow {
   [key: string]: unknown;
 }
 
-const SYSTEM_PROMPT = `Tu es un expert en qualification de prospects B2B pour Metagora.
+const BASE_SYSTEM_PROMPT = `Tu es un expert en qualification de prospects B2B pour Metagora.
 
 METAGORA : startup IA spécialisée dans la formation retail & luxe par simulation IA.
 - Produit phare : Simsell — simulateur de vente IA pour vendeurs retail/luxe
@@ -51,6 +52,26 @@ Pour chaque prospect, tu dois évaluer :
 
 Réponds UNIQUEMENT en JSON array, sans markdown, sans backticks.`;
 
+/** Build system prompt with RAG scoring memory injected */
+function buildSystemPrompt(corrections: ScoringCorrection[]): string {
+  if (corrections.length === 0) return BASE_SYSTEM_PROMPT;
+
+  // Take last 50 corrections max to avoid token overflow
+  const recent = corrections.slice(-50);
+  const examples = recent.map((c) =>
+    `- "${c.poste}" chez "${c.entreprise}" : score corrigé de ${c.old_score} → ${c.new_score}. Raison : ${c.reason}`
+  ).join("\n");
+
+  return `${BASE_SYSTEM_PROMPT}
+
+--- APPRENTISSAGE (corrections humaines précédentes) ---
+Voici des corrections faites par l'humain sur des scorings précédents. Utilise ces exemples pour calibrer tes scores. Ces corrections sont PRIORITAIRES sur tes propres estimations quand un profil similaire apparaît :
+
+${examples}
+
+Applique ces apprentissages systématiquement.`;
+}
+
 type AIResult = { id: string; ai_score: string; ai_comment: string; resume_entreprise: string };
 
 export async function POST(request: Request) {
@@ -58,7 +79,7 @@ export async function POST(request: Request) {
   if (guard.denied) return guard.denied;
 
   const body = await request.json();
-  const { ids } = body as { ids: string[] };
+  const { ids, brand } = body as { ids: string[]; brand?: string };
 
   if (!ids?.length) {
     return new Response(JSON.stringify({ error: "ids[] requis" }), { status: 400, headers: { "Content-Type": "application/json" } });
@@ -100,6 +121,16 @@ export async function POST(request: Request) {
         } catch { /* stream closed */ }
       };
 
+      // Load scoring memory for RAG
+      const brandKey = (brand || "metagora").toLowerCase();
+      let corrections: ScoringCorrection[] = [];
+      try {
+        const all = await readBlob<ScoringCorrection>("scoring-memory.json");
+        corrections = all.filter((c) => c.brand === brandKey);
+        console.log(`[AI Score] Loaded ${corrections.length} scoring corrections for "${brandKey}"`);
+      } catch { /* no corrections yet */ }
+      const systemPrompt = buildSystemPrompt(corrections);
+
       console.log(`[AI Score] Starting: ${toScore.length} prospects, ${totalBatches} batches, ×${PARALLEL} parallel`);
       send("progress", { current: 0, total: totalBatches, message: `Analyse IA — ${totalBatches} batches (×${PARALLEL} en parallèle)...` });
 
@@ -118,7 +149,7 @@ Pas de markdown, pas de backticks, juste le JSON array.`;
 
         try {
           const result = await askAzureFast([
-            { role: "system", content: SYSTEM_PROMPT },
+            { role: "system", content: systemPrompt },
             { role: "user", content: userContent },
           ], 3000);
 

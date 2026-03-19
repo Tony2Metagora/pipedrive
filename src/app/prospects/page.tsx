@@ -44,8 +44,6 @@ interface Prospect {
   statut: string;
   pipelines: string;
   notes: string;
-  score_entreprise: string;
-  score_job: string;
   linkedin: string;
   naf_code: string;
   effectifs: string;
@@ -89,8 +87,6 @@ const PROSPECT_COLUMNS = [
   { key: "entreprise", label: "Entreprise", defaultVisible: true, defaultWidth: 120, minWidth: 60 },
   { key: "statut", label: "Statut", defaultVisible: true, defaultWidth: 70, minWidth: 50 },
   { key: "affaire", label: "Affaire", defaultVisible: true, defaultWidth: 130, minWidth: 60 },
-  { key: "score_entreprise", label: "Score Ent.", defaultVisible: true, defaultWidth: 65, minWidth: 45 },
-  { key: "score_job", label: "Score Job", defaultVisible: true, defaultWidth: 65, minWidth: 45 },
   { key: "linkedin", label: "LinkedIn", defaultVisible: true, defaultWidth: 36, minWidth: 30 },
   { key: "naf_code", label: "NAF", defaultVisible: true, defaultWidth: 65, minWidth: 35 },
   { key: "effectifs", label: "Eff.", defaultVisible: true, defaultWidth: 55, minWidth: 35 },
@@ -102,8 +98,8 @@ const PROSPECT_COLUMNS = [
   { key: "dirigeants", label: "Dirigeants", defaultVisible: false, defaultWidth: 160, minWidth: 80 },
   { key: "date_creation_entreprise", label: "Création", defaultVisible: false, defaultWidth: 80, minWidth: 50 },
   { key: "resume_entreprise", label: "Résumé Ent.", defaultVisible: false, defaultWidth: 160, minWidth: 80 },
-  { key: "ai_score", label: "Score IA", defaultVisible: false, defaultWidth: 60, minWidth: 45 },
-  { key: "ai_comment", label: "Analyse IA", defaultVisible: false, defaultWidth: 180, minWidth: 80 },
+  { key: "ai_score", label: "Score IA", defaultVisible: true, defaultWidth: 60, minWidth: 45 },
+  { key: "ai_comment", label: "Analyse IA", defaultVisible: true, defaultWidth: 180, minWidth: 80 },
 ] as const;
 
 function ScoreNumber({ value, onChange }: { value: number; onChange?: (v: number) => void }) {
@@ -174,6 +170,10 @@ export default function ProspectsPage() {
   const [dealSearch, setDealSearch] = useState("");
   const [showNewProspect, setShowNewProspect] = useState(false);
   const [linking, setLinking] = useState(false);
+  const [scoreEditTarget, setScoreEditTarget] = useState<Prospect | null>(null);
+  const [scoreEditValue, setScoreEditValue] = useState(0);
+  const [scoreEditReason, setScoreEditReason] = useState("");
+  const [scoreEditSaving, setScoreEditSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Lists panel
   const [lists, setLists] = useState<ProspectList[]>([]);
@@ -303,8 +303,6 @@ export default function ProspectsPage() {
       telephone: p.telephone,
       poste: p.poste,
       entreprise: p.entreprise,
-      score_entreprise: p.score_entreprise || "0",
-      score_job: p.score_job || "0",
     });
   };
 
@@ -508,6 +506,49 @@ export default function ProspectsPage() {
     runStreamingAction("/api/prospects/enrich-gouv", "API Gouv", (d) =>
       `${d.enriched}/${d.total} enrichi${Number(d.enriched) > 1 ? "s" : ""} (${d.companiesSearched} entreprises)`
     );
+
+  const openScoreEdit = (p: Prospect) => {
+    setScoreEditTarget(p);
+    setScoreEditValue(parseInt(p.ai_score || "0") || 0);
+    setScoreEditReason(p.ai_comment || "");
+  };
+
+  const submitScoreCorrection = async () => {
+    if (!scoreEditTarget || !scoreEditReason.trim()) return;
+    setScoreEditSaving(true);
+    try {
+      const res = await fetch("/api/prospects/scoring-memory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          brand: "metagora",
+          prospect_id: scoreEditTarget.id,
+          poste: scoreEditTarget.poste || "",
+          entreprise: scoreEditTarget.entreprise || "",
+          old_score: parseInt(scoreEditTarget.ai_score || "0") || 0,
+          new_score: scoreEditValue,
+          reason: scoreEditReason.trim(),
+        }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setProspects((prev) => prev.map((p) =>
+          p.id === scoreEditTarget.id ? { ...p, ai_score: String(scoreEditValue), ai_comment: scoreEditReason.trim() } : p
+        ));
+        setActionMsg("Score IA corrigé + mémorisé pour apprentissage");
+        setTimeout(() => setActionMsg(null), 4000);
+      } else {
+        setActionMsg(`Erreur : ${json.error}`);
+        setTimeout(() => setActionMsg(null), 5000);
+      }
+    } catch (err) {
+      console.error("Score correction error:", err);
+      setActionMsg("Erreur lors de la correction");
+      setTimeout(() => setActionMsg(null), 5000);
+    }
+    setScoreEditSaving(false);
+    setScoreEditTarget(null);
+  };
 
   const openLinkDeal = async () => {
     setShowLinkDeal(true);
@@ -1007,7 +1048,7 @@ export default function ProspectsPage() {
                       key={col.key}
                       className={cn(
                         "relative px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide select-none",
-                        ["score_entreprise", "score_job", "linkedin"].includes(col.key) ? "text-center" : "text-left"
+                        ["linkedin", "ai_score"].includes(col.key) ? "text-center" : "text-left"
                       )}
                       style={{ width: colWidths[col.key], minWidth: col.minWidth, maxWidth: colWidths[col.key] }}
                     >
@@ -1026,8 +1067,6 @@ export default function ProspectsPage() {
                   const isEditing = editingId === p.id;
                   const isLinking = linkingId === p.id;
                   const statut = p.computed_statut || p.statut;
-                  const scoreEnt = parseInt(p.score_entreprise) || 0;
-                  const scoreJob = parseInt(p.score_job) || 0;
                   const isSelected = selected.has(p.id);
                   const isArchived = statut === "archivé";
                   return (
@@ -1151,26 +1190,6 @@ export default function ProspectsPage() {
                           </button>
                         )}
                       </td>}
-                      {colVisible("score_entreprise") && <td className="px-1 py-1.5 text-center" style={{ width: colWidths["score_entreprise"], maxWidth: colWidths["score_entreprise"] }}>
-                        {isEditing ? (
-                          <ScoreNumber
-                            value={parseInt(editData.score_entreprise || "0") || 0}
-                            onChange={(v) => setEditData({ ...editData, score_entreprise: String(v) })}
-                          />
-                        ) : (
-                          <ScoreNumber value={scoreEnt} />
-                        )}
-                      </td>}
-                      {colVisible("score_job") && <td className="px-1 py-1.5 text-center" style={{ width: colWidths["score_job"], maxWidth: colWidths["score_job"] }}>
-                        {isEditing ? (
-                          <ScoreNumber
-                            value={parseInt(editData.score_job || "0") || 0}
-                            onChange={(v) => setEditData({ ...editData, score_job: String(v) })}
-                          />
-                        ) : (
-                          <ScoreNumber value={scoreJob} />
-                        )}
-                      </td>}
                       {colVisible("linkedin") && <td className="px-1 py-1.5 text-center" style={{ width: colWidths["linkedin"], maxWidth: colWidths["linkedin"] }}>
                         {p.linkedin ? (
                           <a href={p.linkedin.startsWith("http") ? p.linkedin : `https://${p.linkedin}`} target="_blank" rel="noopener noreferrer" className="text-[#0077B5] hover:text-[#005885]" title={p.linkedin}>
@@ -1229,7 +1248,9 @@ export default function ProspectsPage() {
                         <span className="text-gray-500 text-[9px]" title={p.resume_entreprise || ""}>{p.resume_entreprise || <span className="text-gray-300">—</span>}</span>
                       </td>}
                       {colVisible("ai_score") && <td className="px-1 py-1.5 text-center" style={{ width: colWidths["ai_score"], maxWidth: colWidths["ai_score"] }}>
-                        <ScoreNumber value={parseInt(p.ai_score || "0") || 0} />
+                        <button onClick={() => openScoreEdit(p)} className="cursor-pointer hover:scale-110 transition-transform" title="Cliquer pour corriger le score">
+                          <ScoreNumber value={parseInt(p.ai_score || "0") || 0} />
+                        </button>
                       </td>}
                       {colVisible("ai_comment") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["ai_comment"], maxWidth: colWidths["ai_comment"] }}>
                         <span className="text-gray-500 text-[9px]" title={p.ai_comment || ""}>{p.ai_comment || <span className="text-gray-300">—</span>}</span>
@@ -1291,8 +1312,6 @@ export default function ProspectsPage() {
               statut: "en cours",
               pipelines: "",
               notes: "",
-              score_entreprise: "",
-              score_job: "",
               linkedin: "",
               naf_code: "",
               effectifs: "",
@@ -1394,6 +1413,85 @@ export default function ProspectsPage() {
               >
                 {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
                 {uploading ? "Import en cours..." : "Importer"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal correction Score IA */}
+      {scoreEditTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setScoreEditTarget(null)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <Bot className="w-4 h-4 text-violet-600" />
+                Corriger le Score IA
+              </h3>
+              <button onClick={() => setScoreEditTarget(null)} className="p-0.5 text-gray-400 hover:text-gray-600 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="bg-gray-50 rounded-lg p-3 space-y-1">
+              <p className="text-xs font-medium text-gray-800">{scoreEditTarget.prenom} {scoreEditTarget.nom}</p>
+              <p className="text-[10px] text-gray-500">{scoreEditTarget.poste}{scoreEditTarget.poste && scoreEditTarget.entreprise ? " — " : ""}{scoreEditTarget.entreprise}</p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-2">Nouveau score</label>
+              <div className="flex items-center gap-1.5">
+                {[1, 2, 3, 4, 5].map((v) => {
+                  const colors = [
+                    "", "bg-red-100 text-red-700 border-red-300", "bg-orange-100 text-orange-700 border-orange-300",
+                    "bg-yellow-100 text-yellow-700 border-yellow-300", "bg-lime-100 text-lime-700 border-lime-300",
+                    "bg-green-100 text-green-700 border-green-300",
+                  ];
+                  const active = scoreEditValue === v;
+                  return (
+                    <button
+                      key={v}
+                      onClick={() => setScoreEditValue(v)}
+                      className={cn(
+                        "w-9 h-9 rounded-lg text-sm font-bold border-2 transition-all cursor-pointer",
+                        active ? `${colors[v]} ring-2 ring-offset-1 ring-indigo-400 scale-110` : "bg-gray-50 text-gray-400 border-gray-200 hover:border-gray-300"
+                      )}
+                    >
+                      {v}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Raison de la correction <span className="text-gray-400">(sera mémorisée pour l&apos;apprentissage IA)</span>
+              </label>
+              <textarea
+                value={scoreEditReason}
+                onChange={(e) => setScoreEditReason(e.target.value)}
+                rows={3}
+                placeholder="Ex: Ce DRH dans le luxe est un décideur clé, score devrait être 5..."
+                className="w-full px-3 py-2 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 focus:border-violet-400 outline-none resize-none"
+                autoFocus
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                onClick={() => setScoreEditTarget(null)}
+                className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={submitScoreCorrection}
+                disabled={scoreEditSaving || !scoreEditReason.trim()}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 cursor-pointer"
+              >
+                {scoreEditSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                Corriger &amp; mémoriser
               </button>
             </div>
           </div>

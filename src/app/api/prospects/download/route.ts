@@ -32,8 +32,6 @@ const EXPORT_COLUMNS = [
   { key: "entreprise", label: "Entreprise" },
   { key: "statut", label: "Statut" },
   { key: "linkedin", label: "LinkedIn" },
-  { key: "score_entreprise", label: "Score Entreprise" },
-  { key: "score_job", label: "Score Job" },
   { key: "naf_code", label: "Code NAF" },
   { key: "effectifs", label: "Effectifs" },
   { key: "ville", label: "Ville" },
