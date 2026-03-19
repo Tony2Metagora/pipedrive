@@ -5,7 +5,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { writeBlob, withLock } from "@/lib/blob-store";
+import { readBlob, writeBlob, withLock } from "@/lib/blob-store";
 import * as XLSX from "xlsx";
 import { requireAuth } from "@/lib/api-guard";
 
@@ -20,6 +20,23 @@ interface ProspectRow {
   statut: string;
   pipelines: string;
   notes: string;
+  list_id?: string;
+  score_entreprise?: string;
+  score_job?: string;
+  linkedin?: string;
+  naf_code?: string;
+  effectifs?: string;
+  ai_score?: string;
+  ai_comment?: string;
+  resume_entreprise?: string;
+}
+
+interface ProspectList {
+  id: string;
+  name: string;
+  company: string;
+  created_at: string;
+  count: number;
 }
 
 // Mapping flexible : clé CSV (lowercase) → champ Prospect
@@ -184,6 +201,9 @@ export async function POST(request: Request) {
   try {
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
+    const listId = formData.get("list_id") as string | null;
+    const listName = formData.get("list_name") as string | null;
+    const listCompany = formData.get("list_company") as string | null;
     if (!file) {
       return NextResponse.json({ error: "Fichier requis" }, { status: 400 });
     }
@@ -208,11 +228,17 @@ export async function POST(request: Request) {
     const hasPrenom = headerMapping.includes("prenom");
     const hasNom = headerMapping.includes("nom");
 
-    const rows: ProspectRow[] = [];
+    // Determine or create list
+    let finalListId = listId || "";
+    if (!finalListId && listName && listCompany) {
+      finalListId = `lst_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    const newRows: ProspectRow[] = [];
     for (let i = 0; i < dataRows.length; i++) {
       const values = dataRows[i];
       const row: ProspectRow = {
-        id: String(i + 1),
+        id: "", // will be set below
         nom: "",
         prenom: "",
         email: "",
@@ -222,6 +248,15 @@ export async function POST(request: Request) {
         statut: "en cours",
         pipelines: "",
         notes: "",
+        list_id: finalListId || undefined,
+        score_entreprise: "",
+        score_job: "",
+        linkedin: "",
+        naf_code: "",
+        effectifs: "",
+        ai_score: "",
+        ai_comment: "",
+        resume_entreprise: "",
       };
 
       for (let j = 0; j < headerMapping.length; j++) {
@@ -241,18 +276,42 @@ export async function POST(request: Request) {
 
       if (!row.nom && !row.prenom && !row.email) continue;
 
-      rows.push(row);
+      newRows.push(row);
     }
 
-    // Store in Vercel Blob (locked to prevent race conditions)
+    // Append to existing prospects (locked to prevent race conditions)
     await withLock("prospects.json", async () => {
-      await writeBlob("prospects.json", rows);
+      const existing = await readBlob<ProspectRow>("prospects.json");
+      const maxId = existing.reduce((max, r) => Math.max(max, Number(r.id) || 0), 0);
+      newRows.forEach((r, i) => { r.id = String(maxId + i + 1); });
+      await writeBlob("prospects.json", [...existing, ...newRows]);
     });
+
+    // Create or update list metadata
+    if (finalListId) {
+      await withLock("prospect-lists.json", async () => {
+        const lists = await readBlob<ProspectList>("prospect-lists.json");
+        const existing = lists.find((l) => l.id === finalListId);
+        if (existing) {
+          existing.count += newRows.length;
+        } else if (listName && listCompany) {
+          lists.push({
+            id: finalListId,
+            name: listName.trim(),
+            company: listCompany.trim(),
+            created_at: new Date().toISOString(),
+            count: newRows.length,
+          });
+        }
+        await writeBlob("prospect-lists.json", lists);
+      });
+    }
 
     return NextResponse.json({
       success: true,
-      count: rows.length,
-      data: rows,
+      count: newRows.length,
+      list_id: finalListId || null,
+      data: newRows,
       mappedColumns: rawHeaders.map((h, i) => ({
         csv: h,
         mapped: headerMapping[i] || "(ignoré)",

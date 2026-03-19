@@ -24,6 +24,10 @@ interface ProspectRow {
   linkedin: string;
   naf_code: string;
   effectifs: string;
+  list_id?: string;
+  ai_score?: string;
+  ai_comment?: string;
+  resume_entreprise?: string;
 }
 
 interface EnrichedProspect extends ProspectRow {
@@ -168,7 +172,7 @@ export async function PUT(request: Request) {
       const idx = rows.findIndex((r) => String(r.id) === String(id));
       if (idx === -1) return;
 
-      const allowedKeys = ["nom", "prenom", "email", "telephone", "poste", "entreprise", "statut", "pipelines", "notes", "score_entreprise", "score_job", "linkedin", "naf_code", "effectifs"];
+      const allowedKeys = ["nom", "prenom", "email", "telephone", "poste", "entreprise", "statut", "pipelines", "notes", "score_entreprise", "score_job", "linkedin", "naf_code", "effectifs", "list_id", "ai_score", "ai_comment", "resume_entreprise"];
       for (const [key, value] of Object.entries(updates)) {
         if (allowedKeys.includes(key)) {
           (rows[idx] as unknown as Record<string, string>)[key] = String(value);

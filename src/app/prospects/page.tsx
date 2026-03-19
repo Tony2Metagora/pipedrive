@@ -16,13 +16,18 @@ import {
   Briefcase,
   ExternalLink,
   Archive,
-  Star,
   Sparkles,
   Linkedin,
   Link2,
   Eye,
   EyeOff,
   ChevronDown,
+  List,
+  Trash2,
+  FolderOpen,
+  Building2,
+  Bot,
+  MessageSquareText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import NewProspectModal from "@/components/NewProspectModal";
@@ -44,6 +49,10 @@ interface Prospect {
   linkedin: string;
   naf_code: string;
   effectifs: string;
+  list_id?: string;
+  ai_score?: string;
+  ai_comment?: string;
+  resume_entreprise?: string;
   deal_id: number | null;
   deal_title: string | null;
   deal_status: string | null;
@@ -51,44 +60,64 @@ interface Prospect {
   computed_statut: string;
 }
 
+interface ProspectList {
+  id: string;
+  name: string;
+  company: string;
+  created_at: string;
+  count: number;
+}
+
 type StatusKey = "en cours" | "perdu" | "archivé";
 
 // Column definitions for visibility toggle + resizable widths
 const PROSPECT_COLUMNS = [
-  { key: "prenom", label: "Prénom", defaultVisible: true, defaultWidth: 72, minWidth: 40 },
-  { key: "nom", label: "Nom", defaultVisible: true, defaultWidth: 72, minWidth: 40 },
-  { key: "email", label: "Email", defaultVisible: true, defaultWidth: 150, minWidth: 60 },
-  { key: "telephone", label: "Tél.", defaultVisible: true, defaultWidth: 80, minWidth: 40 },
-  { key: "poste", label: "Poste", defaultVisible: true, defaultWidth: 75, minWidth: 40 },
-  { key: "entreprise", label: "Entreprise", defaultVisible: true, defaultWidth: 90, minWidth: 40 },
-  { key: "statut", label: "Statut", defaultVisible: true, defaultWidth: 58, minWidth: 40 },
-  { key: "affaire", label: "Affaire", defaultVisible: true, defaultWidth: 110, minWidth: 50 },
-  { key: "score_entreprise", label: "Score Ent.", defaultVisible: true, defaultWidth: 72, minWidth: 50 },
-  { key: "score_job", label: "Score Job", defaultVisible: true, defaultWidth: 72, minWidth: 50 },
-  { key: "linkedin", label: "LinkedIn", defaultVisible: true, defaultWidth: 32, minWidth: 28 },
-  { key: "naf_code", label: "NAF", defaultVisible: true, defaultWidth: 55, minWidth: 30 },
-  { key: "effectifs", label: "Eff.", defaultVisible: true, defaultWidth: 45, minWidth: 30 },
+  { key: "prenom", label: "Prénom", defaultVisible: true, defaultWidth: 90, minWidth: 50 },
+  { key: "nom", label: "Nom", defaultVisible: true, defaultWidth: 90, minWidth: 50 },
+  { key: "email", label: "Email", defaultVisible: true, defaultWidth: 180, minWidth: 80 },
+  { key: "telephone", label: "Tél.", defaultVisible: true, defaultWidth: 100, minWidth: 50 },
+  { key: "poste", label: "Poste", defaultVisible: true, defaultWidth: 110, minWidth: 50 },
+  { key: "entreprise", label: "Entreprise", defaultVisible: true, defaultWidth: 120, minWidth: 60 },
+  { key: "statut", label: "Statut", defaultVisible: true, defaultWidth: 70, minWidth: 50 },
+  { key: "affaire", label: "Affaire", defaultVisible: true, defaultWidth: 130, minWidth: 60 },
+  { key: "score_entreprise", label: "Score Ent.", defaultVisible: true, defaultWidth: 65, minWidth: 45 },
+  { key: "score_job", label: "Score Job", defaultVisible: true, defaultWidth: 65, minWidth: 45 },
+  { key: "linkedin", label: "LinkedIn", defaultVisible: true, defaultWidth: 36, minWidth: 30 },
+  { key: "naf_code", label: "NAF", defaultVisible: true, defaultWidth: 65, minWidth: 35 },
+  { key: "effectifs", label: "Eff.", defaultVisible: true, defaultWidth: 55, minWidth: 35 },
+  { key: "resume_entreprise", label: "Résumé Ent.", defaultVisible: false, defaultWidth: 160, minWidth: 80 },
+  { key: "ai_score", label: "Score IA", defaultVisible: false, defaultWidth: 60, minWidth: 45 },
+  { key: "ai_comment", label: "Analyse IA", defaultVisible: false, defaultWidth: 180, minWidth: 80 },
 ] as const;
 
-function ScoreStars({ value, onChange }: { value: number; onChange?: (v: number) => void }) {
+function ScoreNumber({ value, onChange }: { value: number; onChange?: (v: number) => void }) {
+  const colors = [
+    "bg-gray-100 text-gray-400",   // 0
+    "bg-red-100 text-red-700",     // 1
+    "bg-orange-100 text-orange-700", // 2
+    "bg-yellow-100 text-yellow-700", // 3
+    "bg-lime-100 text-lime-700",   // 4
+    "bg-green-100 text-green-700", // 5
+  ];
+  if (!onChange) {
+    return (
+      <span className={cn("inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold", colors[value] || colors[0])}>
+        {value || "-"}
+      </span>
+    );
+  }
   return (
-    <div className="flex items-center gap-px">
-      {[1, 2, 3, 4, 5].map((n) => (
-        <button
-          key={n}
-          type="button"
-          onClick={() => onChange?.(n === value ? 0 : n)}
-          disabled={!onChange}
-          className={cn(
-            "p-0 cursor-pointer disabled:cursor-default transition-colors",
-            n <= value ? "text-amber-400" : "text-gray-200",
-            onChange && "hover:text-amber-500"
-          )}
-        >
-          <Star className="w-3.5 h-3.5" fill={n <= value ? "currentColor" : "none"} />
-        </button>
-      ))}
-    </div>
+    <input
+      type="number"
+      min={0}
+      max={5}
+      value={value}
+      onChange={(e) => {
+        const v = Math.max(0, Math.min(5, parseInt(e.target.value) || 0));
+        onChange(v);
+      }}
+      className="w-10 px-1 py-0.5 text-[11px] text-center border border-gray-300 rounded focus:ring-1 focus:ring-indigo-400 outline-none"
+    />
   );
 }
 
@@ -129,6 +158,15 @@ export default function ProspectsPage() {
   const [showNewProspect, setShowNewProspect] = useState(false);
   const [linking, setLinking] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Lists panel
+  const [lists, setLists] = useState<ProspectList[]>([]);
+  const [loadingLists, setLoadingLists] = useState(true);
+  const [selectedListId, setSelectedListId] = useState<string | null>(null);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadListName, setUploadListName] = useState("");
+  const [uploadListCompany, setUploadListCompany] = useState("");
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [showListPanel, setShowListPanel] = useState(true);
   const [visibleCols, setVisibleCols] = useState<Set<string>>(
     new Set(PROSPECT_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key))
   );
@@ -153,21 +191,43 @@ export default function ProspectsPage() {
 
   const syncProspects = useCallback(() => fetchProspects(true), [fetchProspects]);
 
+  const fetchLists = useCallback(async () => {
+    try {
+      const res = await fetch("/api/prospects/lists");
+      const json = await res.json();
+      if (json.data) setLists(json.data);
+    } catch (err) {
+      console.error("Erreur chargement listes:", err);
+    } finally {
+      setLoadingLists(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchProspects();
-  }, [fetchProspects]);
+    fetchLists();
+  }, [fetchProspects, fetchLists]);
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleUploadWithList = async () => {
+    if (!uploadFile || !uploadListName.trim() || !uploadListCompany.trim()) return;
     setUploading(true);
     try {
       const formData = new FormData();
-      formData.append("file", file);
+      formData.append("file", uploadFile);
+      formData.append("list_name", uploadListName.trim());
+      formData.append("list_company", uploadListCompany.trim());
       const res = await fetch("/api/prospects/upload", { method: "POST", body: formData });
       const json = await res.json();
-      if (json.data) {
+      if (json.success) {
+        setActionMsg(`${json.count} contacts importés dans "${uploadListName.trim()}"`);
+        setTimeout(() => setActionMsg(null), 4000);
+        setShowUploadModal(false);
+        setUploadFile(null);
+        setUploadListName("");
+        setUploadListCompany("");
         syncProspects();
+        fetchLists();
+        if (json.list_id) setSelectedListId(json.list_id);
       } else {
         alert("Erreur lors de l'import : " + (json.error || "inconnue"));
       }
@@ -179,6 +239,26 @@ export default function ProspectsPage() {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
+
+  const deleteList = async (listId: string) => {
+    if (!confirm("Supprimer cette liste et tous ses contacts ?")) return;
+    try {
+      await fetch(`/api/prospects/lists?id=${listId}`, { method: "DELETE" });
+      if (selectedListId === listId) setSelectedListId(null);
+      fetchLists();
+      syncProspects();
+      setActionMsg("Liste supprimée");
+      setTimeout(() => setActionMsg(null), 3000);
+    } catch {
+      alert("Erreur lors de la suppression");
+    }
+  };
+
+  // Unique companies from lists for dropdown
+  const knownCompanies = useMemo(() => {
+    const set = new Set(lists.map((l) => l.company).filter(Boolean));
+    return Array.from(set).sort();
+  }, [lists]);
 
   const startEdit = (p: Prospect) => {
     setEditingId(p.id);
@@ -432,6 +512,8 @@ export default function ProspectsPage() {
   // Filtered and searched prospects
   const filtered = useMemo(() => {
     return prospects.filter((p) => {
+      // Filter by selected list
+      if (selectedListId && p.list_id !== selectedListId) return false;
       const statut = p.computed_statut || p.statut;
       if (statusFilters.size > 0 && !statusFilters.has(statut as StatusKey)) return false;
       if (search) {
@@ -448,7 +530,7 @@ export default function ProspectsPage() {
       }
       return true;
     });
-  }, [prospects, search, statusFilters]);
+  }, [prospects, search, statusFilters, selectedListId]);
 
   const enCoursCount = prospects.filter((p) => (p.computed_statut || p.statut) === "en cours").length;
   const perduCount = prospects.filter((p) => (p.computed_statut || p.statut) === "perdu").length;
@@ -565,7 +647,11 @@ export default function ProspectsPage() {
             ref={fileInputRef}
             type="file"
             accept=".csv,.xlsx,.xls"
-            onChange={handleUpload}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) { setUploadFile(f); setShowUploadModal(true); }
+              if (fileInputRef.current) fileInputRef.current.value = "";
+            }}
             className="hidden"
           />
           <button
@@ -666,7 +752,79 @@ export default function ProspectsPage() {
         </div>
       </div>
 
-      {/* Table */}
+      {/* Lists panel + Table */}
+      <div className="flex gap-4">
+        {/* Lists sidebar */}
+        {showListPanel && (
+          <div className="w-56 flex-shrink-0 bg-white rounded-lg border border-gray-200 overflow-hidden">
+            <div className="px-3 py-2.5 border-b border-gray-200 flex items-center justify-between">
+              <h3 className="text-xs font-semibold text-gray-700 flex items-center gap-1.5">
+                <FolderOpen className="w-3.5 h-3.5 text-indigo-500" />
+                Listes
+              </h3>
+              <button onClick={() => setShowListPanel(false)} className="text-gray-400 hover:text-gray-600 cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+            </div>
+            <div className="p-2 space-y-0.5 max-h-[500px] overflow-y-auto">
+              {/* All contacts */}
+              <button
+                onClick={() => setSelectedListId(null)}
+                className={cn(
+                  "w-full text-left px-2.5 py-2 rounded-md text-xs transition-colors cursor-pointer flex items-center gap-2",
+                  !selectedListId ? "bg-indigo-50 text-indigo-700 font-semibold" : "hover:bg-gray-50 text-gray-600"
+                )}
+              >
+                <Users className="w-3.5 h-3.5 flex-shrink-0" />
+                <span className="flex-1 truncate">Tous les contacts</span>
+                <span className="text-[9px] text-gray-400">{prospects.length}</span>
+              </button>
+
+              {loadingLists ? (
+                <div className="flex items-center justify-center py-4"><Loader2 className="w-4 h-4 animate-spin text-gray-300" /></div>
+              ) : lists.length === 0 ? (
+                <p className="text-[10px] text-gray-400 px-2.5 py-3 text-center">Aucune liste. Importez un CSV.</p>
+              ) : (
+                lists.map((l) => (
+                  <div key={l.id} className={cn(
+                    "group flex items-center gap-1.5 px-2.5 py-2 rounded-md text-xs transition-colors cursor-pointer",
+                    selectedListId === l.id ? "bg-indigo-50 text-indigo-700 font-semibold" : "hover:bg-gray-50 text-gray-600"
+                  )}>
+                    <button onClick={() => setSelectedListId(l.id)} className="flex-1 text-left flex items-center gap-2 min-w-0 cursor-pointer">
+                      <List className="w-3.5 h-3.5 flex-shrink-0 text-indigo-400" />
+                      <div className="flex-1 min-w-0">
+                        <p className="truncate">{l.name}</p>
+                        <p className="text-[9px] text-gray-400 flex items-center gap-1 truncate">
+                          <Building2 className="w-2.5 h-2.5 flex-shrink-0" />
+                          {l.company}
+                        </p>
+                      </div>
+                      <span className="text-[9px] text-gray-400 flex-shrink-0">{l.count}</span>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteList(l.id); }}
+                      className="opacity-0 group-hover:opacity-100 p-0.5 text-gray-300 hover:text-red-500 cursor-pointer transition-all"
+                      title="Supprimer"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Main content */}
+        <div className="flex-1 min-w-0">
+      {!showListPanel && (
+        <button
+          onClick={() => setShowListPanel(true)}
+          className="mb-3 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer"
+        >
+          <FolderOpen className="w-3.5 h-3.5" />
+          Listes
+        </button>
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
@@ -680,7 +838,7 @@ export default function ProspectsPage() {
       ) : (
         <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="text-sm" style={{ tableLayout: "fixed" }}>
+            <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="text-center pl-3 pr-0 py-2.5 w-[36px]">
@@ -843,22 +1001,22 @@ export default function ProspectsPage() {
                       </td>}
                       {colVisible("score_entreprise") && <td className="px-1 py-1.5 text-center" style={{ width: colWidths["score_entreprise"], maxWidth: colWidths["score_entreprise"] }}>
                         {isEditing ? (
-                          <ScoreStars
+                          <ScoreNumber
                             value={parseInt(editData.score_entreprise || "0") || 0}
                             onChange={(v) => setEditData({ ...editData, score_entreprise: String(v) })}
                           />
                         ) : (
-                          <ScoreStars value={scoreEnt} />
+                          <ScoreNumber value={scoreEnt} />
                         )}
                       </td>}
                       {colVisible("score_job") && <td className="px-1 py-1.5 text-center" style={{ width: colWidths["score_job"], maxWidth: colWidths["score_job"] }}>
                         {isEditing ? (
-                          <ScoreStars
+                          <ScoreNumber
                             value={parseInt(editData.score_job || "0") || 0}
                             onChange={(v) => setEditData({ ...editData, score_job: String(v) })}
                           />
                         ) : (
-                          <ScoreStars value={scoreJob} />
+                          <ScoreNumber value={scoreJob} />
                         )}
                       </td>}
                       {colVisible("linkedin") && <td className="px-1 py-1.5 text-center" style={{ width: colWidths["linkedin"], maxWidth: colWidths["linkedin"] }}>
@@ -875,6 +1033,15 @@ export default function ProspectsPage() {
                       </td>}
                       {colVisible("effectifs") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["effectifs"], maxWidth: colWidths["effectifs"] }}>
                         <span className="text-gray-600 text-[9px]">{p.effectifs}</span>
+                      </td>}
+                      {colVisible("resume_entreprise") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["resume_entreprise"], maxWidth: colWidths["resume_entreprise"] }}>
+                        <span className="text-gray-500 text-[9px]" title={p.resume_entreprise || ""}>{p.resume_entreprise || <span className="text-gray-300">—</span>}</span>
+                      </td>}
+                      {colVisible("ai_score") && <td className="px-1 py-1.5 text-center" style={{ width: colWidths["ai_score"], maxWidth: colWidths["ai_score"] }}>
+                        <ScoreNumber value={parseInt(p.ai_score || "0") || 0} />
+                      </td>}
+                      {colVisible("ai_comment") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["ai_comment"], maxWidth: colWidths["ai_comment"] }}>
+                        <span className="text-gray-500 text-[9px]" title={p.ai_comment || ""}>{p.ai_comment || <span className="text-gray-300">—</span>}</span>
                       </td>}
                       <td className="pr-3 pl-1 py-1.5 text-center">
                         {isEditing ? (
@@ -920,6 +1087,9 @@ export default function ProspectsPage() {
         </div>
       )}
 
+        </div>{/* end flex-1 min-w-0 (main content) */}
+      </div>{/* end flex gap-4 (lists + table) */}
+
       {/* Modal nouveau contact */}
       {showNewProspect && (
         <NewProspectModal
@@ -944,6 +1114,99 @@ export default function ProspectsPage() {
             setTimeout(() => syncProspects(), 2000);
           }}
         />
+      )}
+
+      {/* Modal import CSV avec liste */}
+      {showUploadModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <Upload className="w-5 h-5 text-indigo-600" />
+                Importer un fichier
+              </h3>
+              <button onClick={() => { setShowUploadModal(false); setUploadFile(null); setUploadListName(""); setUploadListCompany(""); }} className="text-gray-400 hover:text-gray-600 cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {uploadFile && (
+              <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg border border-gray-200">
+                <FolderOpen className="w-4 h-4 text-gray-400" />
+                <span className="text-sm text-gray-700 truncate">{uploadFile.name}</span>
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Nom de la liste *</label>
+                <input
+                  type="text"
+                  value={uploadListName}
+                  onChange={(e) => setUploadListName(e.target.value)}
+                  placeholder="Ex: Contacts Salon 2026"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Entreprise associée *</label>
+                <div className="relative">
+                  <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    value={uploadListCompany}
+                    onChange={(e) => setUploadListCompany(e.target.value)}
+                    placeholder="Ex: Metagora"
+                    list="known-companies"
+                    className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+                  />
+                  <datalist id="known-companies">
+                    {knownCompanies.map((c) => (
+                      <option key={c} value={c} />
+                    ))}
+                  </datalist>
+                </div>
+                {knownCompanies.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {knownCompanies.map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => setUploadListCompany(c)}
+                        className={cn(
+                          "px-2 py-0.5 text-[10px] font-medium rounded-full border cursor-pointer transition-colors",
+                          uploadListCompany === c
+                            ? "bg-indigo-100 text-indigo-700 border-indigo-300"
+                            : "bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100"
+                        )}
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => { setShowUploadModal(false); setUploadFile(null); setUploadListName(""); setUploadListCompany(""); }}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleUploadWithList}
+                disabled={uploading || !uploadListName.trim() || !uploadListCompany.trim()}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+              >
+                {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                {uploading ? "Import en cours..." : "Importer"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
