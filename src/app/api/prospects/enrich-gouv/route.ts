@@ -52,9 +52,6 @@ export async function POST(request: Request) {
     if (!ids?.length) {
       return NextResponse.json({ error: "ids[] requis" }, { status: 400 });
     }
-    if (ids.length > 50) {
-      return NextResponse.json({ error: "Maximum 50 contacts à la fois" }, { status: 400 });
-    }
 
     // Read prospects
     const rows = await readBlob<ProspectRow>("prospects.json");

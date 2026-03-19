@@ -670,9 +670,9 @@ export default function ProspectsPage() {
                 <button
                   onClick={openLinkDeal}
                   disabled={linking}
-                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 disabled:opacity-50 cursor-pointer"
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 disabled:opacity-50 cursor-pointer"
                 >
-                  {linking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
+                  {linking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
                   Lier ({selected.size})
                 </button>
                 {showLinkDeal && (
@@ -720,36 +720,36 @@ export default function ProspectsPage() {
               <button
                 onClick={enrichProspects}
                 disabled={enriching}
-                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 disabled:opacity-50 cursor-pointer"
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 disabled:opacity-50 cursor-pointer"
                 title="Enrichir via Dropcontact (email, LinkedIn, tél, poste)"
               >
-                {enriching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {enriching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
                 Dropcontact ({selected.size})
               </button>
               <button
                 onClick={enrichGouvProspects}
                 disabled={enrichingGouv}
-                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 disabled:opacity-50 cursor-pointer"
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 disabled:opacity-50 cursor-pointer"
                 title="Enrichir via API Gouv (SIREN, CA, effectifs, dirigeants — gratuit)"
               >
-                {enrichingGouv ? <Loader2 className="w-4 h-4 animate-spin" /> : <Building2 className="w-4 h-4" />}
+                {enrichingGouv ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Building2 className="w-3.5 h-3.5" />}
                 API Gouv ({selected.size})
               </button>
               <button
                 onClick={aiScoreProspects}
                 disabled={scoringAI}
-                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer"
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer"
                 title="Analyse IA : score de pertinence + commentaire + résumé entreprise"
               >
-                {scoringAI ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
+                {scoringAI ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bot className="w-3.5 h-3.5" />}
                 Score IA ({selected.size})
               </button>
               <button
                 onClick={bulkArchive}
                 disabled={archiving}
-                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 disabled:opacity-50 cursor-pointer"
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 disabled:opacity-50 cursor-pointer"
               >
-                {archiving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Archive className="w-4 h-4" />}
+                {archiving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Archive className="w-3.5 h-3.5" />}
                 Archiver ({selected.size})
               </button>
             </>
@@ -757,19 +757,19 @@ export default function ProspectsPage() {
           <button
             onClick={dedupProspects}
             disabled={prospects.length === 0}
-            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
             title="Supprimer les doublons (même email)"
           >
-            <Filter className="w-4 h-4" />
+            <Filter className="w-3.5 h-3.5" />
             Dédoublonner
           </button>
           <button
             onClick={downloadCsv}
             disabled={prospects.length === 0}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
             title={selected.size > 0 ? `Exporter ${selected.size} sélectionné(s)` : selectedListId ? "Exporter la liste" : "Exporter tous les contacts"}
           >
-            <Download className="w-4 h-4" />
+            <Download className="w-3.5 h-3.5" />
             {selected.size > 0 ? `Export (${selected.size})` : "Export CSV"}
           </button>
           <input
@@ -785,22 +785,22 @@ export default function ProspectsPage() {
           />
           <button
             onClick={() => setShowNewProspect(true)}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 cursor-pointer shadow-sm"
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 cursor-pointer shadow-sm"
           >
-            <Plus className="w-4 h-4" />
-            Ajouter contact
+            <Plus className="w-3.5 h-3.5" />
+            Ajouter
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 cursor-pointer shadow-sm"
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 cursor-pointer shadow-sm"
           >
             {uploading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
             ) : (
-              <Upload className="w-4 h-4" />
+              <Upload className="w-3.5 h-3.5" />
             )}
-            {uploading ? "Import..." : "Importer CSV"}
+            {uploading ? "Import..." : "Importer"}
           </button>
         </div>
       </div>
