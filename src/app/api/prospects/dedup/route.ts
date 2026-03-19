@@ -5,6 +5,8 @@
  * Dedup rules (in order):
  * 1. Same email (case-insensitive) → duplicate
  * 2. No email → same nom + prenom + entreprise (case-insensitive) → duplicate
+ * 
+ * Also recalculates list counts in prospect-lists.json
  */
 
 import { NextResponse } from "next/server";
@@ -17,7 +19,16 @@ interface ProspectRow {
   nom: string;
   prenom: string;
   entreprise: string;
+  list_id?: string;
   [key: string]: unknown;
+}
+
+interface ProspectList {
+  id: string;
+  name: string;
+  company: string;
+  created_at: string;
+  count: number;
 }
 
 function nameKey(r: ProspectRow): string {
@@ -34,6 +45,7 @@ export async function POST() {
   try {
     let beforeCount = 0;
     let afterCount = 0;
+    let deduped: ProspectRow[] = [];
 
     await withLock("prospects.json", async () => {
       const rows = await readBlob<ProspectRow>("prospects.json");
@@ -41,7 +53,7 @@ export async function POST() {
 
       const seenEmails = new Set<string>();
       const seenNames = new Set<string>();
-      const deduped: ProspectRow[] = [];
+      deduped = [];
 
       for (const r of rows) {
         const email = r.email?.toLowerCase().trim();
@@ -58,6 +70,21 @@ export async function POST() {
 
       afterCount = deduped.length;
       await writeBlob("prospects.json", deduped);
+    });
+
+    // Recalculate list counts based on actual remaining prospects
+    await withLock("prospect-lists.json", async () => {
+      const lists = await readBlob<ProspectList>("prospect-lists.json");
+      if (lists.length > 0) {
+        const countByList = new Map<string, number>();
+        for (const r of deduped) {
+          if (r.list_id) countByList.set(r.list_id, (countByList.get(r.list_id) || 0) + 1);
+        }
+        for (const list of lists) {
+          list.count = countByList.get(list.id) || 0;
+        }
+        await writeBlob("prospect-lists.json", lists);
+      }
     });
 
     return NextResponse.json({
