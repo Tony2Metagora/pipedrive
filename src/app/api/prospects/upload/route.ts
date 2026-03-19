@@ -279,25 +279,40 @@ export async function POST(request: Request) {
       newRows.push(row);
     }
 
-    // Append to existing prospects, dedup by email (locked to prevent race conditions)
+    // Append to existing prospects, dedup by email OR nom+prenom+entreprise (locked)
     let skippedDuplicates = 0;
+    const nameKey = (r: ProspectRow) => {
+      const nom = (r.nom || "").toLowerCase().trim();
+      const prenom = (r.prenom || "").toLowerCase().trim();
+      const entreprise = (r.entreprise || "").toLowerCase().trim();
+      return `${nom}||${prenom}||${entreprise}`;
+    };
     await withLock("prospects.json", async () => {
       const existing = await readBlob<ProspectRow>("prospects.json");
-      // Build set of existing emails for fast lookup
+      // Build sets of existing keys for fast lookup
       const existingEmails = new Set<string>();
+      const existingNames = new Set<string>();
       for (const r of existing) {
         if (r.email) existingEmails.add(r.email.toLowerCase().trim());
+        else {
+          const nk = nameKey(r);
+          if (nk !== "||||") existingNames.add(nk);
+        }
       }
       // Also dedup within the new rows themselves
       const seenEmails = new Set<string>();
+      const seenNames = new Set<string>();
       const deduped: ProspectRow[] = [];
       for (const r of newRows) {
         const email = r.email?.toLowerCase().trim();
-        if (email && (existingEmails.has(email) || seenEmails.has(email))) {
-          skippedDuplicates++;
-          continue;
+        if (email) {
+          if (existingEmails.has(email) || seenEmails.has(email)) { skippedDuplicates++; continue; }
+          seenEmails.add(email);
+        } else {
+          const nk = nameKey(r);
+          if (nk !== "||||" && (existingNames.has(nk) || seenNames.has(nk))) { skippedDuplicates++; continue; }
+          if (nk !== "||||") seenNames.add(nk);
         }
-        if (email) seenEmails.add(email);
         deduped.push(r);
       }
       const maxId = existing.reduce((max, r) => Math.max(max, Number(r.id) || 0), 0);

@@ -70,9 +70,11 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
 
   // Mode: create or import
   type Mode = "create" | "import";
-  type ImportType = "event" | "inspiration";
+  type ImportType = "event" | "inspiration" | "transcript";
   const [mode, setMode] = useState<Mode>("create");
   const [importType, setImportType] = useState<ImportType>("event");
+  const [transcriptIdeas, setTranscriptIdeas] = useState<string[]>([]);
+  const [transcriptIdeasLoading, setTranscriptIdeasLoading] = useState(false);
   const [importPost, setImportPost] = useState("");
   const [importContext, setImportContext] = useState("");
   const [importLoading, setImportLoading] = useState(false);
@@ -238,6 +240,24 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
     setSelectedSourceIds(new Set());
     setImportPost("");
     setImportContext("");
+  };
+
+  const handleTranscriptIdeas = async () => {
+    if (!importPost.trim()) return;
+    setTranscriptIdeasLoading(true);
+    setTranscriptIdeas([]);
+    setError(null);
+    try {
+      const res = await fetch("/api/linkedin/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "transcript-ideas", transcript: importPost, context: importContext || undefined }),
+      });
+      const json = await res.json();
+      if (json.error) { setError(json.error); return; }
+      setTranscriptIdeas(json.data?.ideas || []);
+    } catch (err) { setError(String(err)); }
+    finally { setTranscriptIdeasLoading(false); }
   };
 
   const handleImportGenerate = async () => {
@@ -713,7 +733,7 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
         </div>
 
         {/* Theme selection — shown for both modes (for create always, for import only in inspiration) */}
-        {(mode === "create" || (mode === "import" && importType === "inspiration")) && (
+        {(mode === "create" || (mode === "import" && (importType === "inspiration" || importType === "transcript"))) && (
           <>
             <p className="text-[10px] text-gray-400 uppercase font-semibold mb-2">
               {mode === "create" ? "Choisis un thème éditorial" : "Thème pour adapter l'inspiration"}
@@ -749,7 +769,7 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
           {/* Import type selector */}
           <div className="flex gap-2 mb-4">
             <button
-              onClick={() => { setImportType("event"); setSelectedTheme(null); }}
+              onClick={() => { setImportType("event"); setSelectedTheme(null); setTranscriptIdeas([]); }}
               className={cn(
                 "flex-1 text-left p-3 rounded-xl border-2 transition-all cursor-pointer",
                 importType === "event"
@@ -759,10 +779,10 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
             >
               <span className="text-lg">🎤</span>
               <h3 className="text-sm font-semibold text-gray-800 mt-1">Événement</h3>
-              <p className="text-[10px] text-gray-500 mt-1">Post d&apos;un event où Metagora était présent → le transformer en discours Metagora</p>
+              <p className="text-[10px] text-gray-500 mt-1">Post d&apos;un event → discours Metagora</p>
             </button>
             <button
-              onClick={() => setImportType("inspiration")}
+              onClick={() => { setImportType("inspiration"); setTranscriptIdeas([]); }}
               className={cn(
                 "flex-1 text-left p-3 rounded-xl border-2 transition-all cursor-pointer",
                 importType === "inspiration"
@@ -772,7 +792,20 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
             >
               <span className="text-lg">💡</span>
               <h3 className="text-sm font-semibold text-gray-800 mt-1">Inspiration</h3>
-              <p className="text-[10px] text-gray-500 mt-1">Post inspirant → l&apos;adapter au style Tony / Metagora sur un thème choisi</p>
+              <p className="text-[10px] text-gray-500 mt-1">Post inspirant → adapter au style Tony</p>
+            </button>
+            <button
+              onClick={() => { setImportType("transcript"); setTranscriptIdeas([]); }}
+              className={cn(
+                "flex-1 text-left p-3 rounded-xl border-2 transition-all cursor-pointer",
+                importType === "transcript"
+                  ? "border-violet-500 bg-violet-50 ring-1 ring-violet-200"
+                  : "border-gray-200 bg-white hover:border-gray-300"
+              )}
+            >
+              <span className="text-lg">💬</span>
+              <h3 className="text-sm font-semibold text-gray-800 mt-1">Transcript</h3>
+              <p className="text-[10px] text-gray-500 mt-1">Discussion / notes → 10 idées de posts</p>
             </button>
           </div>
 
@@ -780,8 +813,8 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
           <textarea
             value={importPost}
             onChange={(e) => setImportPost(e.target.value)}
-            placeholder="Colle le post LinkedIn ici..."
-            rows={6}
+            placeholder={importType === "transcript" ? "Colle le transcript de ta discussion ici (notes, échanges, idées brutes)..." : "Colle le post LinkedIn ici..."}
+            rows={importType === "transcript" ? 8 : 6}
             className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-300 outline-none resize-y mb-3"
           />
 
@@ -790,18 +823,52 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
             type="text"
             value={importContext}
             onChange={(e) => setImportContext(e.target.value)}
-            placeholder={importType === "event" ? "Contexte : ton rôle à l'event, avec qui tu étais, ce que tu as retenu..." : "Angle souhaité, point de vue perso, ce qui t'a marqué..."}
+            placeholder={importType === "event" ? "Contexte : ton rôle à l'event, avec qui tu étais, ce que tu as retenu..." : importType === "transcript" ? "Contexte : avec qui, à quel sujet, ce qui était important..." : "Angle souhaité, point de vue perso, ce qui t'a marqué..."}
             className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-300 outline-none mb-4"
           />
 
-          <button
-            onClick={handleImportGenerate}
-            disabled={!importPost.trim() || importLoading || (importType === "inspiration" && !selectedTheme)}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-purple-600 rounded-xl hover:bg-purple-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
-          >
-            {importLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            {importLoading ? "Transformation en cours…" : importType === "event" ? "Transformer en post Metagora" : "Adapter à mon style"}
-          </button>
+          {importType === "transcript" ? (
+            <button
+              onClick={handleTranscriptIdeas}
+              disabled={!importPost.trim() || transcriptIdeasLoading}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-violet-600 rounded-xl hover:bg-violet-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
+            >
+              {transcriptIdeasLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              {transcriptIdeasLoading ? "Analyse en cours…" : "Générer 10 idées de posts"}
+            </button>
+          ) : (
+            <button
+              onClick={handleImportGenerate}
+              disabled={!importPost.trim() || importLoading || (importType === "inspiration" && !selectedTheme)}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-purple-600 rounded-xl hover:bg-purple-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
+            >
+              {importLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              {importLoading ? "Transformation en cours…" : importType === "event" ? "Transformer en post Metagora" : "Adapter à mon style"}
+            </button>
+          )
+          }
+
+          {/* Transcript ideas results */}
+          {transcriptIdeas.length > 0 && importType === "transcript" && (
+            <div className="mt-4 space-y-2">
+              <p className="text-xs font-semibold text-gray-700">💡 10 idées de posts tirées du transcript :</p>
+              {transcriptIdeas.map((idea, i) => (
+                <button
+                  key={i}
+                  onClick={() => {
+                    setCustomSubject(idea);
+                    setSelectedSubject(idea);
+                    setImportType("inspiration");
+                    setImportPost(importPost);
+                  }}
+                  className="w-full text-left p-3 rounded-lg border border-gray-200 hover:border-violet-300 hover:bg-violet-50 transition-colors cursor-pointer group"
+                >
+                  <span className="text-xs font-medium text-violet-600 group-hover:text-violet-700">{i + 1}.</span>
+                  <span className="text-sm text-gray-700 ml-1.5">{idea}</span>
+                </button>
+              ))}
+            </div>
+          )}
           {importLoading && (
             <div className="mt-2 space-y-1">
               <div className="flex items-center gap-2 text-xs text-purple-600">

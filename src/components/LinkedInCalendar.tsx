@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
-  ChevronLeft, ChevronRight, Loader2, Trash2, Clock, Eye, X, Plus, GripVertical,
+  ChevronLeft, ChevronRight, Loader2, Trash2, Clock, Eye, X, Plus, GripVertical, Pencil,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -20,19 +20,19 @@ interface CalendarPost {
   imagePrompt?: string;
 }
 
-const THEME_COLORS: Record<string, { bg: string; text: string; dot: string; label: string }> = {
-  "journal-ceo": { bg: "bg-amber-50", text: "text-amber-700", dot: "bg-amber-400", label: "1️⃣ Thème 1" },
-  "ia-formation": { bg: "bg-blue-50", text: "text-blue-700", dot: "bg-blue-400", label: "2️⃣ Thème 2" },
-  "ia-operationnelle": { bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-400", label: "3️⃣ Thème 3" },
-  "evenement": { bg: "bg-purple-50", text: "text-purple-700", dot: "bg-purple-400", label: "🎯 Événement" },
+const THEME_COLORS: Record<string, { bg: string; text: string; dot: string; label: string; short: string }> = {
+  "journal-ceo": { bg: "bg-amber-50", text: "text-amber-700", dot: "bg-amber-400", label: "1️⃣ Journal d'un CEO", short: "1️⃣" },
+  "ia-formation": { bg: "bg-blue-50", text: "text-blue-700", dot: "bg-blue-400", label: "2️⃣ IA & Formation", short: "2️⃣" },
+  "ia-operationnelle": { bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-400", label: "3️⃣ IA Opérationnelle", short: "3️⃣" },
+  "evenement": { bg: "bg-purple-50", text: "text-purple-700", dot: "bg-purple-400", label: "🎯 Événement", short: "🎯" },
 };
 
 const DAY_NAMES = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 
 const THEME_OPTIONS = [
-  { key: "journal-ceo", label: "1️⃣ Thème 1" },
-  { key: "ia-formation", label: "2️⃣ Thème 2" },
-  { key: "ia-operationnelle", label: "3️⃣ Thème 3" },
+  { key: "journal-ceo", label: "1️⃣ Journal d'un CEO" },
+  { key: "ia-formation", label: "2️⃣ IA & Formation" },
+  { key: "ia-operationnelle", label: "3️⃣ IA Opérationnelle" },
   { key: "evenement", label: "🎯 Événement" },
 ];
 
@@ -49,6 +49,12 @@ export default function LinkedInCalendar() {
   const [newPostDate, setNewPostDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [newPostTime, setNewPostTime] = useState("09:00");
   const [addPostLoading, setAddPostLoading] = useState(false);
+
+  // Edit post
+  const [editingPost, setEditingPost] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editTheme, setEditTheme] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
 
   // Drag & drop
   const dragPostId = useRef<string | null>(null);
@@ -172,6 +178,35 @@ export default function LinkedInCalendar() {
       setSelectedPost(null);
     } catch (err) {
       console.error("Delete error:", err);
+    }
+  };
+
+  const handleStartEdit = () => {
+    if (!selectedPost) return;
+    setEditTitle(selectedPost.title);
+    setEditTheme(selectedPost.theme);
+    setEditingPost(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!selectedPost || !editTitle.trim()) return;
+    setEditSaving(true);
+    try {
+      const res = await fetch("/api/linkedin/posts", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: selectedPost.id, title: editTitle.trim(), theme: editTheme }),
+      });
+      if (!res.ok) throw new Error("Update failed");
+      const json = await res.json();
+      const updated = json.data;
+      setPosts((prev) => prev.map((p) => (p.id === selectedPost.id ? { ...p, title: updated.title, theme: updated.theme } : p)));
+      setSelectedPost((prev) => prev ? { ...prev, title: updated.title, theme: updated.theme } : null);
+      setEditingPost(false);
+    } catch (err) {
+      console.error("Save edit error:", err);
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -386,7 +421,7 @@ export default function LinkedInCalendar() {
                     >
                       <span className="text-[8px] sm:text-[10px] flex items-center gap-0.5 opacity-70">
                         <GripVertical className="w-2 h-2 opacity-0 group-hover/post:opacity-50 flex-shrink-0" />
-                        {p.publishTime} {tc.label.split(" ")[0]}
+                        {p.publishTime} {tc.short}
                       </span>
                       <span className="text-[9px] sm:text-[10px] font-medium block truncate">
                         {p.title}
@@ -416,23 +451,72 @@ export default function LinkedInCalendar() {
 
       {/* Post detail modal */}
       {selectedPost && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setSelectedPost(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => { setSelectedPost(null); setEditingPost(false); }}>
           <div className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[80vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between mb-3">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  {(() => {
-                    const tc = THEME_COLORS[selectedPost.theme] || THEME_COLORS["journal-ceo"];
-                    return <span className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full", tc.bg, tc.text)}>{tc.label}</span>;
-                  })()}
-                  <span className="flex items-center gap-1 text-xs text-gray-400">
-                    <Clock className="w-3 h-3" />
-                    {selectedPost.publishDate} à {selectedPost.publishTime}
-                  </span>
-                </div>
-                <h3 className="text-base font-semibold text-gray-900">{selectedPost.title}</h3>
+              <div className="flex-1 min-w-0">
+                {editingPost ? (
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      className="w-full px-3 py-1.5 text-sm font-semibold border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-300"
+                      autoFocus
+                    />
+                    <div className="flex flex-wrap gap-1.5">
+                      {THEME_OPTIONS.map((t) => {
+                        const tc = THEME_COLORS[t.key];
+                        return (
+                          <button
+                            key={t.key}
+                            onClick={() => setEditTheme(t.key)}
+                            className={cn(
+                              "text-[10px] font-medium px-2 py-0.5 rounded-full border cursor-pointer transition-colors",
+                              editTheme === t.key
+                                ? cn(tc.bg, tc.text, "border-current")
+                                : "bg-gray-50 text-gray-400 border-gray-200 hover:border-gray-300"
+                            )}
+                          >
+                            {t.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleSaveEdit}
+                        disabled={editSaving || !editTitle.trim()}
+                        className="flex items-center gap-1 px-3 py-1 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
+                      >
+                        {editSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                        Enregistrer
+                      </button>
+                      <button
+                        onClick={() => setEditingPost(false)}
+                        className="px-3 py-1 text-xs text-gray-500 bg-gray-100 rounded-lg hover:bg-gray-200 cursor-pointer"
+                      >
+                        Annuler
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2 mb-1">
+                      {(() => {
+                        const tc = THEME_COLORS[selectedPost.theme] || THEME_COLORS["journal-ceo"];
+                        return <span className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full", tc.bg, tc.text)}>{tc.label}</span>;
+                      })()}
+                      <span className="flex items-center gap-1 text-xs text-gray-400">
+                        <Clock className="w-3 h-3" />
+                        {selectedPost.publishDate} à {selectedPost.publishTime}
+                      </span>
+                    </div>
+                    <h3 className="text-base font-semibold text-gray-900">{selectedPost.title}</h3>
+                  </>
+                )}
               </div>
-              <button onClick={() => setSelectedPost(null)} className="p-1 hover:bg-gray-100 rounded-lg cursor-pointer">
+              <button onClick={() => { setSelectedPost(null); setEditingPost(false); }} className="p-1 hover:bg-gray-100 rounded-lg cursor-pointer flex-shrink-0 ml-2">
                 <X className="w-5 h-5 text-gray-400" />
               </button>
             </div>
@@ -453,6 +537,15 @@ export default function LinkedInCalendar() {
             )}
 
             <div className="flex items-center gap-2 pt-3 border-t border-gray-100">
+              {!editingPost && (
+                <button
+                  onClick={handleStartEdit}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 cursor-pointer"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  Modifier
+                </button>
+              )}
               <button
                 onClick={() => { navigator.clipboard.writeText(selectedPost.content); }}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 cursor-pointer"

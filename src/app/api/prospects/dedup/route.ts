@@ -1,6 +1,10 @@
 /**
  * API Route — Deduplicate prospects
- * POST : remove duplicate prospects by email (keeps first occurrence)
+ * POST : remove duplicate prospects (keeps first occurrence)
+ * 
+ * Dedup rules (in order):
+ * 1. Same email (case-insensitive) → duplicate
+ * 2. No email → same nom + prenom + entreprise (case-insensitive) → duplicate
  */
 
 import { NextResponse } from "next/server";
@@ -10,7 +14,17 @@ import { requireAuth } from "@/lib/api-guard";
 interface ProspectRow {
   id: string;
   email: string;
+  nom: string;
+  prenom: string;
+  entreprise: string;
   [key: string]: unknown;
+}
+
+function nameKey(r: ProspectRow): string {
+  const nom = (r.nom || "").toLowerCase().trim();
+  const prenom = (r.prenom || "").toLowerCase().trim();
+  const entreprise = (r.entreprise || "").toLowerCase().trim();
+  return `${nom}||${prenom}||${entreprise}`;
 }
 
 export async function POST() {
@@ -25,13 +39,20 @@ export async function POST() {
       const rows = await readBlob<ProspectRow>("prospects.json");
       beforeCount = rows.length;
 
-      const seen = new Set<string>();
+      const seenEmails = new Set<string>();
+      const seenNames = new Set<string>();
       const deduped: ProspectRow[] = [];
 
       for (const r of rows) {
         const email = r.email?.toLowerCase().trim();
-        if (email && seen.has(email)) continue;
-        if (email) seen.add(email);
+        if (email) {
+          if (seenEmails.has(email)) continue;
+          seenEmails.add(email);
+        } else {
+          const nk = nameKey(r);
+          if (nk !== "||||" && seenNames.has(nk)) continue;
+          if (nk !== "||||") seenNames.add(nk);
+        }
         deduped.push(r);
       }
 

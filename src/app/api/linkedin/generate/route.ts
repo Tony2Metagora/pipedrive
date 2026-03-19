@@ -100,7 +100,50 @@ const THEMES: Record<string, { name: string; description: string; emoji: string 
     description: "Vulgarisation IA (agentique, LLM), exploitation réelle chez Metagora",
     emoji: "3️⃣",
   },
+  "evenement": {
+    name: "Événement",
+    description: "Salons, conférences, webinars, meetups — avant/pendant/après. Retour d'expérience terrain, rencontres clés, insights.",
+    emoji: "🎯",
+  },
 };
+
+/* ── Base de connaissance Metagora (contexte IA) ─────────── */
+
+const METAGORA_KNOWLEDGE = `BASE DE CONNAISSANCE METAGORA (utilise ces infos comme contexte) :
+
+■ METAGORA — Qui sommes-nous ?
+Startup IA fondée par Tony, spécialisée dans la formation retail & luxe par simulation IA.
+Produit phare : Simsell — simulateur de vente IA pour vendeurs retail/luxe.
+- Clients virtuels IA (LLM) qui simulent différents profils clients
+- Scoring automatique de la performance du vendeur
+- Feedback personnalisé et axes d'amélioration
+- Fonctionne sur tous devices, déployable à grande échelle
+
+■ PROGRAMMES & PARTENAIRES
+- AWS Startup Program
+- Microsoft for Startups (Founders Hub)
+- Eleven Labs (voix IA)
+- NVIDIA Inception Program
+- Cibles : grands groupes retail/luxe (LVMH, Carrefour, etc.)
+
+■ EXPERTISE TONY
+- 15 ans dans le digital learning / e-learning
+- Expert SCORM, LMS, parcours de formation
+- Background technique (développeur) + business (CEO)
+- Vision : l'IA ne remplace pas le e-learning, elle l'enrichit
+
+■ SIMULATIONS IA — Comment ça marche ?
+- Le vendeur interagit en texte/voix avec un client virtuel IA
+- Scénarios paramétrables : produit, profil client, objections, niveau de difficulté
+- L'IA analyse : écoute active, argumentation, gestion objections, closing
+- Score sur 100 + feedback détaillé + axes d'amélioration
+- Intégration LMS possible (xAPI, SCORM)
+
+■ VALEUR AJOUTÉE
+- Formation scalable : 1 formateur IA = 1000 sessions simultanées
+- Disponible 24/7, pas de logistique
+- Personnalisée au secteur du client (luxe, cosmtique, mode, vin...)
+- ROI mesurable : amélioration du taux de conversion, NPS, panier moyen`;
 
 const SERPER_API_KEY = process.env.SERPER_API_KEY;
 
@@ -150,7 +193,7 @@ export async function POST(request: Request) {
       const result = await askAzureFast([
         {
           role: "system",
-          content: `Tu es un expert LinkedIn et content strategist pour Tony, CEO de Metagora.\n\n${EDITORIAL_LINE}\n\n${STYLE_EXAMPLES}`,
+          content: `Tu es un expert LinkedIn et content strategist pour Tony, CEO de Metagora.\n\n${EDITORIAL_LINE}\n\n${METAGORA_KNOWLEDGE}\n\n${STYLE_EXAMPLES}`,
         },
         {
           role: "user",
@@ -277,6 +320,8 @@ Pas de markdown, pas de backticks, juste le JSON.`,
 
 ${EDITORIAL_LINE}
 
+${METAGORA_KNOWLEDGE}
+
 ${STYLE_EXAMPLES}
 
 MISSION : Tony a assisté ou est intervenu à un événement (en ligne ou en présentiel). Quelqu'un a publié un post LinkedIn sur cet événement (qui peut ou non taguer Tony/Metagora). Tu dois transformer ce post d'inspiration en un post LinkedIn de Tony qui :
@@ -326,6 +371,8 @@ Pas de markdown, juste le JSON.`,
           content: `Tu es le ghostwriter LinkedIn de Tony, CEO de Metagora.
 
 ${EDITORIAL_LINE}
+
+${METAGORA_KNOWLEDGE}
 
 ${STYLE_EXAMPLES}
 
@@ -377,6 +424,8 @@ Pas de markdown, juste le JSON.`,
           content: `Tu es le ghostwriter LinkedIn de Tony, CEO de Metagora.
 
 ${EDITORIAL_LINE}
+
+${METAGORA_KNOWLEDGE}
 
 ${STYLE_EXAMPLES}
 
@@ -583,6 +632,51 @@ ${statsJsonFormat}`;
       }
 
       return NextResponse.json({ data: { stats, statsSource } });
+    }
+
+    // ── transcript-ideas: extract 10 post ideas from a pasted transcript ──
+    if (action === "transcript-ideas") {
+      const { transcript, context } = body;
+      if (!transcript) return NextResponse.json({ error: "Transcript requis" }, { status: 400 });
+
+      const result = await askAzureFast([
+        {
+          role: "system",
+          content: `Tu es un expert LinkedIn et content strategist pour Tony, CEO de Metagora.
+
+${EDITORIAL_LINE}
+
+${METAGORA_KNOWLEDGE}
+
+MISSION : À partir d'un transcript de discussion (notes, échanges, idées brutes), extrais exactement 10 idées de posts LinkedIn.
+Chaque idée doit :
+- Être formulée comme un titre accrocheur de 10-20 mots
+- Avoir un angle storytelling, data, ou opinion forte
+- Correspondre à l'un des 4 thèmes éditoriaux de Tony
+- Être directement exploitable pour rédiger un post`,
+        },
+        {
+          role: "user",
+          content: `Voici le transcript d'une discussion :
+---
+${transcript}
+---
+${context ? `\nContexte supplémentaire : ${context}` : ""}
+
+Extrais exactement 10 idées de posts LinkedIn à partir de ce transcript.
+Réponds en JSON : {"ideas": ["idée 1", "idée 2", ..., "idée 10"]}
+Pas de markdown, pas de backticks, juste le JSON.`,
+        },
+      ], 1200);
+
+      try {
+        const cleaned = result.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+        const parsed = JSON.parse(cleaned);
+        return NextResponse.json({ data: parsed });
+      } catch {
+        const lines = result.split("\n").filter(Boolean).slice(0, 10);
+        return NextResponse.json({ data: { ideas: lines } });
+      }
     }
 
     return NextResponse.json({ error: "Action invalide" }, { status: 400 });
