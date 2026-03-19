@@ -1,16 +1,16 @@
 /**
- * API Route — AI Scoring & Analysis for prospects
+ * API Route — AI Scoring & Analysis for prospects (SSE streaming)
  * POST { ids: string[] }
- * Uses GPT to generate:
+ * Uses gpt-5.4-pro (askAzureAI) to generate:
  *   - ai_score (1-5): pertinence du prospect pour Metagora
  *   - ai_comment: analyse courte du prospect
  *   - resume_entreprise: résumé de l'entreprise
+ * Returns SSE stream with progress events.
  */
 
-import { NextResponse } from "next/server";
 import { readBlob, writeBlob, withLock } from "@/lib/blob-store";
 import { requireAuth } from "@/lib/api-guard";
-import { askAzureFast } from "@/lib/azure-ai";
+import { askAzureAI } from "@/lib/azure-ai";
 
 interface ProspectRow {
   id: string;
@@ -57,103 +57,124 @@ export async function POST(request: Request) {
   const guard = await requireAuth("prospects", "POST");
   if (guard.denied) return guard.denied;
 
-  try {
-    const body = await request.json();
-    const { ids } = body as { ids: string[] };
+  const body = await request.json();
+  const { ids } = body as { ids: string[] };
 
-    if (!ids?.length) {
-      return NextResponse.json({ error: "ids[] requis" }, { status: 400 });
-    }
-    if (ids.length > 30) {
-      return NextResponse.json({ error: "Maximum 30 contacts à la fois pour l'analyse IA" }, { status: 400 });
-    }
+  if (!ids?.length) {
+    return new Response(JSON.stringify({ error: "ids[] requis" }), { status: 400, headers: { "Content-Type": "application/json" } });
+  }
 
-    const rows = await readBlob<ProspectRow>("prospects.json");
-    const idSet = new Set(ids.map(String));
-    const toScore = rows.filter((r) => idSet.has(String(r.id)));
+  const rows = await readBlob<ProspectRow>("prospects.json");
+  const idSet = new Set(ids.map(String));
+  const toScore = rows.filter((r) => idSet.has(String(r.id)));
 
-    if (toScore.length === 0) {
-      return NextResponse.json({ error: "Aucun prospect trouvé" }, { status: 404 });
-    }
+  if (toScore.length === 0) {
+    return new Response(JSON.stringify({ error: "Aucun prospect trouvé" }), { status: 404, headers: { "Content-Type": "application/json" } });
+  }
 
-    // Build compact prospect data for the AI
-    const prospectData = toScore.map((p, i) => ({
-      idx: i,
-      id: p.id,
-      nom: `${p.prenom} ${p.nom}`.trim(),
-      poste: p.poste || "",
-      entreprise: p.entreprise || "",
-      naf: p.naf_code || "",
-      effectifs: p.effectifs || "",
-      categorie: p.categorie_entreprise || "",
-      ca: p.chiffre_affaires || "",
-      ville: p.ville || "",
-    }));
+  const prospectData = toScore.map((p) => ({
+    id: p.id,
+    nom: `${p.prenom} ${p.nom}`.trim(),
+    poste: p.poste || "",
+    entreprise: p.entreprise || "",
+    naf: p.naf_code || "",
+    effectifs: p.effectifs || "",
+    categorie: p.categorie_entreprise || "",
+    ca: p.chiffre_affaires || "",
+    ville: p.ville || "",
+  }));
 
-    // Process in batches of 10 to avoid token limits
-    const BATCH_SIZE = 10;
-    const allResults: { id: string; ai_score: string; ai_comment: string; resume_entreprise: string }[] = [];
+  const BATCH_SIZE = 10;
+  const totalBatches = Math.ceil(prospectData.length / BATCH_SIZE);
 
-    for (let batchStart = 0; batchStart < prospectData.length; batchStart += BATCH_SIZE) {
-      const batch = prospectData.slice(batchStart, batchStart + BATCH_SIZE);
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (event: string, data: unknown) => {
+        controller.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+      };
 
-      const userContent = `Analyse ces ${batch.length} prospects et donne un score + commentaire + résumé entreprise pour chacun :
+      send("progress", { current: 0, total: toScore.length, batches: totalBatches, message: "Démarrage analyse IA..." });
+
+      const allResults: { id: string; ai_score: string; ai_comment: string; resume_entreprise: string }[] = [];
+
+      for (let batchStart = 0; batchStart < prospectData.length; batchStart += BATCH_SIZE) {
+        const batchIdx = Math.floor(batchStart / BATCH_SIZE) + 1;
+        const batch = prospectData.slice(batchStart, batchStart + BATCH_SIZE);
+
+        send("progress", {
+          current: batchStart,
+          total: toScore.length,
+          batches: totalBatches,
+          batch: batchIdx,
+          message: `Analyse batch ${batchIdx}/${totalBatches} (${batch.length} prospects)...`,
+        });
+
+        try {
+          const userContent = `Analyse ces ${batch.length} prospects et donne un score + commentaire + résumé entreprise pour chacun :
 
 ${JSON.stringify(batch, null, 1)}
 
 Réponds en JSON : [{"id": "xxx", "ai_score": 3, "ai_comment": "...", "resume_entreprise": "..."}]
 Pas de markdown, pas de backticks, juste le JSON array.`;
 
-      const result = await askAzureFast([
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: userContent },
-      ], 3000);
+          const result = await askAzureAI([
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user", content: userContent },
+          ], 4000);
 
-      try {
-        const cleaned = result.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-        const parsed = JSON.parse(cleaned);
-        if (Array.isArray(parsed)) {
-          for (const item of parsed) {
-            allResults.push({
-              id: String(item.id),
-              ai_score: String(item.ai_score || "0"),
-              ai_comment: String(item.ai_comment || ""),
-              resume_entreprise: String(item.resume_entreprise || ""),
-            });
+          const cleaned = result.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+          const parsed = JSON.parse(cleaned);
+          if (Array.isArray(parsed)) {
+            for (const item of parsed) {
+              allResults.push({
+                id: String(item.id),
+                ai_score: String(item.ai_score || "0"),
+                ai_comment: String(item.ai_comment || ""),
+                resume_entreprise: String(item.resume_entreprise || ""),
+              });
+            }
           }
-        }
-      } catch (parseErr) {
-        console.error("[AI Score] Parse error for batch:", parseErr, "Raw:", result.slice(0, 500));
-      }
-    }
-
-    // Apply results to prospects
-    let updated = 0;
-    await withLock("prospects.json", async () => {
-      const allRows = await readBlob<ProspectRow>("prospects.json");
-      const resultMap = new Map(allResults.map((r) => [r.id, r]));
-
-      for (const row of allRows) {
-        const aiResult = resultMap.get(String(row.id));
-        if (aiResult) {
-          row.ai_score = aiResult.ai_score;
-          row.ai_comment = aiResult.ai_comment;
-          row.resume_entreprise = aiResult.resume_entreprise;
-          updated++;
+        } catch (err) {
+          console.error(`[AI Score] Batch ${batchIdx} error:`, err);
+          send("progress", { current: batchStart + batch.length, total: toScore.length, message: `Erreur batch ${batchIdx}, continue...` });
         }
       }
 
-      await writeBlob("prospects.json", allRows);
-    });
+      // Save results
+      send("progress", { current: toScore.length, total: toScore.length, message: "Sauvegarde des résultats..." });
 
-    return NextResponse.json({
-      success: true,
-      total: ids.length,
-      scored: updated,
-      results: allResults,
-    });
-  } catch (error) {
-    console.error("POST /api/prospects/ai-score error:", error);
-    return NextResponse.json({ error: String(error) }, { status: 500 });
-  }
+      let updated = 0;
+      try {
+        await withLock("prospects.json", async () => {
+          const allRows = await readBlob<ProspectRow>("prospects.json");
+          const resultMap = new Map(allResults.map((r) => [r.id, r]));
+
+          for (const row of allRows) {
+            const aiResult = resultMap.get(String(row.id));
+            if (aiResult) {
+              row.ai_score = aiResult.ai_score;
+              row.ai_comment = aiResult.ai_comment;
+              row.resume_entreprise = aiResult.resume_entreprise;
+              updated++;
+            }
+          }
+
+          await writeBlob("prospects.json", allRows);
+        });
+      } catch (err) {
+        console.error("[AI Score] Save error:", err);
+      }
+
+      send("done", { success: true, total: ids.length, scored: updated });
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
 }

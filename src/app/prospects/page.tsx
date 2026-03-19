@@ -168,8 +168,7 @@ export default function ProspectsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [archiving, setArchiving] = useState(false);
   const [enriching, setEnriching] = useState(false);
-  const [enrichingGouv, setEnrichingGouv] = useState(false);
-  const [scoringAI, setScoringAI] = useState(false);
+  const [processing, setProcessing] = useState<{ label: string; message: string; current: number; total: number } | null>(null);
   const [showLinkDeal, setShowLinkDeal] = useState(false);
   const [allDeals, setAllDeals] = useState<{ id: number; title: string; person_name?: string; org_name?: string }[]>([]);
   const [dealSearch, setDealSearch] = useState("");
@@ -447,63 +446,68 @@ export default function ProspectsPage() {
     setEnriching(false);
   };
 
-  const aiScoreProspects = async () => {
+  /** Shared SSE handler for streaming API routes (API Gouv, AI Score) */
+  const runStreamingAction = async (url: string, label: string, doneMsg: (data: Record<string, unknown>) => string) => {
     if (selected.size === 0) return;
-    if (selected.size > 30) { setActionMsg("Maximum 30 contacts pour l'analyse IA"); setTimeout(() => setActionMsg(null), 3000); return; }
-    setScoringAI(true);
-    setActionMsg("Analyse IA en cours...");
+    setProcessing({ label, message: "Démarrage...", current: 0, total: 1 });
     try {
-      const res = await fetch("/api/prospects/ai-score", {
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids: Array.from(selected) }),
       });
-      const json = await res.json();
-      if (json.success) {
-        setActionMsg(`${json.scored}/${json.total} prospects analysés par l'IA`);
-        setSelected(new Set());
-        syncProspects();
-      } else {
-        setActionMsg(`Erreur : ${json.error}`);
+      if (!res.ok || !res.body) {
+        const err = await res.text();
+        setProcessing(null);
+        setActionMsg(`Erreur : ${err}`);
+        setTimeout(() => setActionMsg(null), 5000);
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        let eventType = "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) { eventType = line.slice(7).trim(); continue; }
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (eventType === "progress") {
+                setProcessing({ label, message: data.message || "", current: data.current ?? 0, total: data.total ?? 1 });
+              } else if (eventType === "done") {
+                setProcessing(null);
+                setActionMsg(doneMsg(data));
+                setSelected(new Set());
+                syncProspects();
+                setTimeout(() => setActionMsg(null), 6000);
+              }
+            } catch { /* ignore parse errors */ }
+          }
+        }
       }
     } catch (err) {
-      console.error("AI Score error:", err);
-      setActionMsg("Erreur lors de l'analyse IA");
+      console.error(`${label} error:`, err);
+      setActionMsg(`Erreur ${label}`);
+      setTimeout(() => setActionMsg(null), 5000);
     }
-    setTimeout(() => setActionMsg(null), 6000);
-    setScoringAI(false);
+    setProcessing(null);
   };
 
-  const enrichGouvProspects = async () => {
-    if (selected.size === 0) return;
-    setEnrichingGouv(true);
-    setActionMsg("Recherche entreprises (API Gouv)...");
-    try {
-      const res = await fetch("/api/prospects/enrich-gouv", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: Array.from(selected) }),
-      });
-      const json = await res.json();
-      if (json.success) {
-        const details = (json.results || [])
-          .filter((r: { status: string }) => r.status === "enriched")
-          .map((r: { company: string; fields: string[] }) => `${r.company}: ${r.fields.join(", ")}`)
-          .slice(0, 5)
-          .join(" | ");
-        setActionMsg(`${json.enriched}/${json.total} enrichi${json.enriched > 1 ? "s" : ""} (${json.companiesSearched} entreprises)${details ? ` — ${details}` : ""}`);
-        setSelected(new Set());
-        syncProspects();
-      } else {
-        setActionMsg(`Erreur : ${json.error}`);
-      }
-    } catch (err) {
-      console.error("Enrichissement Gouv error:", err);
-      setActionMsg("Erreur lors de l'enrichissement API Gouv");
-    }
-    setTimeout(() => setActionMsg(null), 8000);
-    setEnrichingGouv(false);
-  };
+  const aiScoreProspects = () =>
+    runStreamingAction("/api/prospects/ai-score", "Score IA", (d) =>
+      `${d.scored}/${d.total} prospects analysés par l'IA`
+    );
+
+  const enrichGouvProspects = () =>
+    runStreamingAction("/api/prospects/enrich-gouv", "API Gouv", (d) =>
+      `${d.enriched}/${d.total} enrichi${Number(d.enriched) > 1 ? "s" : ""} (${d.companiesSearched} entreprises)`
+    );
 
   const openLinkDeal = async () => {
     setShowLinkDeal(true);
@@ -661,10 +665,29 @@ export default function ProspectsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {actionMsg && (
+          {actionMsg && !processing && (
             <span className="text-xs font-medium px-2 py-1 rounded bg-green-50 text-green-700">{actionMsg}</span>
           )}
-          {selected.size > 0 && (
+          {processing ? (
+            <div className="flex items-center gap-3 px-3 py-1.5 bg-white border border-gray-200 rounded-lg min-w-[320px]">
+              <Loader2 className="w-4 h-4 animate-spin text-indigo-600 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-semibold text-indigo-700">{processing.label}</span>
+                  <span className="text-[10px] text-gray-500">
+                    {processing.total > 0 ? `${Math.min(processing.current, processing.total)}/${processing.total}` : ""}
+                  </span>
+                </div>
+                <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                    style={{ width: `${processing.total > 0 ? Math.min((processing.current / processing.total) * 100, 100) : 0}%` }}
+                  />
+                </div>
+                <p className="text-[9px] text-gray-500 mt-0.5 truncate">{processing.message}</p>
+              </div>
+            </div>
+          ) : selected.size > 0 && (
             <>
               <div className="relative">
                 <button
@@ -728,20 +751,20 @@ export default function ProspectsPage() {
               </button>
               <button
                 onClick={enrichGouvProspects}
-                disabled={enrichingGouv}
+                disabled={!!processing}
                 className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 disabled:opacity-50 cursor-pointer"
                 title="Enrichir via API Gouv (SIREN, CA, effectifs, dirigeants — gratuit)"
               >
-                {enrichingGouv ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Building2 className="w-3.5 h-3.5" />}
+                <Building2 className="w-3.5 h-3.5" />
                 API Gouv ({selected.size})
               </button>
               <button
                 onClick={aiScoreProspects}
-                disabled={scoringAI}
+                disabled={!!processing}
                 className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer"
                 title="Analyse IA : score de pertinence + commentaire + résumé entreprise"
               >
-                {scoringAI ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bot className="w-3.5 h-3.5" />}
+                <Bot className="w-3.5 h-3.5" />
                 Score IA ({selected.size})
               </button>
               <button
