@@ -155,6 +155,7 @@ export default function ProspectsPage() {
   const [uploading, setUploading] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilters, setStatusFilters] = useState<Set<StatusKey>>(new Set(["en cours", "perdu"]));
+  const [scoreFilters, setScoreFilters] = useState<Set<number>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editData, setEditData] = useState<Partial<Prospect>>({});
   const [saving, setSaving] = useState(false);
@@ -685,6 +686,15 @@ export default function ProspectsPage() {
     });
   };
 
+  const toggleScoreFilter = (s: number) => {
+    setScoreFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(s)) next.delete(s);
+      else next.add(s);
+      return next;
+    });
+  };
+
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -702,6 +712,10 @@ export default function ProspectsPage() {
       if (selectedListId && p.list_id !== selectedListId) return false;
       const statut = p.computed_statut || p.statut;
       if (statusFilters.size > 0 && !statusFilters.has(statut as StatusKey)) return false;
+      if (scoreFilters.size > 0) {
+        const score = parseInt(p.ai_score || "0") || 0;
+        if (!scoreFilters.has(score)) return false;
+      }
       if (search) {
         const q = search.toLowerCase();
         return (
@@ -716,7 +730,7 @@ export default function ProspectsPage() {
       }
       return true;
     });
-  }, [prospects, search, statusFilters, selectedListId]);
+  }, [prospects, search, statusFilters, scoreFilters, selectedListId]);
 
   const enCoursCount = prospects.filter((p) => (p.computed_statut || p.statut) === "en cours").length;
   const perduCount = prospects.filter((p) => (p.computed_statut || p.statut) === "perdu").length;
@@ -951,6 +965,38 @@ export default function ProspectsPage() {
             />
             <span className="text-gray-500 font-medium">Archivé ({archivedCount})</span>
           </label>
+          <div className="ml-1 border-l border-gray-200 pl-2 flex items-center gap-1">
+            <Bot className="w-3.5 h-3.5 text-violet-400" />
+            {[1, 2, 3, 4, 5].map((s) => {
+              const colors = [
+                "", "bg-red-100 text-red-700 border-red-300", "bg-orange-100 text-orange-700 border-orange-300",
+                "bg-yellow-100 text-yellow-700 border-yellow-300", "bg-lime-100 text-lime-700 border-lime-300",
+                "bg-green-100 text-green-700 border-green-300",
+              ];
+              const active = scoreFilters.has(s);
+              return (
+                <button
+                  key={s}
+                  onClick={() => toggleScoreFilter(s)}
+                  className={cn(
+                    "w-5 h-5 rounded text-[10px] font-bold border transition-all cursor-pointer",
+                    active ? `${colors[s]} ring-1 ring-offset-0.5 ring-violet-400` : "bg-white text-gray-300 border-gray-200 hover:border-gray-300"
+                  )}
+                >
+                  {s}
+                </button>
+              );
+            })}
+            {scoreFilters.size > 0 && (
+              <button
+                onClick={() => setScoreFilters(new Set())}
+                className="text-[9px] text-gray-400 hover:text-gray-600 ml-0.5 cursor-pointer"
+                title="Effacer filtre score"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
           <div className="ml-2 border-l border-gray-200 pl-2 relative">
             <button
               onClick={() => setShowColPicker(!showColPicker)}
