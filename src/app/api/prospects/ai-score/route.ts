@@ -1,16 +1,14 @@
 /**
  * API Route — AI Scoring & Analysis for prospects (SSE streaming)
  * POST { ids: string[] }
- * Uses gpt-5.4-pro (askAzureAI) to generate:
- *   - ai_score (1-5): pertinence du prospect pour Metagora
- *   - ai_comment: analyse courte du prospect
- *   - resume_entreprise: résumé de l'entreprise
- * Returns SSE stream with progress events.
+ * Uses gpt-5.2-chat (askAzureFast) — fast Chat Completions API (~3-5s/batch)
+ * Generates: ai_score (1-5), ai_comment, resume_entreprise
+ * Runs 4 batches of 20 in parallel → ~15s for 120 contacts
  */
 
 import { readBlob, writeBlob, withLock } from "@/lib/blob-store";
 import { requireAuth } from "@/lib/api-guard";
-import { askAzureAI } from "@/lib/azure-ai";
+import { askAzureFast } from "@/lib/azure-ai";
 
 interface ProspectRow {
   id: string;
@@ -51,7 +49,9 @@ Pour chaque prospect, tu dois évaluer :
 2. **ai_comment** : analyse en 1-2 phrases (pourquoi ce score, quel angle d'approche)
 3. **resume_entreprise** : résumé de l'entreprise en 1 phrase (secteur, taille, activité principale)
 
-Réponds en JSON array.`;
+Réponds UNIQUEMENT en JSON array, sans markdown, sans backticks.`;
+
+type AIResult = { id: string; ai_score: string; ai_comment: string; resume_entreprise: string };
 
 export async function POST(request: Request) {
   const guard = await requireAuth("prospects", "POST");
@@ -84,7 +84,7 @@ export async function POST(request: Request) {
     ville: p.ville || "",
   }));
 
-  const BATCH_SIZE = 10;
+  const BATCH_SIZE = 20;
   const PARALLEL = 4;
   const batches: { idx: number; data: typeof prospectData }[] = [];
   for (let i = 0; i < prospectData.length; i += BATCH_SIZE) {
@@ -95,16 +95,20 @@ export async function POST(request: Request) {
   const stream = new ReadableStream({
     async start(controller) {
       const send = (event: string, data: unknown) => {
-        controller.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        try {
+          controller.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        } catch { /* stream closed */ }
       };
 
-      send("progress", { current: 0, total: totalBatches, message: `Démarrage analyse IA — ${totalBatches} batches (×${PARALLEL} en parallèle)...` });
+      console.log(`[AI Score] Starting: ${toScore.length} prospects, ${totalBatches} batches, ×${PARALLEL} parallel`);
+      send("progress", { current: 0, total: totalBatches, message: `Analyse IA — ${totalBatches} batches (×${PARALLEL} en parallèle)...` });
 
-      const allResults: { id: string; ai_score: string; ai_comment: string; resume_entreprise: string }[] = [];
+      const allResults: AIResult[] = [];
       let completedBatches = 0;
+      let errorCount = 0;
 
-      /** Process a single batch */
-      const processBatch = async (batch: typeof batches[0]) => {
+      const processBatch = async (batch: typeof batches[0]): Promise<void> => {
+        const t0 = Date.now();
         const userContent = `Analyse ces ${batch.data.length} prospects et donne un score + commentaire + résumé entreprise pour chacun :
 
 ${JSON.stringify(batch.data, null, 1)}
@@ -113,12 +117,14 @@ Réponds en JSON : [{"id": "xxx", "ai_score": 3, "ai_comment": "...", "resume_en
 Pas de markdown, pas de backticks, juste le JSON array.`;
 
         try {
-          const result = await askAzureAI([
+          const result = await askAzureFast([
             { role: "system", content: SYSTEM_PROMPT },
             { role: "user", content: userContent },
-          ], 4000);
+          ], 3000);
 
-          const cleaned = result.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+          console.log(`[AI Score] Batch ${batch.idx} OK in ${Date.now() - t0}ms, response length: ${result.length}`);
+
+          const cleaned = result.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
           const parsed = JSON.parse(cleaned);
           if (Array.isArray(parsed)) {
             for (const item of parsed) {
@@ -129,31 +135,36 @@ Pas de markdown, pas de backticks, juste le JSON array.`;
                 resume_entreprise: String(item.resume_entreprise || ""),
               });
             }
+          } else {
+            console.error(`[AI Score] Batch ${batch.idx}: response is not an array`);
+            errorCount++;
           }
         } catch (err) {
-          console.error(`[AI Score] Batch ${batch.idx} error:`, err);
+          console.error(`[AI Score] Batch ${batch.idx} FAILED after ${Date.now() - t0}ms:`, err);
+          errorCount++;
         }
         completedBatches++;
         send("progress", {
           current: completedBatches,
           total: totalBatches,
-          message: `Batch ${completedBatches}/${totalBatches} terminé`,
+          message: `Batch ${completedBatches}/${totalBatches} terminé${errorCount > 0 ? ` (${errorCount} erreur${errorCount > 1 ? "s" : ""})` : ""}`,
         });
       };
 
-      // Run batches in parallel windows of PARALLEL
+      // Run batches in parallel windows
       for (let i = 0; i < batches.length; i += PARALLEL) {
         const window = batches.slice(i, i + PARALLEL);
         send("progress", {
           current: completedBatches,
           total: totalBatches,
-          message: `Batches ${completedBatches + 1}-${Math.min(completedBatches + window.length, totalBatches)}/${totalBatches} en cours...`,
+          message: `Batches ${completedBatches + 1}–${Math.min(completedBatches + window.length, totalBatches)}/${totalBatches} en cours...`,
         });
         await Promise.all(window.map(processBatch));
       }
 
       // Save results
-      send("progress", { current: totalBatches, total: totalBatches, message: "Sauvegarde des résultats..." });
+      console.log(`[AI Score] All batches done. ${allResults.length} results, ${errorCount} errors. Saving...`);
+      send("progress", { current: totalBatches, total: totalBatches, message: `Sauvegarde de ${allResults.length} résultats...` });
 
       let updated = 0;
       try {
@@ -173,11 +184,12 @@ Pas de markdown, pas de backticks, juste le JSON array.`;
 
           await writeBlob("prospects.json", allRows);
         });
+        console.log(`[AI Score] Saved ${updated} prospects`);
       } catch (err) {
         console.error("[AI Score] Save error:", err);
       }
 
-      send("done", { success: true, total: ids.length, scored: updated });
+      send("done", { success: true, total: ids.length, scored: updated, errors: errorCount });
       controller.close();
     },
   });
