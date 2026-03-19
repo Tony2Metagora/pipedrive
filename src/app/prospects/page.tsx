@@ -219,8 +219,9 @@ export default function ProspectsPage() {
       const res = await fetch("/api/prospects/upload", { method: "POST", body: formData });
       const json = await res.json();
       if (json.success) {
-        setActionMsg(`${json.count} contacts importés dans "${uploadListName.trim()}"`);
-        setTimeout(() => setActionMsg(null), 4000);
+        const dupMsg = json.skippedDuplicates ? ` (${json.skippedDuplicates} doublons ignorés)` : "";
+        setActionMsg(`${json.count} contacts importés dans "${uploadListName.trim()}"${dupMsg}`);
+        setTimeout(() => setActionMsg(null), 5000);
         setShowUploadModal(false);
         setUploadFile(null);
         setUploadListName("");
@@ -252,6 +253,22 @@ export default function ProspectsPage() {
     } catch {
       alert("Erreur lors de la suppression");
     }
+  };
+
+  const dedupProspects = async () => {
+    if (!confirm("Supprimer les doublons (même email) ? Les premiers occurrences sont conservées.")) return;
+    setActionMsg("Dédoublonnage en cours...");
+    try {
+      const res = await fetch("/api/prospects/dedup", { method: "POST" });
+      const json = await res.json();
+      if (json.success) {
+        setActionMsg(`${json.removed} doublons supprimés (${json.after} contacts restants)`);
+        syncProspects();
+      } else {
+        setActionMsg("Erreur: " + (json.error || "inconnue"));
+      }
+    } catch { setActionMsg("Erreur réseau"); }
+    setTimeout(() => setActionMsg(null), 5000);
   };
 
   // Unique companies from lists for dropdown
@@ -635,6 +652,15 @@ export default function ProspectsPage() {
               </button>
             </>
           )}
+          <button
+            onClick={dedupProspects}
+            disabled={prospects.length === 0}
+            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
+            title="Supprimer les doublons (même email)"
+          >
+            <Filter className="w-4 h-4" />
+            Dédoublonner
+          </button>
           <button
             onClick={downloadCsv}
             disabled={prospects.length === 0}

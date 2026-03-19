@@ -279,12 +279,32 @@ export async function POST(request: Request) {
       newRows.push(row);
     }
 
-    // Append to existing prospects (locked to prevent race conditions)
+    // Append to existing prospects, dedup by email (locked to prevent race conditions)
+    let skippedDuplicates = 0;
     await withLock("prospects.json", async () => {
       const existing = await readBlob<ProspectRow>("prospects.json");
+      // Build set of existing emails for fast lookup
+      const existingEmails = new Set<string>();
+      for (const r of existing) {
+        if (r.email) existingEmails.add(r.email.toLowerCase().trim());
+      }
+      // Also dedup within the new rows themselves
+      const seenEmails = new Set<string>();
+      const deduped: ProspectRow[] = [];
+      for (const r of newRows) {
+        const email = r.email?.toLowerCase().trim();
+        if (email && (existingEmails.has(email) || seenEmails.has(email))) {
+          skippedDuplicates++;
+          continue;
+        }
+        if (email) seenEmails.add(email);
+        deduped.push(r);
+      }
       const maxId = existing.reduce((max, r) => Math.max(max, Number(r.id) || 0), 0);
-      newRows.forEach((r, i) => { r.id = String(maxId + i + 1); });
-      await writeBlob("prospects.json", [...existing, ...newRows]);
+      deduped.forEach((r, i) => { r.id = String(maxId + i + 1); });
+      newRows.length = 0;
+      newRows.push(...deduped);
+      await writeBlob("prospects.json", [...existing, ...deduped]);
     });
 
     // Create or update list metadata
@@ -310,6 +330,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       count: newRows.length,
+      skippedDuplicates,
       list_id: finalListId || null,
       data: newRows,
       mappedColumns: rawHeaders.map((h, i) => ({

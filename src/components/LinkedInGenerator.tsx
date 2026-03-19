@@ -37,6 +37,7 @@ const THEMES = [
   { key: "journal-ceo", emoji: "1️⃣", name: "Journal d'un CEO", desc: "Rencontres retail/luxe, bonnes pratiques, personnes et marques inspirantes", color: "amber" },
   { key: "ia-formation", emoji: "2️⃣", name: "IA dans la formation", desc: "E-learning (SCORM/LMS) = réalité de 90% des entreprises. L'IA l'enrichit, pas le remplace. Constat + solutions.", color: "blue" },
   { key: "ia-operationnelle", emoji: "3️⃣", name: "IA Opérationnelle", desc: "Vulgarisation IA (agentique, LLM) → exploitation réelle chez Metagora", color: "emerald" },
+  { key: "evenement", emoji: "🎯", name: "Événement", desc: "Salons, conférences, webinars, meetups — avant/pendant/après", color: "purple" },
 ];
 
 // ─── Reusable elapsed timer hook ─────────────────────────
@@ -915,6 +916,7 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
                             "text-[9px] font-semibold px-1.5 py-0.5 rounded-full",
                             tk === "journal-ceo" ? "bg-amber-100 text-amber-700" :
                             tk === "ia-formation" ? "bg-blue-100 text-blue-700" :
+                            tk === "evenement" ? "bg-purple-100 text-purple-700" :
                             "bg-emerald-100 text-emerald-700"
                           )}>{t.emoji}</span>
                         ) : null;
@@ -942,6 +944,7 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
                             s.themes.includes(t.key)
                               ? t.key === "journal-ceo" ? "bg-amber-100 text-amber-700 border-amber-300" :
                                 t.key === "ia-formation" ? "bg-blue-100 text-blue-700 border-blue-300" :
+                                t.key === "evenement" ? "bg-purple-100 text-purple-700 border-purple-300" :
                                 "bg-emerald-100 text-emerald-700 border-emerald-300"
                               : "bg-gray-50 text-gray-400 border-gray-200 hover:border-gray-300"
                           )}

@@ -14,7 +14,7 @@ export interface LinkedInPost {
   id: string;
   title: string;
   content: string;
-  theme: string;          // "journal-ceo" | "ia-formation" | "ia-operationnelle"
+  theme: string;          // "journal-ceo" | "ia-formation" | "ia-operationnelle" | "evenement"
   hook: string;           // chosen hook (first lines)
   publishDate: string;    // ISO date "2026-03-18"
   publishTime: string;    // "09:00"

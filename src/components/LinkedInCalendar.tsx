@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
-  ChevronLeft, ChevronRight, Loader2, Trash2, Clock, Eye, X, Plus,
+  ChevronLeft, ChevronRight, Loader2, Trash2, Clock, Eye, X, Plus, GripVertical,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -21,17 +21,19 @@ interface CalendarPost {
 }
 
 const THEME_COLORS: Record<string, { bg: string; text: string; dot: string; label: string }> = {
-  "journal-ceo": { bg: "bg-amber-50", text: "text-amber-700", dot: "bg-amber-400", label: "1️⃣ CEO" },
-  "ia-formation": { bg: "bg-blue-50", text: "text-blue-700", dot: "bg-blue-400", label: "2️⃣ Formation" },
-  "ia-operationnelle": { bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-400", label: "3️⃣ IA Opé" },
+  "journal-ceo": { bg: "bg-amber-50", text: "text-amber-700", dot: "bg-amber-400", label: "1️⃣ Thème 1" },
+  "ia-formation": { bg: "bg-blue-50", text: "text-blue-700", dot: "bg-blue-400", label: "2️⃣ Thème 2" },
+  "ia-operationnelle": { bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-400", label: "3️⃣ Thème 3" },
+  "evenement": { bg: "bg-purple-50", text: "text-purple-700", dot: "bg-purple-400", label: "🎯 Événement" },
 };
 
 const DAY_NAMES = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 
 const THEME_OPTIONS = [
-  { key: "journal-ceo", label: "1️⃣ Journal d'un CEO" },
-  { key: "ia-formation", label: "2️⃣ IA dans la formation" },
-  { key: "ia-operationnelle", label: "3️⃣ IA Opérationnelle" },
+  { key: "journal-ceo", label: "1️⃣ Thème 1" },
+  { key: "ia-formation", label: "2️⃣ Thème 2" },
+  { key: "ia-operationnelle", label: "3️⃣ Thème 3" },
+  { key: "evenement", label: "🎯 Événement" },
 ];
 
 export default function LinkedInCalendar() {
@@ -47,6 +49,10 @@ export default function LinkedInCalendar() {
   const [newPostDate, setNewPostDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [newPostTime, setNewPostTime] = useState("09:00");
   const [addPostLoading, setAddPostLoading] = useState(false);
+
+  // Drag & drop
+  const dragPostId = useRef<string | null>(null);
+  const [dropTargetDate, setDropTargetDate] = useState<string | null>(null);
 
   // ─── Load posts ───────────────────────────────────────
 
@@ -169,6 +175,62 @@ export default function LinkedInCalendar() {
     }
   };
 
+  // ─── Drag & drop handlers ──────────────────────────────
+
+  const handleDragStart = (e: React.DragEvent, postId: string) => {
+    dragPostId.current = postId;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", postId);
+    // Make the drag ghost slightly transparent
+    if (e.currentTarget instanceof HTMLElement) {
+      e.currentTarget.style.opacity = "0.5";
+    }
+  };
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    dragPostId.current = null;
+    setDropTargetDate(null);
+    if (e.currentTarget instanceof HTMLElement) {
+      e.currentTarget.style.opacity = "1";
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent, dateStr: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDropTargetDate(dateStr);
+  };
+
+  const handleDragLeave = () => {
+    setDropTargetDate(null);
+  };
+
+  const handleDrop = async (e: React.DragEvent, dateStr: string) => {
+    e.preventDefault();
+    setDropTargetDate(null);
+    const postId = dragPostId.current;
+    if (!postId) return;
+    dragPostId.current = null;
+
+    // Optimistic update
+    const prevPosts = [...posts];
+    setPosts((prev) =>
+      prev.map((p) => (p.id === postId ? { ...p, publishDate: dateStr } : p))
+    );
+
+    try {
+      const res = await fetch("/api/linkedin/posts", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: postId, publishDate: dateStr }),
+      });
+      if (!res.ok) throw new Error("Update failed");
+    } catch (err) {
+      console.error("Drop update error:", err);
+      setPosts(prevPosts); // rollback
+    }
+  };
+
   // ─── Render ───────────────────────────────────────────
 
   if (loading) {
@@ -284,13 +346,19 @@ export default function LinkedInCalendar() {
             const dayPosts = postsByDate.get(day.dateStr) || [];
             const isToday = day.dateStr === todayStr;
 
+            const isDropTarget = dropTargetDate === day.dateStr;
+
             return (
               <div
                 key={i}
+                onDragOver={(e) => handleDragOver(e, day.dateStr)}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => handleDrop(e, day.dateStr)}
                 className={cn(
-                  "min-h-[60px] sm:min-h-[90px] border-b border-r border-gray-100 p-1 sm:p-1.5",
+                  "min-h-[60px] sm:min-h-[90px] border-b border-r border-gray-100 p-1 sm:p-1.5 transition-colors",
                   !day.inMonth && "bg-gray-50/50",
-                  isToday && "bg-blue-50/30"
+                  isToday && "bg-blue-50/30",
+                  isDropTarget && "bg-indigo-50 ring-2 ring-inset ring-indigo-300"
                 )}
               >
                 <span
@@ -305,21 +373,25 @@ export default function LinkedInCalendar() {
                 {dayPosts.map((p) => {
                   const tc = THEME_COLORS[p.theme] || THEME_COLORS["journal-ceo"];
                   return (
-                    <button
+                    <div
                       key={p.id}
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, p.id)}
+                      onDragEnd={handleDragEnd}
                       onClick={() => setSelectedPost(p)}
                       className={cn(
-                        "w-full mt-0.5 px-1 py-0.5 sm:py-1 rounded text-left cursor-pointer transition-colors",
+                        "w-full mt-0.5 px-1 py-0.5 sm:py-1 rounded text-left cursor-grab active:cursor-grabbing transition-colors group/post",
                         tc.bg, tc.text, "hover:opacity-80"
                       )}
                     >
                       <span className="text-[8px] sm:text-[10px] flex items-center gap-0.5 opacity-70">
+                        <GripVertical className="w-2 h-2 opacity-0 group-hover/post:opacity-50 flex-shrink-0" />
                         {p.publishTime} {tc.label.split(" ")[0]}
                       </span>
                       <span className="text-[9px] sm:text-[10px] font-medium block truncate">
                         {p.title}
                       </span>
-                    </button>
+                    </div>
                   );
                 })}
               </div>
