@@ -670,8 +670,12 @@ export default function ProspectsPage() {
     const params = new URLSearchParams();
     if (selected.size > 0) {
       params.set("ids", Array.from(selected).join(","));
-    } else if (selectedListId) {
-      params.set("list_id", selectedListId);
+    } else {
+      // Always export the filtered view (respects all active filters: status, score, search, list)
+      const filteredIds = filtered.map((p) => p.id);
+      if (filteredIds.length > 0) {
+        params.set("ids", filteredIds.join(","));
+      }
     }
     const qs = params.toString();
     window.open(`/api/prospects/download${qs ? `?${qs}` : ""}`, "_blank");
@@ -886,10 +890,10 @@ export default function ProspectsPage() {
             onClick={downloadCsv}
             disabled={prospects.length === 0}
             className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
-            title={selected.size > 0 ? `Exporter ${selected.size} sélectionné(s)` : selectedListId ? "Exporter la liste" : "Exporter tous les contacts"}
+            title={selected.size > 0 ? `Exporter ${selected.size} sélectionné(s)` : `Exporter ${filtered.length} prospect(s) filtrés`}
           >
             <Download className="w-3.5 h-3.5" />
-            {selected.size > 0 ? `Export (${selected.size})` : "Export CSV"}
+            {selected.size > 0 ? `Export (${selected.size})` : filtered.length < prospects.length ? `Export (${filtered.length})` : "Export CSV"}
           </button>
           <input
             ref={fileInputRef}
