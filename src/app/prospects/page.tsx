@@ -169,6 +169,7 @@ export default function ProspectsPage() {
   const [archiving, setArchiving] = useState(false);
   const [enriching, setEnriching] = useState(false);
   const [enrichingGouv, setEnrichingGouv] = useState(false);
+  const [scoringAI, setScoringAI] = useState(false);
   const [showLinkDeal, setShowLinkDeal] = useState(false);
   const [allDeals, setAllDeals] = useState<{ id: number; title: string; person_name?: string; org_name?: string }[]>([]);
   const [dealSearch, setDealSearch] = useState("");
@@ -446,6 +447,33 @@ export default function ProspectsPage() {
     setEnriching(false);
   };
 
+  const aiScoreProspects = async () => {
+    if (selected.size === 0) return;
+    if (selected.size > 30) { setActionMsg("Maximum 30 contacts pour l'analyse IA"); setTimeout(() => setActionMsg(null), 3000); return; }
+    setScoringAI(true);
+    setActionMsg("Analyse IA en cours...");
+    try {
+      const res = await fetch("/api/prospects/ai-score", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selected) }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setActionMsg(`${json.scored}/${json.total} prospects analysés par l'IA`);
+        setSelected(new Set());
+        syncProspects();
+      } else {
+        setActionMsg(`Erreur : ${json.error}`);
+      }
+    } catch (err) {
+      console.error("AI Score error:", err);
+      setActionMsg("Erreur lors de l'analyse IA");
+    }
+    setTimeout(() => setActionMsg(null), 6000);
+    setScoringAI(false);
+  };
+
   const enrichGouvProspects = async () => {
     if (selected.size === 0) return;
     setEnrichingGouv(true);
@@ -706,6 +734,15 @@ export default function ProspectsPage() {
               >
                 {enrichingGouv ? <Loader2 className="w-4 h-4 animate-spin" /> : <Building2 className="w-4 h-4" />}
                 API Gouv ({selected.size})
+              </button>
+              <button
+                onClick={aiScoreProspects}
+                disabled={scoringAI}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer"
+                title="Analyse IA : score de pertinence + commentaire + résumé entreprise"
+              >
+                {scoringAI ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
+                Score IA ({selected.size})
               </button>
               <button
                 onClick={bulkArchive}
