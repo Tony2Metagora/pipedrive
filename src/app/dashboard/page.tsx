@@ -1823,84 +1823,87 @@ function DealRow({
             </div>
           )}
 
-          {/* Contact detail panels — side by side when multiple */}
-          {participantsFetched && participants.length > 0 ? (
-            <div className={cn(
-              participants.length > 1 ? "grid grid-cols-2 gap-2 px-2" : ""
-            )}>
-              {participants
-                .sort((a, b) => (b.primary ? 1 : 0) - (a.primary ? 1 : 0))
-                .map((p) => (
-                  <div key={p.id} className={cn(
-                    participants.length > 1 && "border border-gray-200 rounded-lg overflow-hidden"
-                  )}>
-                    {participants.length > 1 && (
-                      <div className={cn(
-                        "px-3 py-1.5 flex items-center justify-between",
-                        p.primary ? "bg-indigo-50 border-b border-indigo-100" : "bg-gray-50 border-b border-gray-100"
-                      )}>
-                        <span className={cn(
-                          "text-[10px] font-semibold uppercase tracking-wide",
-                          p.primary ? "text-indigo-600" : "text-gray-400"
-                        )}>
-                          {p.primary ? "★ Principal" : "Secondaire"} — {p.name}
-                        </span>
-                        {!p.primary && (
-                          <button
-                            onClick={async () => {
-                              try {
-                                await fetch(`/api/deals/${deal.id}`, {
-                                  method: "PUT",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({ person_id: p.id }),
-                                });
-                                setParticipants((prev) =>
-                                  prev.map((pp) => ({ ...pp, primary: pp.id === p.id }))
-                                );
-                                onDealUpdated?.(deal.id, { person_id: p.id, person_name: p.name });
-                              } catch (err) {
-                                console.error("Erreur changement contact principal:", err);
-                              }
-                            }}
-                            className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-600 hover:bg-indigo-200 font-medium cursor-pointer transition-colors"
-                            title="Définir comme contact principal"
-                          >
-                            ★ Principal
-                          </button>
+          {/* Contact(s) LEFT + Timeline/Notes RIGHT — side by side */}
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-0 border-t border-gray-200">
+            {/* LEFT: Contact panels */}
+            <div className="border-r border-gray-200">
+              {participantsFetched && participants.length > 0 ? (
+                <div className={cn(
+                  participants.length > 1 ? "space-y-0 divide-y divide-gray-200" : ""
+                )}>
+                  {participants
+                    .sort((a, b) => (b.primary ? 1 : 0) - (a.primary ? 1 : 0))
+                    .map((p) => (
+                      <div key={p.id}>
+                        {participants.length > 1 && (
+                          <div className={cn(
+                            "px-3 py-1.5 flex items-center justify-between",
+                            p.primary ? "bg-indigo-50 border-b border-indigo-100" : "bg-gray-50 border-b border-gray-100"
+                          )}>
+                            <span className={cn(
+                              "text-[10px] font-semibold uppercase tracking-wide",
+                              p.primary ? "text-indigo-600" : "text-gray-400"
+                            )}>
+                              {p.primary ? "★ Principal" : "Secondaire"} — {p.name}
+                            </span>
+                            {!p.primary && (
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    await fetch(`/api/deals/${deal.id}`, {
+                                      method: "PUT",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ person_id: p.id }),
+                                    });
+                                    setParticipants((prev) =>
+                                      prev.map((pp) => ({ ...pp, primary: pp.id === p.id }))
+                                    );
+                                    onDealUpdated?.(deal.id, { person_id: p.id, person_name: p.name });
+                                  } catch (err) {
+                                    console.error("Erreur changement contact principal:", err);
+                                  }
+                                }}
+                                className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-600 hover:bg-indigo-200 font-medium cursor-pointer transition-colors"
+                                title="Définir comme contact principal"
+                              >
+                                ★ Principal
+                              </button>
+                            )}
+                          </div>
                         )}
+                        <DetailPanel
+                          personId={p.id}
+                          allParticipants={participants.length > 1 ? participants : undefined}
+                          dealId={deal.id}
+                          orgId={deal.org_id}
+                          onActivityCreated={onTaskCreated}
+                          compact={participants.length > 1}
+                        />
                       </div>
-                    )}
-                    <DetailPanel
-                      personId={p.id}
-                      allParticipants={participants.length > 1 ? participants : undefined}
-                      dealId={deal.id}
-                      orgId={deal.org_id}
-                      onActivityCreated={onTaskCreated}
-                      compact={participants.length > 1}
-                    />
-                  </div>
-                ))}
+                    ))}
+                </div>
+              ) : participantsFetched && participants.length === 0 && deal.person_id ? (
+                <DetailPanel personId={deal.person_id} dealId={deal.id} orgId={deal.org_id} onActivityCreated={onTaskCreated} />
+              ) : !deal.person_id && participantsFetched ? (
+                <div className="px-4 py-3 text-xs text-gray-400">
+                  Aucun contact associé à cette affaire
+                </div>
+              ) : null}
             </div>
-          ) : participantsFetched && participants.length === 0 && deal.person_id ? (
-            <DetailPanel personId={deal.person_id} dealId={deal.id} orgId={deal.org_id} onActivityCreated={onTaskCreated} />
-          ) : !deal.person_id && participantsFetched ? (
-            <div className="px-4 py-3 text-xs text-gray-400">
-              Aucun contact associé à cette affaire
-            </div>
-          ) : null}
 
-          {/* Notes / Tâches / Historique — au niveau de l'affaire */}
-          <DealContextPanel
-            dealId={deal.id}
-            personId={deal.person_id ?? undefined}
-            orgId={deal.org_id}
-            personName={deal.person_name}
-            orgName={deal.org_name}
-            onActivityChanged={onTaskCreated}
-            onMarkDone={onMarkDone}
-            refreshKey={contextRefreshKey}
-            parentPendingIds={dealActivities?.map((a) => a.id)}
-          />
+            {/* RIGHT: Timeline + Notes + Email Analysis */}
+            <DealContextPanel
+              dealId={deal.id}
+              personId={deal.person_id ?? undefined}
+              orgId={deal.org_id}
+              personName={deal.person_name}
+              orgName={deal.org_name}
+              onActivityChanged={onTaskCreated}
+              onMarkDone={onMarkDone}
+              refreshKey={contextRefreshKey}
+              parentPendingIds={dealActivities?.map((a) => a.id)}
+            />
+          </div>
         </div>
       )}
     </div>
