@@ -82,14 +82,14 @@ const PROSPECT_COLUMNS = [
   { key: "prenom", label: "Prénom", defaultVisible: true, defaultWidth: 90, minWidth: 50 },
   { key: "nom", label: "Nom", defaultVisible: true, defaultWidth: 90, minWidth: 50 },
   { key: "email", label: "Email", defaultVisible: true, defaultWidth: 180, minWidth: 80 },
-  { key: "telephone", label: "Tél.", defaultVisible: true, defaultWidth: 100, minWidth: 50 },
+  { key: "telephone", label: "Tél.", defaultVisible: false, defaultWidth: 100, minWidth: 50 },
   { key: "poste", label: "Poste", defaultVisible: true, defaultWidth: 110, minWidth: 50 },
   { key: "entreprise", label: "Entreprise", defaultVisible: true, defaultWidth: 120, minWidth: 60 },
-  { key: "statut", label: "Statut", defaultVisible: true, defaultWidth: 70, minWidth: 50 },
-  { key: "affaire", label: "Affaire", defaultVisible: true, defaultWidth: 130, minWidth: 60 },
-  { key: "linkedin", label: "LinkedIn", defaultVisible: true, defaultWidth: 36, minWidth: 30 },
-  { key: "naf_code", label: "NAF", defaultVisible: true, defaultWidth: 65, minWidth: 35 },
-  { key: "effectifs", label: "Eff.", defaultVisible: true, defaultWidth: 55, minWidth: 35 },
+  { key: "statut", label: "Statut", defaultVisible: false, defaultWidth: 70, minWidth: 50 },
+  { key: "affaire", label: "Affaire", defaultVisible: false, defaultWidth: 130, minWidth: 60 },
+  { key: "linkedin", label: "LinkedIn", defaultVisible: false, defaultWidth: 36, minWidth: 30 },
+  { key: "naf_code", label: "NAF", defaultVisible: false, defaultWidth: 65, minWidth: 35 },
+  { key: "effectifs", label: "Eff.", defaultVisible: false, defaultWidth: 55, minWidth: 35 },
   { key: "ville", label: "Ville", defaultVisible: false, defaultWidth: 90, minWidth: 50 },
   { key: "siren", label: "SIREN", defaultVisible: false, defaultWidth: 85, minWidth: 60 },
   { key: "categorie_entreprise", label: "Cat.", defaultVisible: false, defaultWidth: 55, minWidth: 40 },
@@ -97,7 +97,7 @@ const PROSPECT_COLUMNS = [
   { key: "resultat_net", label: "Résultat", defaultVisible: false, defaultWidth: 80, minWidth: 50 },
   { key: "dirigeants", label: "Dirigeants", defaultVisible: false, defaultWidth: 160, minWidth: 80 },
   { key: "date_creation_entreprise", label: "Création", defaultVisible: false, defaultWidth: 80, minWidth: 50 },
-  { key: "resume_entreprise", label: "Résumé Ent.", defaultVisible: false, defaultWidth: 160, minWidth: 80 },
+  { key: "resume_entreprise", label: "Résumé Ent.", defaultVisible: true, defaultWidth: 160, minWidth: 80 },
   { key: "ai_score", label: "Score IA", defaultVisible: true, defaultWidth: 60, minWidth: 45 },
   { key: "ai_comment", label: "Analyse IA", defaultVisible: true, defaultWidth: 180, minWidth: 80 },
 ] as const;
@@ -173,6 +173,7 @@ export default function ProspectsPage() {
   const [scoreEditTarget, setScoreEditTarget] = useState<Prospect | null>(null);
   const [scoreEditValue, setScoreEditValue] = useState(0);
   const [scoreEditReason, setScoreEditReason] = useState("");
+  const [scoreEditResume, setScoreEditResume] = useState("");
   const [scoreEditSaving, setScoreEditSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Lists panel
@@ -511,8 +512,34 @@ export default function ProspectsPage() {
     setScoreEditTarget(p);
     setScoreEditValue(parseInt(p.ai_score || "0") || 0);
     setScoreEditReason(p.ai_comment || "");
+    setScoreEditResume(p.resume_entreprise || "");
   };
 
+  /** Save only resume_entreprise — no scoring memory impact */
+  const saveResumeOnly = async () => {
+    if (!scoreEditTarget) return;
+    setScoreEditSaving(true);
+    try {
+      await fetch("/api/prospects", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: scoreEditTarget.id, updates: { resume_entreprise: scoreEditResume.trim() } }),
+      });
+      setProspects((prev) => prev.map((p) =>
+        p.id === scoreEditTarget.id ? { ...p, resume_entreprise: scoreEditResume.trim() } : p
+      ));
+      setActionMsg("Résumé entreprise mis à jour");
+      setTimeout(() => setActionMsg(null), 3000);
+    } catch (err) {
+      console.error("Resume save error:", err);
+      setActionMsg("Erreur lors de la sauvegarde du résumé");
+      setTimeout(() => setActionMsg(null), 5000);
+    }
+    setScoreEditSaving(false);
+    setScoreEditTarget(null);
+  };
+
+  /** Save score correction → scoring memory (RAG learning) + update prospect */
   const submitScoreCorrection = async () => {
     if (!scoreEditTarget || !scoreEditReason.trim()) return;
     setScoreEditSaving(true);
@@ -532,8 +559,22 @@ export default function ProspectsPage() {
       });
       const json = await res.json();
       if (json.success) {
+        // Also save resume if changed
+        const resumeChanged = scoreEditResume.trim() !== (scoreEditTarget.resume_entreprise || "");
+        if (resumeChanged) {
+          await fetch("/api/prospects", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: scoreEditTarget.id, updates: { resume_entreprise: scoreEditResume.trim() } }),
+          });
+        }
         setProspects((prev) => prev.map((p) =>
-          p.id === scoreEditTarget.id ? { ...p, ai_score: String(scoreEditValue), ai_comment: scoreEditReason.trim() } : p
+          p.id === scoreEditTarget.id ? {
+            ...p,
+            ai_score: String(scoreEditValue),
+            ai_comment: scoreEditReason.trim(),
+            ...(resumeChanged ? { resume_entreprise: scoreEditResume.trim() } : {}),
+          } : p
         ));
         setActionMsg("Score IA corrigé + mémorisé pour apprentissage");
         setTimeout(() => setActionMsg(null), 4000);
@@ -1244,16 +1285,14 @@ export default function ProspectsPage() {
                       {colVisible("date_creation_entreprise") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["date_creation_entreprise"], maxWidth: colWidths["date_creation_entreprise"] }}>
                         <span className="text-gray-600 text-[9px]">{p.date_creation_entreprise || <span className="text-gray-300">—</span>}</span>
                       </td>}
-                      {colVisible("resume_entreprise") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["resume_entreprise"], maxWidth: colWidths["resume_entreprise"] }}>
-                        <span className="text-gray-500 text-[9px]" title={p.resume_entreprise || ""}>{p.resume_entreprise || <span className="text-gray-300">—</span>}</span>
+                      {colVisible("resume_entreprise") && <td className="px-1 py-1.5 truncate overflow-hidden cursor-pointer hover:bg-violet-50/50 transition-colors" style={{ width: colWidths["resume_entreprise"], maxWidth: colWidths["resume_entreprise"] }} onClick={() => openScoreEdit(p)} title="Cliquer pour modifier">
+                        <span className="text-gray-500 text-[9px]">{p.resume_entreprise || <span className="text-gray-300">—</span>}</span>
                       </td>}
-                      {colVisible("ai_score") && <td className="px-1 py-1.5 text-center" style={{ width: colWidths["ai_score"], maxWidth: colWidths["ai_score"] }}>
-                        <button onClick={() => openScoreEdit(p)} className="cursor-pointer hover:scale-110 transition-transform" title="Cliquer pour corriger le score">
-                          <ScoreNumber value={parseInt(p.ai_score || "0") || 0} />
-                        </button>
+                      {colVisible("ai_score") && <td className="px-1 py-1.5 text-center cursor-pointer hover:bg-violet-50/50 transition-colors" style={{ width: colWidths["ai_score"], maxWidth: colWidths["ai_score"] }} onClick={() => openScoreEdit(p)} title="Cliquer pour modifier">
+                        <ScoreNumber value={parseInt(p.ai_score || "0") || 0} />
                       </td>}
-                      {colVisible("ai_comment") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["ai_comment"], maxWidth: colWidths["ai_comment"] }}>
-                        <span className="text-gray-500 text-[9px]" title={p.ai_comment || ""}>{p.ai_comment || <span className="text-gray-300">—</span>}</span>
+                      {colVisible("ai_comment") && <td className="px-1 py-1.5 truncate overflow-hidden cursor-pointer hover:bg-violet-50/50 transition-colors" style={{ width: colWidths["ai_comment"], maxWidth: colWidths["ai_comment"] }} onClick={() => openScoreEdit(p)} title="Cliquer pour modifier">
+                        <span className="text-gray-500 text-[9px]">{p.ai_comment || <span className="text-gray-300">—</span>}</span>
                       </td>}
                       <td className="pr-3 pl-1 py-1.5 text-center">
                         {isEditing ? (
@@ -1420,26 +1459,45 @@ export default function ProspectsPage() {
       )}
 
       {/* Modal correction Score IA */}
-      {scoreEditTarget && (
+      {scoreEditTarget && (() => {
+        const origScore = parseInt(scoreEditTarget.ai_score || "0") || 0;
+        const scoreChanged = scoreEditValue !== origScore;
+        const reasonChanged = scoreEditReason.trim() !== (scoreEditTarget.ai_comment || "");
+        const resumeChanged = scoreEditResume.trim() !== (scoreEditTarget.resume_entreprise || "");
+        const hasScoreEdit = scoreChanged || reasonChanged;
+        return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setScoreEditTarget(null)}>
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
                 <Bot className="w-4 h-4 text-violet-600" />
-                Corriger le Score IA
+                Fiche IA — {scoreEditTarget.prenom} {scoreEditTarget.nom}
               </h3>
               <button onClick={() => setScoreEditTarget(null)} className="p-0.5 text-gray-400 hover:text-gray-600 cursor-pointer">
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="bg-gray-50 rounded-lg p-3 space-y-1">
-              <p className="text-xs font-medium text-gray-800">{scoreEditTarget.prenom} {scoreEditTarget.nom}</p>
-              <p className="text-[10px] text-gray-500">{scoreEditTarget.poste}{scoreEditTarget.poste && scoreEditTarget.entreprise ? " — " : ""}{scoreEditTarget.entreprise}</p>
+            <div className="bg-gray-50 rounded-lg p-3 space-y-0.5">
+              <p className="text-[11px] font-medium text-gray-800">{scoreEditTarget.poste || "Poste inconnu"}</p>
+              <p className="text-[10px] text-gray-500">{scoreEditTarget.entreprise || "Entreprise inconnue"}</p>
             </div>
 
+            {/* Résumé entreprise — editable, no learning impact */}
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-2">Nouveau score</label>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Résumé entreprise</label>
+              <textarea
+                value={scoreEditResume}
+                onChange={(e) => setScoreEditResume(e.target.value)}
+                rows={2}
+                placeholder="Résumé de l'entreprise (secteur, taille, activité)..."
+                className="w-full px-3 py-2 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-300 focus:border-gray-400 outline-none resize-none"
+              />
+            </div>
+
+            {/* Score IA */}
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-2">Score IA</label>
               <div className="flex items-center gap-1.5">
                 {[1, 2, 3, 4, 5].map((v) => {
                   const colors = [
@@ -1461,42 +1519,71 @@ export default function ProspectsPage() {
                     </button>
                   );
                 })}
+                {scoreChanged && (
+                  <span className="ml-2 text-[10px] text-violet-500 font-medium">
+                    {origScore} → {scoreEditValue}
+                  </span>
+                )}
               </div>
             </div>
 
+            {/* Analyse IA / Raison */}
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">
-                Raison de la correction <span className="text-gray-400">(sera mémorisée pour l&apos;apprentissage IA)</span>
+                Analyse IA
+                {hasScoreEdit && <span className="ml-1 text-violet-500">(sera mémorisée pour l&apos;apprentissage)</span>}
               </label>
               <textarea
                 value={scoreEditReason}
                 onChange={(e) => setScoreEditReason(e.target.value)}
                 rows={3}
-                placeholder="Ex: Ce DRH dans le luxe est un décideur clé, score devrait être 5..."
-                className="w-full px-3 py-2 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 focus:border-violet-400 outline-none resize-none"
-                autoFocus
+                placeholder="Raison du score / commentaire IA..."
+                className={cn(
+                  "w-full px-3 py-2 text-xs border rounded-lg outline-none resize-none",
+                  hasScoreEdit
+                    ? "border-violet-300 focus:ring-2 focus:ring-violet-400 focus:border-violet-400"
+                    : "border-gray-300 focus:ring-2 focus:ring-gray-300 focus:border-gray-400"
+                )}
               />
             </div>
 
-            <div className="flex justify-end gap-2 pt-1">
-              <button
-                onClick={() => setScoreEditTarget(null)}
-                className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer"
-              >
-                Annuler
-              </button>
-              <button
-                onClick={submitScoreCorrection}
-                disabled={scoreEditSaving || !scoreEditReason.trim()}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 cursor-pointer"
-              >
-                {scoreEditSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                Corriger &amp; mémoriser
-              </button>
+            {/* Actions */}
+            <div className="flex items-center justify-between pt-1">
+              <div className="text-[9px] text-gray-400">
+                {hasScoreEdit ? "💡 Score modifié → sauvegarde dans la mémoire IA" : resumeChanged ? "📝 Résumé modifié (pas d'impact apprentissage)" : "Cliquez sur un score ou modifiez les champs"}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setScoreEditTarget(null)}
+                  className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer"
+                >
+                  Annuler
+                </button>
+                {hasScoreEdit ? (
+                  <button
+                    onClick={submitScoreCorrection}
+                    disabled={scoreEditSaving || !scoreEditReason.trim()}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 cursor-pointer"
+                  >
+                    {scoreEditSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                    Corriger &amp; mémoriser
+                  </button>
+                ) : resumeChanged ? (
+                  <button
+                    onClick={saveResumeOnly}
+                    disabled={scoreEditSaving}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-gray-700 rounded-lg hover:bg-gray-800 disabled:opacity-50 cursor-pointer"
+                  >
+                    {scoreEditSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                    Enregistrer résumé
+                  </button>
+                ) : null}
+              </div>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
