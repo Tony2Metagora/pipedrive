@@ -53,6 +53,15 @@ interface Prospect {
   ai_score?: string;
   ai_comment?: string;
   resume_entreprise?: string;
+  siren?: string;
+  siret?: string;
+  adresse_siege?: string;
+  categorie_entreprise?: string;
+  chiffre_affaires?: string;
+  resultat_net?: string;
+  date_creation_entreprise?: string;
+  dirigeants?: string;
+  ville?: string;
   deal_id: number | null;
   deal_title: string | null;
   deal_status: string | null;
@@ -85,6 +94,13 @@ const PROSPECT_COLUMNS = [
   { key: "linkedin", label: "LinkedIn", defaultVisible: true, defaultWidth: 36, minWidth: 30 },
   { key: "naf_code", label: "NAF", defaultVisible: true, defaultWidth: 65, minWidth: 35 },
   { key: "effectifs", label: "Eff.", defaultVisible: true, defaultWidth: 55, minWidth: 35 },
+  { key: "ville", label: "Ville", defaultVisible: false, defaultWidth: 90, minWidth: 50 },
+  { key: "siren", label: "SIREN", defaultVisible: false, defaultWidth: 85, minWidth: 60 },
+  { key: "categorie_entreprise", label: "Cat.", defaultVisible: false, defaultWidth: 55, minWidth: 40 },
+  { key: "chiffre_affaires", label: "CA", defaultVisible: false, defaultWidth: 80, minWidth: 50 },
+  { key: "resultat_net", label: "Résultat", defaultVisible: false, defaultWidth: 80, minWidth: 50 },
+  { key: "dirigeants", label: "Dirigeants", defaultVisible: false, defaultWidth: 160, minWidth: 80 },
+  { key: "date_creation_entreprise", label: "Création", defaultVisible: false, defaultWidth: 80, minWidth: 50 },
   { key: "resume_entreprise", label: "Résumé Ent.", defaultVisible: false, defaultWidth: 160, minWidth: 80 },
   { key: "ai_score", label: "Score IA", defaultVisible: false, defaultWidth: 60, minWidth: 45 },
   { key: "ai_comment", label: "Analyse IA", defaultVisible: false, defaultWidth: 180, minWidth: 80 },
@@ -152,6 +168,7 @@ export default function ProspectsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [archiving, setArchiving] = useState(false);
   const [enriching, setEnriching] = useState(false);
+  const [enrichingGouv, setEnrichingGouv] = useState(false);
   const [showLinkDeal, setShowLinkDeal] = useState(false);
   const [allDeals, setAllDeals] = useState<{ id: number; title: string; person_name?: string; org_name?: string }[]>([]);
   const [dealSearch, setDealSearch] = useState("");
@@ -429,6 +446,37 @@ export default function ProspectsPage() {
     setEnriching(false);
   };
 
+  const enrichGouvProspects = async () => {
+    if (selected.size === 0) return;
+    setEnrichingGouv(true);
+    setActionMsg("Recherche entreprises (API Gouv)...");
+    try {
+      const res = await fetch("/api/prospects/enrich-gouv", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selected) }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        const details = (json.results || [])
+          .filter((r: { status: string }) => r.status === "enriched")
+          .map((r: { company: string; fields: string[] }) => `${r.company}: ${r.fields.join(", ")}`)
+          .slice(0, 5)
+          .join(" | ");
+        setActionMsg(`${json.enriched}/${json.total} enrichi${json.enriched > 1 ? "s" : ""} (${json.companiesSearched} entreprises)${details ? ` — ${details}` : ""}`);
+        setSelected(new Set());
+        syncProspects();
+      } else {
+        setActionMsg(`Erreur : ${json.error}`);
+      }
+    } catch (err) {
+      console.error("Enrichissement Gouv error:", err);
+      setActionMsg("Erreur lors de l'enrichissement API Gouv");
+    }
+    setTimeout(() => setActionMsg(null), 8000);
+    setEnrichingGouv(false);
+  };
+
   const openLinkDeal = async () => {
     setShowLinkDeal(true);
     setDealSearch("");
@@ -504,7 +552,14 @@ export default function ProspectsPage() {
   };
 
   const downloadCsv = () => {
-    window.open("/api/prospects/download", "_blank");
+    const params = new URLSearchParams();
+    if (selected.size > 0) {
+      params.set("ids", Array.from(selected).join(","));
+    } else if (selectedListId) {
+      params.set("list_id", selectedListId);
+    }
+    const qs = params.toString();
+    window.open(`/api/prospects/download${qs ? `?${qs}` : ""}`, "_blank");
   };
 
   const toggleStatusFilter = (s: StatusKey) => {
@@ -638,9 +693,19 @@ export default function ProspectsPage() {
                 onClick={enrichProspects}
                 disabled={enriching}
                 className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 disabled:opacity-50 cursor-pointer"
+                title="Enrichir via Dropcontact (email, LinkedIn, tél, poste)"
               >
                 {enriching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                Enrichir ({selected.size})
+                Dropcontact ({selected.size})
+              </button>
+              <button
+                onClick={enrichGouvProspects}
+                disabled={enrichingGouv}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 disabled:opacity-50 cursor-pointer"
+                title="Enrichir via API Gouv (SIREN, CA, effectifs, dirigeants — gratuit)"
+              >
+                {enrichingGouv ? <Loader2 className="w-4 h-4 animate-spin" /> : <Building2 className="w-4 h-4" />}
+                API Gouv ({selected.size})
               </button>
               <button
                 onClick={bulkArchive}
@@ -665,9 +730,10 @@ export default function ProspectsPage() {
             onClick={downloadCsv}
             disabled={prospects.length === 0}
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
+            title={selected.size > 0 ? `Exporter ${selected.size} sélectionné(s)` : selectedListId ? "Exporter la liste" : "Exporter tous les contacts"}
           >
             <Download className="w-4 h-4" />
-            CSV
+            {selected.size > 0 ? `Export (${selected.size})` : "Export CSV"}
           </button>
           <input
             ref={fileInputRef}
@@ -1059,6 +1125,45 @@ export default function ProspectsPage() {
                       </td>}
                       {colVisible("effectifs") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["effectifs"], maxWidth: colWidths["effectifs"] }}>
                         <span className="text-gray-600 text-[9px]">{p.effectifs}</span>
+                      </td>}
+                      {colVisible("ville") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["ville"], maxWidth: colWidths["ville"] }}>
+                        <span className="text-gray-600 text-[9px]" title={p.ville || ""}>{p.ville || <span className="text-gray-300">—</span>}</span>
+                      </td>}
+                      {colVisible("siren") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["siren"], maxWidth: colWidths["siren"] }}>
+                        <span className="text-gray-600 text-[9px] font-mono">{p.siren || <span className="text-gray-300">—</span>}</span>
+                      </td>}
+                      {colVisible("categorie_entreprise") && <td className="px-1 py-1.5 text-center" style={{ width: colWidths["categorie_entreprise"], maxWidth: colWidths["categorie_entreprise"] }}>
+                        {p.categorie_entreprise ? (
+                          <span className={cn("inline-flex items-center px-1 py-0.5 rounded text-[8px] font-bold",
+                            p.categorie_entreprise === "GE" ? "bg-purple-100 text-purple-700" :
+                            p.categorie_entreprise === "ETI" ? "bg-blue-100 text-blue-700" :
+                            "bg-green-100 text-green-700"
+                          )}>{p.categorie_entreprise}</span>
+                        ) : <span className="text-gray-300 text-[9px]">—</span>}
+                      </td>}
+                      {colVisible("chiffre_affaires") && <td className="px-1 py-1.5 truncate overflow-hidden text-right" style={{ width: colWidths["chiffre_affaires"], maxWidth: colWidths["chiffre_affaires"] }}>
+                        {p.chiffre_affaires ? (
+                          <span className="text-gray-700 text-[9px] font-medium" title={`${Number(p.chiffre_affaires).toLocaleString("fr-FR")} €`}>
+                            {Number(p.chiffre_affaires) >= 1_000_000
+                              ? `${(Number(p.chiffre_affaires) / 1_000_000).toFixed(1)}M€`
+                              : `${(Number(p.chiffre_affaires) / 1_000).toFixed(0)}k€`}
+                          </span>
+                        ) : <span className="text-gray-300 text-[9px]">—</span>}
+                      </td>}
+                      {colVisible("resultat_net") && <td className="px-1 py-1.5 truncate overflow-hidden text-right" style={{ width: colWidths["resultat_net"], maxWidth: colWidths["resultat_net"] }}>
+                        {p.resultat_net ? (
+                          <span className={cn("text-[9px] font-medium", Number(p.resultat_net) >= 0 ? "text-green-700" : "text-red-600")} title={`${Number(p.resultat_net).toLocaleString("fr-FR")} €`}>
+                            {Number(p.resultat_net) >= 1_000_000 || Number(p.resultat_net) <= -1_000_000
+                              ? `${(Number(p.resultat_net) / 1_000_000).toFixed(1)}M€`
+                              : `${(Number(p.resultat_net) / 1_000).toFixed(0)}k€`}
+                          </span>
+                        ) : <span className="text-gray-300 text-[9px]">—</span>}
+                      </td>}
+                      {colVisible("dirigeants") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["dirigeants"], maxWidth: colWidths["dirigeants"] }}>
+                        <span className="text-gray-500 text-[9px]" title={p.dirigeants || ""}>{p.dirigeants || <span className="text-gray-300">—</span>}</span>
+                      </td>}
+                      {colVisible("date_creation_entreprise") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["date_creation_entreprise"], maxWidth: colWidths["date_creation_entreprise"] }}>
+                        <span className="text-gray-600 text-[9px]">{p.date_creation_entreprise || <span className="text-gray-300">—</span>}</span>
                       </td>}
                       {colVisible("resume_entreprise") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["resume_entreprise"], maxWidth: colWidths["resume_entreprise"] }}>
                         <span className="text-gray-500 text-[9px]" title={p.resume_entreprise || ""}>{p.resume_entreprise || <span className="text-gray-300">—</span>}</span>

@@ -172,7 +172,7 @@ export async function PUT(request: Request) {
       const idx = rows.findIndex((r) => String(r.id) === String(id));
       if (idx === -1) return;
 
-      const allowedKeys = ["nom", "prenom", "email", "telephone", "poste", "entreprise", "statut", "pipelines", "notes", "score_entreprise", "score_job", "linkedin", "naf_code", "effectifs", "list_id", "ai_score", "ai_comment", "resume_entreprise"];
+      const allowedKeys = ["nom", "prenom", "email", "telephone", "poste", "entreprise", "statut", "pipelines", "notes", "score_entreprise", "score_job", "linkedin", "naf_code", "effectifs", "list_id", "ai_score", "ai_comment", "resume_entreprise", "siren", "siret", "adresse_siege", "categorie_entreprise", "chiffre_affaires", "resultat_net", "date_creation_entreprise", "dirigeants", "ville"];
       for (const [key, value] of Object.entries(updates)) {
         if (allowedKeys.includes(key)) {
           (rows[idx] as unknown as Record<string, string>)[key] = String(value);
