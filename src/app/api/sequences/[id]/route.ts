@@ -2,36 +2,65 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-guard";
 import {
   getCampaign,
-  getCampaignStats,
+  getCampaignAnalytics,
   getSequences,
   saveSequences,
   getCampaignLeads,
   addLeadsToCampaign,
-  addEmailAccountToCampaign,
+  addEmailAccountsToCampaign,
+  removeEmailAccountsFromCampaign,
+  getCampaignEmailAccounts,
   setCampaignStatus,
+  updateCampaignSettings,
+  setCampaignSchedule,
+  getLeadMessageHistory,
   type SmartleadLead,
+  type LeadStatus,
+  type EmailStatus,
+  type CampaignSettings,
+  type CampaignSchedule,
 } from "@/lib/smartlead";
 
-/** GET /api/sequences/[id] — campaign detail + stats + sequences + leads */
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+/** GET /api/sequences/[id] — campaign detail + stats + sequences + leads + campaign email accounts */
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const guard = await requireAuth("sequences" as never, "GET");
   if (guard.denied) return guard.denied;
 
   try {
     const { id } = await params;
     const campaignId = Number(id);
-    const [campaign, stats, sequences, leads] = await Promise.allSettled([
+    const url = new URL(req.url);
+
+    // Lead filters
+    const leadStatus = url.searchParams.get("leadStatus") as LeadStatus | null;
+    const emailStatus = url.searchParams.get("emailStatus") as EmailStatus | null;
+    const leadOffset = Number(url.searchParams.get("leadOffset") || "0");
+    const leadLimit = Number(url.searchParams.get("leadLimit") || "100");
+
+    // Lead message history
+    const leadIdParam = url.searchParams.get("leadId");
+    if (leadIdParam) {
+      const messages = await getLeadMessageHistory(campaignId, Number(leadIdParam));
+      return NextResponse.json({ messages });
+    }
+
+    const [campaign, stats, sequences, leads, campaignAccounts] = await Promise.allSettled([
       getCampaign(campaignId),
-      getCampaignStats(campaignId),
+      getCampaignAnalytics(campaignId),
       getSequences(campaignId),
-      getCampaignLeads(campaignId, 0, 100),
+      getCampaignLeads(campaignId, leadOffset, leadLimit, {
+        status: leadStatus || undefined,
+        emailStatus: emailStatus || undefined,
+      }),
+      getCampaignEmailAccounts(campaignId),
     ]);
 
     return NextResponse.json({
       campaign: campaign.status === "fulfilled" ? campaign.value : null,
       stats: stats.status === "fulfilled" ? stats.value : null,
       sequences: sequences.status === "fulfilled" ? sequences.value : [],
-      leads: leads.status === "fulfilled" ? leads.value : [],
+      leads: leads.status === "fulfilled" ? leads.value : { total_leads: "0", offset: 0, limit: 100, data: [] },
+      campaignAccounts: campaignAccounts.status === "fulfilled" ? campaignAccounts.value : [],
     });
   } catch (error) {
     console.error("GET /api/sequences/[id] error:", error);
@@ -39,7 +68,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   }
 }
 
-/** POST /api/sequences/[id] — actions: add-leads, save-sequences, set-email-accounts, set-status */
+/** POST /api/sequences/[id] — all campaign actions */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const guard = await requireAuth("sequences" as never, "POST");
   if (guard.denied) return guard.denied;
@@ -63,10 +92,26 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         const result = await saveSequences(campaignId, sequences);
         return NextResponse.json({ success: true, result });
       }
-      case "set-email-accounts": {
+      case "add-email-accounts": {
         const { email_account_ids } = body as { email_account_ids: number[] };
         if (!email_account_ids?.length) return NextResponse.json({ error: "email_account_ids[] requis" }, { status: 400 });
-        const result = await addEmailAccountToCampaign(campaignId, email_account_ids);
+        const result = await addEmailAccountsToCampaign(campaignId, email_account_ids);
+        return NextResponse.json({ success: true, result });
+      }
+      case "remove-email-accounts": {
+        const { email_account_ids } = body as { email_account_ids: number[] };
+        if (!email_account_ids?.length) return NextResponse.json({ error: "email_account_ids[] requis" }, { status: 400 });
+        const result = await removeEmailAccountsFromCampaign(campaignId, email_account_ids);
+        return NextResponse.json({ success: true, result });
+      }
+      case "update-settings": {
+        const { settings } = body as { settings: CampaignSettings };
+        const result = await updateCampaignSettings(campaignId, settings);
+        return NextResponse.json({ success: true, result });
+      }
+      case "set-schedule": {
+        const { schedule } = body as { schedule: CampaignSchedule };
+        const result = await setCampaignSchedule(campaignId, schedule);
         return NextResponse.json({ success: true, result });
       }
       case "set-status": {

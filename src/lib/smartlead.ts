@@ -1,5 +1,5 @@
 /**
- * Smartlead API v1 helper
+ * Smartlead API v1 helper — full coverage
  * Docs: https://api.smartlead.ai/reference
  */
 
@@ -17,9 +17,11 @@ async function sl(path: string, opts?: RequestInit & { params?: Record<string, s
   if (opts?.params) {
     for (const [k, v] of Object.entries(opts.params)) url.searchParams.set(k, v);
   }
+  const { params: _p, ...fetchOpts } = opts || {} as Record<string, unknown>;
+  void _p;
   const res = await fetch(url.toString(), {
-    ...opts,
-    headers: { "Content-Type": "application/json", ...opts?.headers },
+    ...fetchOpts,
+    headers: { "Content-Type": "application/json", ...(fetchOpts as RequestInit)?.headers },
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -35,10 +37,20 @@ export interface Campaign {
   name: string;
   status: string;
   created_at: string;
+  updated_at?: string;
+  max_leads_per_day?: number;
+  min_time_btwn_emails?: number;
+  stop_lead_settings?: string;
+  track_settings?: string[];
+  scheduler_cron_value?: { tz: string; days: number[]; endHour: string; startHour: string };
+  enable_ai_esp_matching?: boolean;
+  send_as_plain_text?: boolean;
+  follow_up_percentage?: number;
+  unsubscribe_text?: string;
 }
 
 export async function listCampaigns(): Promise<Campaign[]> {
-  return (await sl("/campaigns")) as Campaign[];
+  return (await sl("/campaigns", { params: { include_tags: "true" } })) as Campaign[];
 }
 
 export async function getCampaign(id: number): Promise<Campaign> {
@@ -50,6 +62,57 @@ export async function createCampaign(name: string): Promise<Campaign> {
     method: "POST",
     body: JSON.stringify({ name }),
   })) as Campaign;
+}
+
+// ─── Campaign Settings ──────────────────────────────────
+
+export interface CampaignSettings {
+  track_settings?: string[];
+  stop_lead_settings?: string;
+  max_leads_per_day?: number;
+  min_time_btwn_emails?: number;
+  enable_ai_esp_matching?: boolean;
+  send_as_plain_text?: boolean;
+  follow_up_percentage?: number;
+  unsubscribe_text?: string;
+}
+
+export async function updateCampaignSettings(campaignId: number, settings: CampaignSettings): Promise<unknown> {
+  return sl(`/campaigns/${campaignId}/settings`, {
+    method: "POST",
+    body: JSON.stringify(settings),
+  });
+}
+
+// ─── Campaign Schedule ──────────────────────────────────
+
+export interface CampaignSchedule {
+  timezone?: string;
+  days_of_the_week?: number[];
+  start_hour?: string;
+  end_hour?: string;
+  min_time_btw_emails?: number;
+  max_new_leads_per_day?: number;
+}
+
+export async function getCampaignSchedule(campaignId: number): Promise<unknown> {
+  return sl(`/campaigns/${campaignId}/schedule`);
+}
+
+export async function setCampaignSchedule(campaignId: number, schedule: CampaignSchedule): Promise<unknown> {
+  return sl(`/campaigns/${campaignId}/schedule`, {
+    method: "POST",
+    body: JSON.stringify(schedule),
+  });
+}
+
+// ─── Campaign Status ────────────────────────────────────
+
+export async function setCampaignStatus(campaignId: number, status: "START" | "PAUSE" | "STOP"): Promise<unknown> {
+  return sl(`/campaigns/${campaignId}/status`, {
+    method: "POST",
+    body: JSON.stringify({ status }),
+  });
 }
 
 // ─── Campaign Sequences ─────────────────────────────────
@@ -73,24 +136,6 @@ export async function saveSequences(campaignId: number, sequences: { subject: st
   });
 }
 
-// ─── Campaign Schedule ──────────────────────────────────
-
-export async function setCampaignSchedule(campaignId: number, schedule: Record<string, unknown>): Promise<unknown> {
-  return sl(`/campaigns/${campaignId}/schedule`, {
-    method: "POST",
-    body: JSON.stringify(schedule),
-  });
-}
-
-// ─── Campaign Status ────────────────────────────────────
-
-export async function setCampaignStatus(campaignId: number, status: "START" | "PAUSE" | "STOP"): Promise<unknown> {
-  return sl(`/campaigns/${campaignId}/status`, {
-    method: "POST",
-    body: JSON.stringify({ status }),
-  });
-}
-
 // ─── Leads ──────────────────────────────────────────────
 
 export interface SmartleadLead {
@@ -98,7 +143,43 @@ export interface SmartleadLead {
   first_name?: string;
   last_name?: string;
   company_name?: string;
+  phone_number?: string;
+  website?: string;
+  location?: string;
+  linkedin_profile?: string;
+  company_url?: string;
   custom_fields?: Record<string, string>;
+}
+
+export type LeadStatus = "STARTED" | "INPROGRESS" | "COMPLETED" | "PAUSED" | "STOPPED";
+export type EmailStatus = "is_opened" | "is_clicked" | "is_replied" | "is_bounced" | "is_unsubscribed" | "is_spam" | "is_accepted" | "not_replied" | "is_sender_bounced";
+
+export interface CampaignLeadEntry {
+  campaign_lead_map_id: number;
+  lead_category_id: number | null;
+  status: string;
+  created_at: string;
+  lead: {
+    id: number;
+    first_name: string;
+    last_name: string;
+    email: string;
+    phone_number: string | null;
+    company_name: string | null;
+    website: string | null;
+    location: string | null;
+    linkedin_profile: string | null;
+    company_url: string | null;
+    custom_fields: Record<string, string> | null;
+    is_unsubscribed: boolean;
+  };
+}
+
+export interface CampaignLeadsResponse {
+  total_leads: string;
+  offset: number;
+  limit: number;
+  data: CampaignLeadEntry[];
 }
 
 export async function addLeadsToCampaign(campaignId: number, leads: SmartleadLead[], settings?: { ignore_global_block_list?: boolean; ignore_unsubscribe_list?: boolean }): Promise<unknown> {
@@ -111,27 +192,61 @@ export async function addLeadsToCampaign(campaignId: number, leads: SmartleadLea
   });
 }
 
-export async function getCampaignLeads(campaignId: number, offset = 0, limit = 100): Promise<unknown> {
-  return sl(`/campaigns/${campaignId}/leads`, {
-    params: { offset: String(offset), limit: String(limit) },
-  });
+export async function getCampaignLeads(
+  campaignId: number,
+  offset = 0,
+  limit = 100,
+  filters?: { status?: LeadStatus; emailStatus?: EmailStatus }
+): Promise<CampaignLeadsResponse> {
+  const params: Record<string, string> = { offset: String(offset), limit: String(limit) };
+  if (filters?.status) params.status = filters.status;
+  if (filters?.emailStatus) params.emailStatus = filters.emailStatus;
+  return (await sl(`/campaigns/${campaignId}/leads`, { params })) as CampaignLeadsResponse;
 }
 
-// ─── Stats ──────────────────────────────────────────────
+// ─── Lead Message History ───────────────────────────────
 
-export interface CampaignStats {
+export interface LeadMessageEntry {
+  type: string;
+  time: string;
+  message_id?: string;
+  email_body?: string;
+  subject?: string;
+  from_email?: string;
+}
+
+export async function getLeadMessageHistory(campaignId: number, leadId: number): Promise<LeadMessageEntry[]> {
+  const data = await sl(`/campaigns/${campaignId}/leads/${leadId}/message-history`);
+  return (Array.isArray(data) ? data : []) as LeadMessageEntry[];
+}
+
+// ─── Stats / Analytics ──────────────────────────────────
+
+export interface CampaignAnalytics {
+  id?: number;
+  campaign_id?: number;
   sent_count: number;
+  unique_sent_count?: number;
   open_count: number;
+  unique_open_count?: number;
   click_count: number;
+  unique_click_count?: number;
   reply_count: number;
+  unique_reply_count?: number;
   bounce_count: number;
-  unsubscribe_count: number;
   total_leads: number;
+  unsubscribe_count?: number;
 }
 
-export async function getCampaignStats(campaignId: number): Promise<CampaignStats> {
+export async function getCampaignAnalytics(campaignId: number): Promise<CampaignAnalytics> {
   const data = await sl(`/campaigns/${campaignId}/analytics`);
-  return data as CampaignStats;
+  return data as CampaignAnalytics;
+}
+
+export async function getCampaignAnalyticsByDate(campaignId: number, startDate: string, endDate: string): Promise<unknown> {
+  return sl(`/campaigns/${campaignId}/analytics-by-date`, {
+    params: { start_date: startDate, end_date: endDate },
+  });
 }
 
 // ─── Email Accounts ─────────────────────────────────────
@@ -142,15 +257,49 @@ export interface EmailAccount {
   from_email: string;
   type: string;
   is_smtp_success: boolean;
+  is_imap_success?: boolean;
+  message_per_day?: number;
+  daily_sent_count?: number;
+  campaign_count?: number;
+  warmup_details?: {
+    status: string;
+    total_sent_count: number;
+    total_spam_count: number;
+    warmup_reputation: string;
+    reply_rate?: number;
+  };
 }
 
 export async function listEmailAccounts(): Promise<EmailAccount[]> {
   return (await sl("/email-accounts")) as EmailAccount[];
 }
 
-export async function addEmailAccountToCampaign(campaignId: number, emailAccountIds: number[]): Promise<unknown> {
+export async function getCampaignEmailAccounts(campaignId: number): Promise<EmailAccount[]> {
+  return (await sl(`/campaigns/${campaignId}/email-accounts`)) as EmailAccount[];
+}
+
+export async function addEmailAccountsToCampaign(campaignId: number, emailAccountIds: number[]): Promise<unknown> {
   return sl(`/campaigns/${campaignId}/email-accounts`, {
     method: "POST",
     body: JSON.stringify({ email_account_ids: emailAccountIds }),
   });
+}
+
+export async function removeEmailAccountsFromCampaign(campaignId: number, emailAccountIds: number[]): Promise<unknown> {
+  return sl(`/campaigns/${campaignId}/email-accounts`, {
+    method: "DELETE",
+    body: JSON.stringify({ email_account_ids: emailAccountIds }),
+  });
+}
+
+// ─── Webhooks ───────────────────────────────────────────
+
+export async function getCampaignWebhooks(campaignId: number): Promise<unknown> {
+  return sl(`/campaigns/${campaignId}/webhooks`);
+}
+
+// ─── Global Lead Lookup ─────────────────────────────────
+
+export async function getLeadByEmail(email: string): Promise<unknown> {
+  return sl("/leads", { params: { email } });
 }
