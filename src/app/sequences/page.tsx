@@ -106,12 +106,75 @@ function statusBadge(s: string) {
 
 function parseCSVLeads(text: string) {
   const lines = text.trim().split("\n").filter(Boolean);
-  // Skip header if first line looks like a header
-  const start = lines[0]?.toLowerCase().includes("email") ? 1 : 0;
-  return lines.slice(start).map((line) => {
-    const parts = line.split(/[,;\t]/).map((s) => s.trim().replace(/^["']|["']$/g, ""));
-    return { email: parts[0] || "", first_name: parts[1] || "", last_name: parts[2] || "", company_name: parts[3] || "" };
-  }).filter((l) => l.email.includes("@"));
+  if (!lines.length) return [];
+
+  // Detect separator: use whichever of ;,\t appears most in first line
+  const first = lines[0];
+  const counts = { ";": (first.match(/;/g) || []).length, ",": (first.match(/,/g) || []).length, "\t": (first.match(/\t/g) || []).length };
+  const sep = counts[";"] >= counts[","] && counts[";"] >= counts["\t"] ? ";" : counts["\t"] >= counts[","] ? "\t" : ",";
+
+  const splitLine = (line: string) => {
+    // Handle quoted fields (CSV standard)
+    const parts: string[] = [];
+    let current = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { inQuotes = !inQuotes; continue; }
+      if (ch === sep && !inQuotes) { parts.push(current.trim()); current = ""; continue; }
+      current += ch;
+    }
+    parts.push(current.trim());
+    return parts;
+  };
+
+  // Check if first line is a header row
+  const headerCells = splitLine(first).map((s) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
+  const hasHeader = headerCells.some((h) => ["email", "e-mail", "mail", "courriel"].includes(h));
+
+  if (hasHeader) {
+    // Map column names to indices
+    const colMap: Record<string, number> = {};
+    headerCells.forEach((h, i) => {
+      if (["email", "e-mail", "mail", "courriel"].includes(h)) colMap.email = i;
+      else if (["prenom", "first_name", "firstname", "first name", "prénom"].includes(h)) colMap.first_name = i;
+      else if (["nom", "last_name", "lastname", "last name", "name"].includes(h)) colMap.last_name = i;
+      else if (["entreprise", "company", "company_name", "societe", "société", "organization"].includes(h)) colMap.company = i;
+      else if (["telephone", "phone", "tel", "phone_number", "téléphone"].includes(h)) colMap.phone = i;
+      else if (["poste", "title", "job_title", "fonction", "job title", "position"].includes(h)) colMap.title = i;
+      else if (["linkedin", "linkedin_profile", "linkedin_url"].includes(h)) colMap.linkedin = i;
+      else if (["ville", "city", "location"].includes(h)) colMap.location = i;
+    });
+
+    return lines.slice(1).map((line) => {
+      const parts = splitLine(line);
+      return {
+        email: parts[colMap.email ?? -1] || "",
+        first_name: parts[colMap.first_name ?? -1] || "",
+        last_name: parts[colMap.last_name ?? -1] || "",
+        company_name: parts[colMap.company ?? -1] || "",
+        phone_number: parts[colMap.phone ?? -1] || undefined,
+        location: parts[colMap.location ?? -1] || undefined,
+        linkedin_profile: parts[colMap.linkedin ?? -1] || undefined,
+        custom_fields: colMap.title !== undefined ? { title: parts[colMap.title] || "" } : undefined,
+      };
+    }).filter((l) => l.email.includes("@"));
+  }
+
+  // No header: assume email, first_name, last_name, company_name
+  return lines.map((line) => {
+    const parts = splitLine(line);
+    // Find which column has the email
+    const emailIdx = parts.findIndex((p) => p.includes("@"));
+    if (emailIdx < 0) return null;
+    const remaining = parts.filter((_, i) => i !== emailIdx);
+    return {
+      email: parts[emailIdx],
+      first_name: remaining[0] || "",
+      last_name: remaining[1] || "",
+      company_name: remaining[2] || "",
+    };
+  }).filter((l): l is NonNullable<typeof l> => l !== null && l.email.includes("@"));
 }
 
 // ─── Main Component ─────────────────────────────────────
@@ -151,7 +214,7 @@ export default function SequencesPage() {
   // Import
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState("");
-  const [importPreview, setImportPreview] = useState<{ email: string; first_name: string; last_name: string; company_name: string }[]>([]);
+  const [importPreview, setImportPreview] = useState<{ email: string; first_name: string; last_name: string; company_name: string; phone_number?: string; location?: string; linkedin_profile?: string; custom_fields?: Record<string, string> }[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Settings edit
@@ -764,9 +827,9 @@ export default function SequencesPage() {
               <span className="text-[10px] text-gray-400">ou collez directement ci-dessous</span>
             </div>
 
-            <p className="text-[10px] text-gray-500">Format : email, prénom, nom, entreprise (séparés par virgule, tab ou point-virgule)</p>
+            <p className="text-[10px] text-gray-500">Format : CSV avec en-têtes (Email, Prénom, Nom, Entreprise, Téléphone, Poste...) séparés par virgule, tab ou point-virgule. La colonne Email est détectée automatiquement.</p>
             <textarea value={importText} onChange={(e) => setImportText(e.target.value)} rows={6}
-              placeholder={"email,prenom,nom,entreprise\njohn@acme.com,John,Doe,Acme Corp\njane@corp.com,Jane,Smith,Corp Inc"}
+              placeholder={"Prénom;Nom;Email;Téléphone;Poste;Entreprise\nJohn;Doe;john@acme.com;0601020304;CEO;Acme Corp\nJane;Smith;jane@corp.com;;CTO;Corp Inc"}
               className="w-full px-3 py-2 text-xs font-mono border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 outline-none resize-none" />
 
             {/* Preview table */}
@@ -780,6 +843,7 @@ export default function SequencesPage() {
                       <th className="text-left px-2 py-1">Prénom</th>
                       <th className="text-left px-2 py-1">Nom</th>
                       <th className="text-left px-2 py-1">Entreprise</th>
+                      <th className="text-left px-2 py-1">Poste</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -789,6 +853,7 @@ export default function SequencesPage() {
                         <td className="px-2 py-1">{l.first_name}</td>
                         <td className="px-2 py-1">{l.last_name}</td>
                         <td className="px-2 py-1">{l.company_name}</td>
+                        <td className="px-2 py-1 text-gray-400">{l.custom_fields?.title || ""}</td>
                       </tr>
                     ))}
                   </tbody>
