@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-guard";
 import dns from "dns";
-import { promisify } from "util";
 
-const resolveTxt = promisify(dns.resolveTxt);
-const resolveMx = promisify(dns.resolveMx);
+// Create a fresh resolver per request to bypass Node.js DNS cache
+function freshResolver() {
+  const resolver = new dns.Resolver();
+  // Use public DNS servers for freshest results
+  resolver.setServers(["8.8.8.8", "1.1.1.1", "8.8.4.4"]);
+  return {
+    resolveTxt: (hostname: string) => new Promise<string[][]>((resolve, reject) => resolver.resolveTxt(hostname, (err, records) => err ? reject(err) : resolve(records))),
+    resolveMx: (hostname: string) => new Promise<dns.MxRecord[]>((resolve, reject) => resolver.resolveMx(hostname, (err, records) => err ? reject(err) : resolve(records))),
+  };
+}
 
 interface DomainCheck {
   domain: string;
@@ -17,6 +24,7 @@ interface DomainCheck {
 }
 
 async function checkDomain(domain: string): Promise<DomainCheck> {
+  const { resolveTxt, resolveMx } = freshResolver();
   const result: DomainCheck = {
     domain,
     spf: { found: false, record: null, valid: false, issue: null },
@@ -48,8 +56,8 @@ async function checkDomain(domain: string): Promise<DomainCheck> {
     result.spf.issue = "Impossible de vérifier le SPF (erreur DNS)";
   }
 
-  // DKIM check — try common selectors
-  const selectors = ["default", "google", "selector1", "selector2", "s1", "s2", "k1", "mail", "dkim"];
+  // DKIM check — try common selectors (including Hostinger-specific ones)
+  const selectors = ["default", "google", "selector1", "selector2", "s1", "s2", "k1", "k2", "mail", "dkim", "hostinger", "hst", "mta", "smtp"];
   for (const sel of selectors) {
     try {
       const dkimRecords = await resolveTxt(`${sel}._domainkey.${domain}`);
@@ -125,7 +133,9 @@ export async function GET(request: Request) {
 
   try {
     const result = await checkDomain(domain);
-    return NextResponse.json(result);
+    return NextResponse.json(result, {
+      headers: { "Cache-Control": "no-store, no-cache, must-revalidate" },
+    });
   } catch (error) {
     console.error("Domain check error:", error);
     return NextResponse.json({ error: String(error) }, { status: 500 });

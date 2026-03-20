@@ -262,7 +262,22 @@ export default function WarmupPage() {
         }),
       });
       const d = await res.json();
-      if (d.error) throw new Error(d.error);
+      if (d.error) {
+        const errMsg = String(d.error);
+        // Detect Google App Password error and show helpful message
+        if (errMsg.includes("Application-specific password required") || errMsg.includes("InvalidSecondFactor")) {
+          throw new Error(
+            "Google bloque la connexion car la 2FA est activée. Vous devez utiliser un Mot de passe d'application :\n" +
+            "1. Allez sur myaccount.google.com/apppasswords\n" +
+            "2. Créez un mot de passe pour 'Mail' / 'Autre (Smartlead)'\n" +
+            "3. Utilisez ce mot de passe de 16 caractères au lieu de votre mot de passe Google"
+          );
+        }
+        if (errMsg.includes("ACCOUNT_VERIFICATION_FAILED")) {
+          throw new Error("Échec de vérification du compte. Vérifiez l'email, le mot de passe, et les paramètres SMTP/IMAP. " + errMsg.replace(/.*message":"/, "").replace(/".*/, ""));
+        }
+        throw new Error(errMsg);
+      }
       flash("Compte email ajouté !");
       setShowAdd(false);
       setAddForm({
@@ -302,9 +317,12 @@ export default function WarmupPage() {
         </div>
       )}
       {error && (
-        <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex items-center gap-2">
-          <AlertTriangle className="w-3.5 h-3.5" /> {error}
-          <button onClick={() => setError(null)} className="ml-auto cursor-pointer"><X className="w-3 h-3" /></button>
+        <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+            <div className="flex-1 whitespace-pre-line">{error}</div>
+            <button onClick={() => setError(null)} className="ml-auto shrink-0 cursor-pointer"><X className="w-3 h-3" /></button>
+          </div>
         </div>
       )}
 
@@ -730,19 +748,27 @@ export default function WarmupPage() {
                   placeholder={addForm.from_email || "email@exemple.com"} className="w-full mt-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-400 outline-none" />
               </div>
               <div>
-                <label className="text-[10px] font-semibold text-gray-500">Mot de passe</label>
+                <label className="text-[10px] font-semibold text-gray-500">
+                  {addProvider === "google" ? "Mot de passe d'application Google" : "Mot de passe"}
+                </label>
                 <div className="relative mt-1">
                   <input
                     type={showPassword ? "text" : "password"}
                     value={addForm.password}
                     onChange={(e) => setAddForm({ ...addForm, password: e.target.value })}
-                    placeholder="Mot de passe SMTP"
+                    placeholder={addProvider === "google" ? "abcdefghijklmnop (16 car.)" : "Mot de passe SMTP"}
                     className="w-full px-3 py-1.5 pr-8 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-400 outline-none"
                   />
                   <button onClick={() => setShowPassword(!showPassword)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 cursor-pointer">
                     {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                   </button>
                 </div>
+                {addProvider === "google" && (
+                  <p className="text-[9px] text-blue-600 mt-1">
+                    ⚠️ Google exige un <b>Mot de passe d&apos;application</b> (pas votre mot de passe Google).
+                    Créez-le sur <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" className="underline font-medium">myaccount.google.com/apppasswords</a>
+                  </p>
+                )}
               </div>
             </div>
 
