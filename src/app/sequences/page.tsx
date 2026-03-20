@@ -105,6 +105,27 @@ function statusBadge(s: string) {
   return <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-medium", st.color)}>{st.label}</span>;
 }
 
+/** Add business days (skip Sat/Sun) to a date */
+function addBusinessDays(start: Date, days: number): Date {
+  const result = new Date(start);
+  let remaining = days;
+  while (remaining > 0) {
+    result.setDate(result.getDate() + 1);
+    const dow = result.getDay();
+    if (dow !== 0 && dow !== 6) remaining--;
+  }
+  // If result lands on weekend, push to Monday
+  const dow = result.getDay();
+  if (dow === 6) result.setDate(result.getDate() + 2);
+  else if (dow === 0) result.setDate(result.getDate() + 1);
+  return result;
+}
+
+const DAYS_FR = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
+function formatDateFR(d: Date): string {
+  return `${DAYS_FR[d.getDay()]} ${d.getDate().toString().padStart(2, "0")}/${(d.getMonth() + 1).toString().padStart(2, "0")}`;
+}
+
 function parseCSVLeads(text: string) {
   const lines = text.trim().split("\n").filter(Boolean);
   if (!lines.length) return [];
@@ -246,6 +267,10 @@ export default function SequencesPage() {
   type EditMemory = { date: string; emailNum: number; motif: string; instruction: string; type: "rewrite" | "manual" };
   const [editMemories, setEditMemories] = useState<EditMemory[]>([]);
   const [showMemories, setShowMemories] = useState(false);
+
+  // Lead name editing in preview
+  const [leadNameEdits, setLeadNameEdits] = useState<Record<number, { first_name: string; last_name: string }>>({});
+  const [savingLeadName, setSavingLeadName] = useState(false);
 
   // Wizard
   type WizardStep = 1 | 2 | 3 | 4;
@@ -492,6 +517,36 @@ export default function SequencesPage() {
   const memoryContext = editMemories.length > 0
     ? `\n\n## Historique des modifications précédentes (mémoire)\nL'utilisateur a déjà modifié des emails. Tiens compte de ces retours pour améliorer ta réécriture :\n${editMemories.slice(0, 10).map((m) => `- Email ${m.emailNum} (${m.date}) : Motif="${m.motif}" | Instruction="${m.instruction}"`).join("\n")}`
     : "";
+
+  // ─── Lead name editing ─────────────────────────────────
+  const getLeadName = (lead: { id: number; first_name: string; last_name: string }) => {
+    const edit = leadNameEdits[lead.id];
+    return edit || { first_name: lead.first_name, last_name: lead.last_name };
+  };
+  const setLeadNameField = (leadId: number, field: "first_name" | "last_name", value: string) => {
+    setLeadNameEdits((prev) => ({
+      ...prev,
+      [leadId]: { ...prev[leadId], first_name: prev[leadId]?.first_name ?? "", last_name: prev[leadId]?.last_name ?? "", [field]: value },
+    }));
+  };
+  const initLeadNameEdit = (lead: { id: number; first_name: string; last_name: string }) => {
+    if (!leadNameEdits[lead.id]) {
+      setLeadNameEdits((prev) => ({ ...prev, [lead.id]: { first_name: lead.first_name, last_name: lead.last_name } }));
+    }
+  };
+  const saveLeadName = async (lead: { id: number; first_name: string; last_name: string; email: string; company_name: string | null }) => {
+    const edit = leadNameEdits[lead.id];
+    if (!edit) return;
+    if (edit.first_name === lead.first_name && edit.last_name === lead.last_name) return;
+    setSavingLeadName(true);
+    try {
+      await doAction("add-leads", {
+        leads: [{ email: lead.email, first_name: edit.first_name, last_name: edit.last_name, company_name: lead.company_name || "" }],
+      });
+      flash("Nom du lead mis à jour");
+    } catch (e) { setError(String(e)); }
+    setSavingLeadName(false);
+  };
 
   const saveAiEmails = async () => {
     if (!aiEmails.length || !selectedId) return;
@@ -1162,35 +1217,86 @@ export default function SequencesPage() {
                 </div>
               )}
 
-              {previewLead ? (
+              {previewLead ? (() => {
+                const nameEdit = getLeadName(previewLead);
+                const nameChanged = nameEdit.first_name !== previewLead.first_name || nameEdit.last_name !== previewLead.last_name;
+                // Compute projected send dates skipping weekends
+                const today = new Date();
+                const sendDates: Date[] = [];
+                sequences.forEach((seq, i) => {
+                  if (i === 0) {
+                    // First email: today or next business day
+                    const d0 = new Date(today);
+                    const dow = d0.getDay();
+                    if (dow === 6) d0.setDate(d0.getDate() + 2);
+                    else if (dow === 0) d0.setDate(d0.getDate() + 1);
+                    sendDates.push(d0);
+                  } else {
+                    const prevDate = sendDates[i - 1];
+                    const delay = seq.seq_delay_details?.delay_in_days || 0;
+                    sendDates.push(delay > 0 ? addBusinessDays(prevDate, delay) : prevDate);
+                  }
+                });
+                return (
                 <div className="space-y-3">
-                  {/* Lead info */}
+                  {/* Lead info — editable name */}
                   <div className="flex items-center gap-3 px-3 py-2 bg-gray-50 rounded-lg">
                     <UserCircle className="w-8 h-8 text-gray-400 shrink-0" />
-                    <div>
-                      <p className="text-xs font-medium text-gray-800">{previewLead.first_name} {previewLead.last_name}</p>
-                      <p className="text-[10px] text-gray-400">{previewLead.email} • {previewLead.company_name || "—"}</p>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <input value={nameEdit.first_name}
+                          onFocus={() => initLeadNameEdit(previewLead)}
+                          onChange={(ev) => setLeadNameField(previewLead.id, "first_name", ev.target.value)}
+                          className="px-1.5 py-0.5 text-xs font-medium text-gray-800 bg-transparent border border-transparent hover:border-gray-300 focus:border-violet-400 focus:bg-white rounded outline-none transition-all w-24"
+                          placeholder="Prénom" />
+                        <input value={nameEdit.last_name}
+                          onFocus={() => initLeadNameEdit(previewLead)}
+                          onChange={(ev) => setLeadNameField(previewLead.id, "last_name", ev.target.value)}
+                          className="px-1.5 py-0.5 text-xs font-medium text-gray-800 bg-transparent border border-transparent hover:border-gray-300 focus:border-violet-400 focus:bg-white rounded outline-none transition-all w-24"
+                          placeholder="Nom" />
+                        {nameChanged && (
+                          <button onClick={() => saveLeadName(previewLead)} disabled={savingLeadName}
+                            className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-medium text-white bg-violet-600 rounded hover:bg-violet-700 disabled:opacity-50 cursor-pointer">
+                            {savingLeadName ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Check className="w-2.5 h-2.5" />}
+                            Sauver
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-gray-400 mt-0.5">{previewLead.email} • {previewLead.company_name || "—"}</p>
                     </div>
                   </div>
 
                   {/* Each email preview — with edit */}
                   {sequences.map((seq, sIdx) => (
                     <div key={seq.seq_number}>
-                      {sIdx > 0 && (
+                      {sIdx > 0 && (() => {
+                        const delayDays = seq.seq_delay_details?.delay_in_days || 0;
+                        const prev = sendDates[sIdx - 1];
+                        const curr = sendDates[sIdx];
+                        const calendarDays = prev && curr ? Math.round((curr.getTime() - prev.getTime()) / 86400000) : delayDays;
+                        const skippedWeekend = calendarDays > delayDays;
+                        return (
                         <div className="flex items-center gap-2 py-1.5 px-3">
                           <div className="flex-1 h-px bg-gray-200" />
-                          <span className="text-[9px] text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
-                            ⏱ {seq.seq_delay_details?.delay_in_days || 0} jour(s) d&apos;attente
+                          <span className={cn("text-[9px] px-2 py-0.5 rounded border",
+                            skippedWeekend ? "text-orange-700 bg-orange-50 border-orange-300" : "text-amber-600 bg-amber-50 border-amber-200")}>
+                            ⏱ {delayDays}j d&apos;attente{skippedWeekend ? ` → ${calendarDays}j réels (weekend évité)` : ""}
                           </span>
                           <div className="flex-1 h-px bg-gray-200" />
                         </div>
-                      )}
+                        );
+                      })()}
                       <div className={cn("border rounded-lg overflow-hidden transition-all",
                         previewEditIdx === sIdx ? "border-violet-300 bg-violet-50/30" : "border-gray-200")}>
                         <div className="px-3 py-2 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             <span className="text-[10px] font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded">Email {seq.seq_number}</span>
                             <span className="text-[10px] text-gray-400">{seq.seq_delay_details?.delay_in_days ? `+${seq.seq_delay_details.delay_in_days}j` : "J0"}</span>
+                            {sendDates[sIdx] && (
+                              <span className="text-[9px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                                📅 {formatDateFR(sendDates[sIdx])}
+                              </span>
+                            )}
                           </div>
                           <button onClick={() => setPreviewEditIdx(previewEditIdx === sIdx ? null : sIdx)} title="Modifier"
                             className="p-1 text-gray-400 hover:text-violet-600 cursor-pointer"><Pencil className="w-3 h-3" /></button>
@@ -1206,10 +1312,10 @@ export default function SequencesPage() {
                           </div>
                           <div className="flex items-center gap-2 text-xs text-gray-800">
                             <span className="font-medium text-[10px] text-gray-500">Sujet :</span>
-                            <span className="font-semibold">{previewSubstitute(seq.subject, previewLead)}</span>
+                            <span className="font-semibold">{previewSubstitute(seq.subject, { ...previewLead, first_name: nameEdit.first_name, last_name: nameEdit.last_name })}</span>
                           </div>
                           <div className="mt-2 p-3 bg-white border border-gray-100 rounded-lg text-xs text-gray-700 whitespace-pre-line"
-                            dangerouslySetInnerHTML={{ __html: previewSubstitute(seq.email_body || "", previewLead) }} />
+                            dangerouslySetInnerHTML={{ __html: previewSubstitute(seq.email_body || "", { ...previewLead, first_name: nameEdit.first_name, last_name: nameEdit.last_name }) }} />
                           {previewEditIdx === sIdx && (
                             <div className="mt-2 pt-2 border-t border-gray-200 space-y-2">
                               <input value={editMotif} onChange={(ev) => setEditMotif(ev.target.value)}
@@ -1232,7 +1338,7 @@ export default function SequencesPage() {
                     </div>
                   ))}
                 </div>
-              ) : (
+                ); })() : (
                 <p className="text-xs text-gray-400 text-center py-6">Aucun lead importé. Retournez à l&apos;étape 2 pour en ajouter.</p>
               )}
             </div>
