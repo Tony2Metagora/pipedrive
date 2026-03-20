@@ -263,15 +263,13 @@ export default function SequencesPage() {
   const [rewriteLoading, setRewriteLoading] = useState(false);
   const [localDelays, setLocalDelays] = useState<Record<number, number>>({});
   const [previewEditIdx, setPreviewEditIdx] = useState<number | null>(null);
+  const [previewEditSubject, setPreviewEditSubject] = useState("");
+  const [previewEditBody, setPreviewEditBody] = useState("");
+  const [savingDirectEdit, setSavingDirectEdit] = useState(false);
   const [editMotif, setEditMotif] = useState("");
   type EditMemory = { date: string; emailNum: number; motif: string; instruction: string; type: "rewrite" | "manual" };
   const [editMemories, setEditMemories] = useState<EditMemory[]>([]);
   const [showMemories, setShowMemories] = useState(false);
-
-  // Manual email editing in preview (raw template with {{variables}})
-  const [manualEditSubject, setManualEditSubject] = useState<Record<number, string>>({});
-  const [manualEditBody, setManualEditBody] = useState<Record<number, string>>({});
-  const [savingManualEdit, setSavingManualEdit] = useState(false);
 
   // Lead name editing in preview
   const [leadNameEdits, setLeadNameEdits] = useState<Record<number, { first_name: string; last_name: string }>>({});
@@ -486,6 +484,35 @@ export default function SequencesPage() {
     setRewriteLoading(false);
   };
 
+  // Direct edit: save subject/body from preview (reverse-substitute to update template)
+  const saveDirectEdit = async (seqIdx: number, lead: { first_name: string; last_name: string; email: string; company_name: string | null }) => {
+    const seq = sequences[seqIdx];
+    if (!seq) return;
+    // Reverse-substitute: put {{variables}} back where lead values appear
+    const newSubjectTemplate = reverseSubstitute(previewEditSubject, lead);
+    const newBodyTemplate = reverseSubstitute(previewEditBody, lead);
+    const subjectChanged = newSubjectTemplate !== seq.subject;
+    const bodyChanged = newBodyTemplate !== seq.email_body;
+    if (!subjectChanged && !bodyChanged) { flash("Aucune modification détectée"); return; }
+    setSavingDirectEdit(true);
+    try {
+      const updated = sequences.map((s, i) => ({
+        subject: i === seqIdx ? newSubjectTemplate : s.subject,
+        email_body: i === seqIdx ? newBodyTemplate : s.email_body,
+        seq_number: s.seq_number,
+        seq_delay_details: { delay_in_days: s.seq_delay_details?.delay_in_days || 0 },
+      }));
+      await doAction("save-sequences", { sequences: updated });
+      if (editMotif.trim()) {
+        addMemory({ date: new Date().toLocaleDateString("fr"), emailNum: seq.seq_number, motif: editMotif, instruction: "(modification manuelle)", type: "manual" });
+      }
+      setPreviewEditIdx(null); setEditMotif("");
+      flash("Email modifié et sauvegardé ✓");
+      if (selectedId) openDetail(selectedId);
+    } catch (e) { setError(String(e)); }
+    setSavingDirectEdit(false);
+  };
+
   // Local delay editing — batch save all at once
   const getLocalDelay = (idx: number) => localDelays[idx] ?? (sequences[idx]?.seq_delay_details?.delay_in_days || 0);
   const setLocalDelayVal = (idx: number, val: number) => setLocalDelays((prev) => ({ ...prev, [idx]: Math.max(0, val) }));
@@ -551,51 +578,6 @@ export default function SequencesPage() {
       flash("Nom du lead mis à jour");
     } catch (e) { setError(String(e)); }
     setSavingLeadName(false);
-  };
-
-  // ─── Manual email editing in preview ──────────────────
-  const initManualEdit = (sIdx: number) => {
-    const seq = sequences[sIdx];
-    if (!seq) return;
-    if (manualEditSubject[sIdx] === undefined) setManualEditSubject((p) => ({ ...p, [sIdx]: seq.subject }));
-    if (manualEditBody[sIdx] === undefined) setManualEditBody((p) => ({ ...p, [sIdx]: seq.email_body || "" }));
-  };
-  const hasManualChanges = (sIdx: number) => {
-    const seq = sequences[sIdx];
-    if (!seq) return false;
-    return (manualEditSubject[sIdx] !== undefined && manualEditSubject[sIdx] !== seq.subject)
-      || (manualEditBody[sIdx] !== undefined && manualEditBody[sIdx] !== (seq.email_body || ""));
-  };
-  const saveManualEdit = async (sIdx: number) => {
-    const seq = sequences[sIdx];
-    if (!seq || !hasManualChanges(sIdx)) return;
-    if (!editMotif.trim()) { setError("Ajoutez un motif de modification."); return; }
-    setSavingManualEdit(true);
-    try {
-      const newSubject = manualEditSubject[sIdx] ?? seq.subject;
-      const newBody = manualEditBody[sIdx] ?? seq.email_body;
-      const updated = sequences.map((s, i) => ({
-        subject: i === sIdx ? newSubject : s.subject,
-        email_body: i === sIdx ? newBody : s.email_body,
-        seq_number: s.seq_number,
-        seq_delay_details: { delay_in_days: s.seq_delay_details?.delay_in_days || 0 },
-      }));
-      await doAction("save-sequences", { sequences: updated });
-      addMemory({ date: new Date().toLocaleDateString("fr"), emailNum: seq.seq_number, motif: editMotif, instruction: "(modification manuelle)", type: "manual" });
-      setManualEditSubject((p) => { const n = { ...p }; delete n[sIdx]; return n; });
-      setManualEditBody((p) => { const n = { ...p }; delete n[sIdx]; return n; });
-      setEditMotif("");
-      setPreviewEditIdx(null);
-      flash("Email modifié et sauvegardé ✓");
-      if (selectedId) openDetail(selectedId);
-    } catch (e) { setError(String(e)); }
-    setSavingManualEdit(false);
-  };
-  const cancelManualEdit = (sIdx: number) => {
-    setManualEditSubject((p) => { const n = { ...p }; delete n[sIdx]; return n; });
-    setManualEditBody((p) => { const n = { ...p }; delete n[sIdx]; return n; });
-    setPreviewEditIdx(null);
-    setEditMotif("");
   };
 
   const saveAiEmails = async () => {
@@ -777,6 +759,24 @@ export default function SequencesPage() {
       .replace(/\{\{email\}\}/gi, lead.email || "")
       .replace(/\{\{company_name\}\}/gi, lead.company_name || "")
       .replace(/\{\{company\}\}/gi, lead.company_name || "");
+  };
+
+  // Reverse: re-inject {{variables}} where lead values appear in edited text
+  const reverseSubstitute = (editedText: string, lead: { first_name: string; last_name: string; email: string; company_name: string | null }) => {
+    let result = editedText;
+    // Replace exact lead values back with variables (order matters: longer values first to avoid partial matches)
+    const replacements: [string, string][] = [
+      [lead.email || "", "{{email}}"],
+      [lead.company_name || "", "{{company_name}}"],
+      [lead.first_name || "", "{{first_name}}"],
+      [lead.last_name || "", "{{last_name}}"],
+    ].filter(([val]) => val.length > 0) as [string, string][];
+    // Sort by value length descending to replace longer matches first
+    replacements.sort((a, b) => b[0].length - a[0].length);
+    for (const [val, variable] of replacements) {
+      result = result.split(val).join(variable);
+    }
+    return result;
   };
 
   // ─── WIZARD VIEW (for DRAFTED campaigns) ──────────────
@@ -1349,83 +1349,77 @@ export default function SequencesPage() {
                             )}
                           </div>
                           <button onClick={() => {
-                            if (previewEditIdx === sIdx) { cancelManualEdit(sIdx); } else { setPreviewEditIdx(sIdx); initManualEdit(sIdx); }
+                            if (previewEditIdx === sIdx) { setPreviewEditIdx(null); } else {
+                              const leadForSub = { ...previewLead, first_name: nameEdit.first_name, last_name: nameEdit.last_name };
+                              setPreviewEditSubject(previewSubstitute(seq.subject, leadForSub));
+                              setPreviewEditBody(previewSubstitute(seq.email_body || "", leadForSub).replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, ""));
+                              setPreviewEditIdx(sIdx);
+                            }
                           }} title="Modifier"
-                            className={cn("p-1 cursor-pointer", previewEditIdx === sIdx ? "text-violet-600" : "text-gray-400 hover:text-violet-600")}>
-                            {previewEditIdx === sIdx ? <X className="w-3 h-3" /> : <Pencil className="w-3 h-3" />}
-                          </button>
+                            className="p-1 text-gray-400 hover:text-violet-600 cursor-pointer"><Pencil className="w-3 h-3" /></button>
                         </div>
+                        <div className="p-3 space-y-1.5">
+                          <div className="flex items-center gap-2 text-[10px] text-gray-500">
+                            <span className="font-medium">De :</span>
+                            <span>{campaignAccounts[0]?.from_email || "—"}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-[10px] text-gray-500">
+                            <span className="font-medium">À :</span>
+                            <span className="font-mono">{previewLead.email}</span>
+                          </div>
 
-                        {previewEditIdx === sIdx ? (
-                          <div className="p-3 space-y-2">
-                            {/* Editable template — raw with {{variables}} */}
-                            <p className="text-[9px] text-gray-400 italic">Modifiez le template ci-dessous. Les {`{{variables}}`} seront remplacées par les données du lead. Les changements hors variables s&apos;appliquent à tous les contacts.</p>
-                            <div className="space-y-1.5">
-                              <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-medium text-gray-500 shrink-0">Sujet :</span>
-                                <input value={manualEditSubject[sIdx] ?? seq.subject}
-                                  onChange={(ev) => setManualEditSubject((p) => ({ ...p, [sIdx]: ev.target.value }))}
-                                  className="flex-1 px-2 py-1 text-xs font-semibold text-gray-800 border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400 focus:border-violet-400" />
+                          {previewEditIdx === sIdx ? (
+                            <>
+                              {/* Editable subject */}
+                              <div className="flex items-center gap-2 text-xs">
+                                <span className="font-medium text-[10px] text-gray-500 shrink-0">Sujet :</span>
+                                <input value={previewEditSubject} onChange={(ev) => setPreviewEditSubject(ev.target.value)}
+                                  className="flex-1 px-2 py-1 text-xs font-semibold text-gray-800 border border-violet-300 rounded-lg bg-white outline-none focus:ring-1 focus:ring-violet-400" />
                               </div>
-                              <textarea value={manualEditBody[sIdx] ?? seq.email_body ?? ""}
-                                onChange={(ev) => setManualEditBody((p) => ({ ...p, [sIdx]: ev.target.value }))}
+                              {/* Editable body */}
+                              <textarea value={previewEditBody} onChange={(ev) => setPreviewEditBody(ev.target.value)}
                                 rows={8}
-                                className="w-full px-2.5 py-2 text-xs text-gray-700 border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400 focus:border-violet-400 font-mono leading-relaxed resize-y" />
-                            </div>
-
-                            {/* Live preview of the edited template */}
-                            <details className="group">
-                              <summary className="text-[9px] text-violet-500 cursor-pointer hover:text-violet-700 font-medium">
-                                Aperçu pour {nameEdit.first_name} {nameEdit.last_name}
-                              </summary>
-                              <div className="mt-1.5 p-2.5 bg-gray-50 rounded-lg border border-gray-200 space-y-1">
-                                <p className="text-[10px] text-gray-500"><span className="font-medium">Sujet :</span> <span className="font-semibold text-gray-800">{previewSubstitute(manualEditSubject[sIdx] ?? seq.subject, { ...previewLead, first_name: nameEdit.first_name, last_name: nameEdit.last_name })}</span></p>
-                                <div className="text-xs text-gray-700 whitespace-pre-line"
-                                  dangerouslySetInnerHTML={{ __html: previewSubstitute(manualEditBody[sIdx] ?? seq.email_body ?? "", { ...previewLead, first_name: nameEdit.first_name, last_name: nameEdit.last_name }) }} />
+                                className="w-full mt-2 p-3 text-xs text-gray-700 border border-violet-300 rounded-lg bg-white outline-none focus:ring-1 focus:ring-violet-400 resize-y whitespace-pre-line" />
+                              {/* Info banner */}
+                              <div className="text-[9px] text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-1">
+                                💡 Si vous modifiez le texte (hors prénom/nom/email/société), le template sera mis à jour pour <strong>tous les leads</strong>.
+                                Les variables (prénom, nom, etc.) restent personnalisées par lead.
                               </div>
-                            </details>
-
-                            {/* Motif + Save / AI rewrite */}
-                            <div className="pt-2 border-t border-gray-200 space-y-2">
-                              <input value={editMotif} onChange={(ev) => setEditMotif(ev.target.value)}
-                                placeholder="Motif de modification * (ex: trop formel, manque de chiffres, CTA pas clair...)"
-                                className="w-full px-2 py-1.5 text-[10px] border border-orange-300 bg-orange-50 rounded-lg outline-none focus:ring-1 focus:ring-orange-400" />
-                              <div className="flex items-center gap-2">
-                                <button onClick={() => saveManualEdit(sIdx)} disabled={savingManualEdit || !hasManualChanges(sIdx) || !editMotif.trim()}
-                                  className="flex items-center gap-1 px-3 py-1.5 text-[10px] font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-40 cursor-pointer">
-                                  {savingManualEdit ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-                                  Sauvegarder
-                                </button>
-                                <div className="flex-1 h-px bg-gray-200" />
-                                <input value={rewriteInstruction} onChange={(ev) => setRewriteInstruction(ev.target.value)}
-                                  placeholder="Ou instruction IA..."
-                                  className="w-40 px-2 py-1.5 text-[10px] border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400" />
-                                <button onClick={() => rewriteSavedEmail(sIdx)} disabled={rewriteLoading || !editMotif.trim()}
-                                  className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer">
-                                  {rewriteLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
-                                  IA
-                                </button>
+                              {/* Motif + Save + AI rewrite */}
+                              <div className="mt-2 pt-2 border-t border-gray-200 space-y-2">
+                                <input value={editMotif} onChange={(ev) => setEditMotif(ev.target.value)}
+                                  placeholder="Motif de modification (optionnel pour sauvegarde manuelle, requis pour IA)"
+                                  className="w-full px-2 py-1.5 text-[10px] border border-orange-300 bg-orange-50 rounded-lg outline-none focus:ring-1 focus:ring-orange-400" />
+                                <div className="flex items-center gap-2">
+                                  <button onClick={() => saveDirectEdit(sIdx, { ...previewLead, first_name: nameEdit.first_name, last_name: nameEdit.last_name })}
+                                    disabled={savingDirectEdit}
+                                    className="flex items-center gap-1 px-3 py-1.5 text-[10px] font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 cursor-pointer">
+                                    {savingDirectEdit ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                                    Sauvegarder
+                                  </button>
+                                  <div className="flex-1 h-px bg-gray-200" />
+                                  <input value={rewriteInstruction} onChange={(ev) => setRewriteInstruction(ev.target.value)}
+                                    placeholder="Instruction IA..."
+                                    className="w-40 px-2 py-1.5 text-[10px] border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400" />
+                                  <button onClick={() => rewriteSavedEmail(sIdx)} disabled={rewriteLoading || !editMotif.trim()}
+                                    className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer">
+                                    {rewriteLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+                                    Réécrire IA
+                                  </button>
+                                </div>
                               </div>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="p-3 space-y-1.5">
-                            <div className="flex items-center gap-2 text-[10px] text-gray-500">
-                              <span className="font-medium">De :</span>
-                              <span>{campaignAccounts[0]?.from_email || "—"}</span>
-                            </div>
-                            <div className="flex items-center gap-2 text-[10px] text-gray-500">
-                              <span className="font-medium">À :</span>
-                              <span className="font-mono">{previewLead.email}</span>
-                            </div>
-                            <div className="flex items-center gap-2 text-xs text-gray-800">
-                              <span className="font-medium text-[10px] text-gray-500">Sujet :</span>
-                              <span className="font-semibold">{previewSubstitute(seq.subject, { ...previewLead, first_name: nameEdit.first_name, last_name: nameEdit.last_name })}</span>
-                            </div>
-                            <div className="mt-2 p-3 bg-white border border-gray-100 rounded-lg text-xs text-gray-700 whitespace-pre-line"
-                              dangerouslySetInnerHTML={{ __html: previewSubstitute(seq.email_body || "", { ...previewLead, first_name: nameEdit.first_name, last_name: nameEdit.last_name }) }} />
-                          </div>
-                        )}
+                            </>
+                          ) : (
+                            <>
+                              <div className="flex items-center gap-2 text-xs text-gray-800">
+                                <span className="font-medium text-[10px] text-gray-500">Sujet :</span>
+                                <span className="font-semibold">{previewSubstitute(seq.subject, { ...previewLead, first_name: nameEdit.first_name, last_name: nameEdit.last_name })}</span>
+                              </div>
+                              <div className="mt-2 p-3 bg-white border border-gray-100 rounded-lg text-xs text-gray-700 whitespace-pre-line"
+                                dangerouslySetInnerHTML={{ __html: previewSubstitute(seq.email_body || "", { ...previewLead, first_name: nameEdit.first_name, last_name: nameEdit.last_name }) }} />
+                            </>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
