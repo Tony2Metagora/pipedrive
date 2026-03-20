@@ -175,7 +175,9 @@ export default function Sidebar() {
               {isOpen && (
                 <div className="ml-3 mt-0.5 space-y-0.5">
                   {group.items.map((item) => {
-                    const isActive = pathname.startsWith(item.href);
+                    const isActive = item.href === "/sequences"
+                      ? pathname === "/sequences"
+                      : pathname.startsWith(item.href);
                     return (
                       <Link
                         key={item.href}

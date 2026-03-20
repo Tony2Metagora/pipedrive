@@ -6,6 +6,7 @@ import {
   ChevronRight, ChevronLeft, Eye, Upload, Play, X, Check, FileUp,
   ArrowLeft, Clock, MousePointerClick, Reply, AlertTriangle,
   Settings2, CheckSquare, SquareIcon, Zap, Shield, MessageSquare, Sparkles, Save, UserCircle,
+  Pencil, Timer, RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -233,6 +234,11 @@ export default function SequencesPage() {
   const [aiContext, setAiContext] = useState({ leadOrigin: "", leadProfile: "", campaignGoal: "", tone: "professionnel mais chaleureux, tutoiement" });
   const [aiEmails, setAiEmails] = useState<{ seq_number: number; delay_days: number; subject: string; body: string }[]>([]);
 
+  // Sequence editing (delays + AI rewrite)
+  const [editingSeqIdx, setEditingSeqIdx] = useState<number | null>(null);
+  const [rewriteInstruction, setRewriteInstruction] = useState("");
+  const [rewriteLoading, setRewriteLoading] = useState(false);
+
   // Wizard
   type WizardStep = 1 | 2 | 3 | 4;
   const [wizardStep, setWizardStep] = useState<WizardStep>(1);
@@ -362,6 +368,88 @@ export default function SequencesPage() {
       setAiEmails(d.emails || []);
     } catch (e) { setError(String(e)); }
     setAiGenLoading(false);
+  };
+
+  // Update delay on an AI-generated email
+  const updateAiDelay = (idx: number, days: number) => {
+    setAiEmails((prev) => prev.map((e, i) => i === idx ? { ...e, delay_days: Math.max(0, days) } : e));
+  };
+
+  // Update subject/body on an AI-generated email manually
+  const updateAiEmail = (idx: number, field: "subject" | "body", value: string) => {
+    setAiEmails((prev) => prev.map((e, i) => i === idx ? { ...e, [field]: value } : e));
+  };
+
+  // AI rewrite a single email
+  const rewriteEmail = async (idx: number) => {
+    const email = aiEmails[idx];
+    if (!email) return;
+    setRewriteLoading(true);
+    try {
+      const res = await fetch("/api/sequences/rewrite-email", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: email.subject,
+          body: email.body,
+          instruction: rewriteInstruction || "Améliore cet email pour le rendre plus percutant.",
+          campaignGoal: aiContext.campaignGoal,
+          tone: aiContext.tone,
+        }),
+      });
+      const d = await res.json();
+      if (d.error) throw new Error(d.error);
+      setAiEmails((prev) => prev.map((e, i) => i === idx ? { ...e, subject: d.subject || e.subject, body: d.body || e.body } : e));
+      setRewriteInstruction("");
+      flash("Email réécrit par l'IA");
+    } catch (e) { setError(String(e)); }
+    setRewriteLoading(false);
+  };
+
+  // AI rewrite a saved sequence email (already in Smartlead)
+  const rewriteSavedEmail = async (seqIdx: number) => {
+    const seq = sequences[seqIdx];
+    if (!seq) return;
+    setRewriteLoading(true);
+    try {
+      const res = await fetch("/api/sequences/rewrite-email", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: seq.subject,
+          body: seq.email_body,
+          instruction: rewriteInstruction || "Améliore cet email pour le rendre plus percutant.",
+          campaignGoal: aiContext.campaignGoal,
+          tone: aiContext.tone,
+        }),
+      });
+      const d = await res.json();
+      if (d.error) throw new Error(d.error);
+      // Save the rewritten email back to Smartlead
+      const updated = sequences.map((s, i) => ({
+        subject: i === seqIdx ? (d.subject || s.subject) : s.subject,
+        email_body: i === seqIdx ? (d.body || s.email_body) : s.email_body,
+        seq_number: s.seq_number,
+        seq_delay_details: { delay_in_days: s.seq_delay_details?.delay_in_days || 0 },
+      }));
+      await doAction("save-sequences", { sequences: updated });
+      setRewriteInstruction("");
+      setEditingSeqIdx(null);
+      flash("Email réécrit et sauvegardé");
+      if (selectedId) openDetail(selectedId);
+    } catch (e) { setError(String(e)); }
+    setRewriteLoading(false);
+  };
+
+  // Save delay change on a saved sequence
+  const updateSavedDelay = async (seqIdx: number, days: number) => {
+    const updated = sequences.map((s, i) => ({
+      subject: s.subject,
+      email_body: s.email_body,
+      seq_number: s.seq_number,
+      seq_delay_details: { delay_in_days: i === seqIdx ? Math.max(0, days) : (s.seq_delay_details?.delay_in_days || 0) },
+    }));
+    await doAction("save-sequences", { sequences: updated });
+    flash("Délai mis à jour");
+    if (selectedId) openDetail(selectedId);
   };
 
   const saveAiEmails = async () => {
@@ -766,42 +854,131 @@ export default function SequencesPage() {
                 </button>
               </div>
 
-              {/* AI preview */}
+              {/* AI preview — editable */}
               {aiEmails.length > 0 && (
-                <div className="mt-4 space-y-2 pt-3 border-t border-gray-200">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold text-violet-700">Aperçu des emails générés</p>
+                <div className="mt-4 space-y-0 pt-3 border-t border-gray-200">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-xs font-semibold text-violet-700">Séquence générée — cliquez pour modifier</p>
                     <button onClick={saveAiEmails} disabled={actionLoading}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50 cursor-pointer">
                       {actionLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
                       Sauvegarder dans Smartlead
                     </button>
                   </div>
-                  {aiEmails.map((e) => (
-                    <div key={e.seq_number} className="bg-gray-50 rounded-lg border border-gray-100 p-3">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-[10px] font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded">Email {e.seq_number}</span>
-                        <span className="text-[10px] text-gray-400">{e.delay_days === 0 ? "J0" : `+${e.delay_days}j`}</span>
+                  {aiEmails.map((e, idx) => (
+                    <div key={e.seq_number}>
+                      {/* Delay step between emails */}
+                      {idx > 0 && (
+                        <div className="flex items-center gap-2 py-2 px-3">
+                          <div className="flex-1 h-px bg-gray-200" />
+                          <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1">
+                            <Timer className="w-3 h-3 text-amber-500" />
+                            <span className="text-[10px] text-amber-700">Attendre</span>
+                            <input type="number" min={1} max={30} value={e.delay_days}
+                              onChange={(ev) => updateAiDelay(idx, Number(ev.target.value))}
+                              className="w-10 text-center text-[10px] font-bold text-amber-800 border border-amber-300 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-amber-400" />
+                            <span className="text-[10px] text-amber-700">jour(s)</span>
+                          </div>
+                          <div className="flex-1 h-px bg-gray-200" />
+                        </div>
+                      )}
+                      {/* Email card */}
+                      <div className={cn("rounded-lg border p-3 transition-all",
+                        editingSeqIdx === idx ? "border-violet-300 bg-violet-50/50" : "border-gray-100 bg-gray-50")}>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded">Email {e.seq_number}</span>
+                            <span className="text-[10px] text-gray-400">{e.delay_days === 0 ? "J0" : `+${e.delay_days}j`}</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => setEditingSeqIdx(editingSeqIdx === idx ? null : idx)} title="Modifier"
+                              className="p-1 text-gray-400 hover:text-violet-600 cursor-pointer"><Pencil className="w-3 h-3" /></button>
+                          </div>
+                        </div>
+                        {editingSeqIdx === idx ? (
+                          <div className="space-y-2">
+                            <div>
+                              <label className="text-[9px] font-semibold text-gray-500">Sujet</label>
+                              <input value={e.subject} onChange={(ev) => updateAiEmail(idx, "subject", ev.target.value)}
+                                className="w-full mt-0.5 px-2 py-1 text-xs border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400" />
+                            </div>
+                            <div>
+                              <label className="text-[9px] font-semibold text-gray-500">Corps</label>
+                              <textarea value={e.body} onChange={(ev) => updateAiEmail(idx, "body", ev.target.value)} rows={5}
+                                className="w-full mt-0.5 px-2 py-1 text-xs border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400 resize-none" />
+                            </div>
+                            <div className="flex items-center gap-2 pt-1 border-t border-gray-200">
+                              <input value={rewriteInstruction} onChange={(ev) => setRewriteInstruction(ev.target.value)}
+                                placeholder="Ex: Plus court, plus direct, ajoute un chiffre..."
+                                className="flex-1 px-2 py-1 text-[10px] border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400"
+                                onKeyDown={(ev) => ev.key === "Enter" && rewriteEmail(idx)} />
+                              <button onClick={() => rewriteEmail(idx)} disabled={rewriteLoading}
+                                className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer">
+                                {rewriteLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+                                Réécrire IA
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <p className="text-xs font-semibold text-gray-800 mb-1">Sujet : {e.subject}</p>
+                            <div className="text-[11px] text-gray-700 whitespace-pre-line">{e.body}</div>
+                          </>
+                        )}
                       </div>
-                      <p className="text-xs font-semibold text-gray-800 mb-1">Sujet : {e.subject}</p>
-                      <div className="text-[11px] text-gray-700 whitespace-pre-line">{e.body}</div>
                     </div>
                   ))}
                 </div>
               )}
 
-              {/* Existing sequences */}
+              {/* Existing sequences — with delay editing & AI rewrite */}
               {sequences.length > 0 && aiEmails.length === 0 && (
-                <div className="mt-4 pt-3 border-t border-gray-200 space-y-2">
-                  <p className="text-xs font-semibold text-gray-700">Séquence actuelle</p>
-                  {sequences.map((seq) => (
-                    <div key={seq.seq_number} className="bg-gray-50 rounded-lg border border-gray-100 p-3">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-[10px] font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded">Email {seq.seq_number}</span>
-                        <span className="text-[10px] text-gray-400">{seq.seq_delay_details?.delay_in_days ? `+${seq.seq_delay_details.delay_in_days}j` : "J0"}</span>
+                <div className="mt-4 pt-3 border-t border-gray-200 space-y-0">
+                  <p className="text-xs font-semibold text-gray-700 mb-3">Séquence actuelle</p>
+                  {sequences.map((seq, idx) => (
+                    <div key={seq.seq_number}>
+                      {/* Delay step */}
+                      {idx > 0 && (
+                        <div className="flex items-center gap-2 py-2 px-3">
+                          <div className="flex-1 h-px bg-gray-200" />
+                          <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1">
+                            <Timer className="w-3 h-3 text-amber-500" />
+                            <span className="text-[10px] text-amber-700">Attendre</span>
+                            <input type="number" min={1} max={30} value={seq.seq_delay_details?.delay_in_days || 0}
+                              onChange={(ev) => updateSavedDelay(idx, Number(ev.target.value))}
+                              className="w-10 text-center text-[10px] font-bold text-amber-800 border border-amber-300 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-amber-400" />
+                            <span className="text-[10px] text-amber-700">jour(s)</span>
+                          </div>
+                          <div className="flex-1 h-px bg-gray-200" />
+                        </div>
+                      )}
+                      {/* Email card */}
+                      <div className={cn("rounded-lg border p-3 transition-all",
+                        editingSeqIdx === (idx + 100) ? "border-violet-300 bg-violet-50/50" : "border-gray-100 bg-gray-50")}>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded">Email {seq.seq_number}</span>
+                            <span className="text-[10px] text-gray-400">{seq.seq_delay_details?.delay_in_days ? `+${seq.seq_delay_details.delay_in_days}j` : "J0"}</span>
+                          </div>
+                          <button onClick={() => setEditingSeqIdx(editingSeqIdx === (idx + 100) ? null : (idx + 100))} title="Modifier avec l'IA"
+                            className="p-1 text-gray-400 hover:text-violet-600 cursor-pointer"><Pencil className="w-3 h-3" /></button>
+                        </div>
+                        <p className="text-xs font-semibold text-gray-800 mb-1">Sujet : {seq.subject}</p>
+                        <div className="text-[11px] text-gray-700 max-h-20 overflow-y-auto" dangerouslySetInnerHTML={{ __html: seq.email_body || "" }} />
+                        {editingSeqIdx === (idx + 100) && (
+                          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-gray-200">
+                            <input value={rewriteInstruction} onChange={(ev) => setRewriteInstruction(ev.target.value)}
+                              placeholder="Ex: Plus court, ajoute urgence, change l'angle..."
+                              className="flex-1 px-2 py-1 text-[10px] border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400"
+                              onKeyDown={(ev) => ev.key === "Enter" && rewriteSavedEmail(idx)} />
+                            <button onClick={() => rewriteSavedEmail(idx)} disabled={rewriteLoading}
+                              className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer">
+                              {rewriteLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+                              Réécrire IA
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      <p className="text-xs font-semibold text-gray-800 mb-1">Sujet : {seq.subject}</p>
-                      <div className="text-[11px] text-gray-700 max-h-20 overflow-y-auto" dangerouslySetInnerHTML={{ __html: seq.email_body || "" }} />
                     </div>
                   ))}
                 </div>
@@ -1202,25 +1379,67 @@ export default function SequencesPage() {
                     {aiGenLoading ? "Génération en cours (10-15s)..." : "Générer 3 emails"}
                   </button>
 
-                  {/* AI Generated preview */}
+                  {/* AI Generated preview — editable */}
                   {aiEmails.length > 0 && (
-                    <div className="space-y-2 pt-2 border-t border-violet-200">
-                      <div className="flex items-center justify-between">
-                        <p className="text-[10px] font-semibold text-violet-700">Aperçu des emails générés</p>
+                    <div className="space-y-0 pt-2 border-t border-violet-200">
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="text-[10px] font-semibold text-violet-700">Séquence générée — cliquez ✏️ pour modifier</p>
                         <button onClick={saveAiEmails} disabled={actionLoading}
                           className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50 cursor-pointer">
                           {actionLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
                           Sauvegarder dans Smartlead
                         </button>
                       </div>
-                      {aiEmails.map((e) => (
-                        <div key={e.seq_number} className="bg-white rounded-lg border border-violet-100 p-3">
-                          <div className="flex items-center gap-2 mb-1.5">
-                            <span className="text-[10px] font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded">Email {e.seq_number}</span>
-                            <span className="text-[10px] text-gray-400">{e.delay_days === 0 ? "Premier email (J0)" : `+${e.delay_days} jour(s)`}</span>
+                      {aiEmails.map((e, idx) => (
+                        <div key={e.seq_number}>
+                          {idx > 0 && (
+                            <div className="flex items-center gap-2 py-2 px-3">
+                              <div className="flex-1 h-px bg-violet-200" />
+                              <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1">
+                                <Timer className="w-3 h-3 text-amber-500" />
+                                <span className="text-[10px] text-amber-700">Attendre</span>
+                                <input type="number" min={1} max={30} value={e.delay_days}
+                                  onChange={(ev) => updateAiDelay(idx, Number(ev.target.value))}
+                                  className="w-10 text-center text-[10px] font-bold text-amber-800 border border-amber-300 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-amber-400" />
+                                <span className="text-[10px] text-amber-700">jour(s)</span>
+                              </div>
+                              <div className="flex-1 h-px bg-violet-200" />
+                            </div>
+                          )}
+                          <div className={cn("bg-white rounded-lg border p-3 transition-all",
+                            editingSeqIdx === idx ? "border-violet-300 bg-violet-50/50" : "border-violet-100")}>
+                            <div className="flex items-center justify-between mb-1.5">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded">Email {e.seq_number}</span>
+                                <span className="text-[10px] text-gray-400">{e.delay_days === 0 ? "J0" : `+${e.delay_days}j`}</span>
+                              </div>
+                              <button onClick={() => setEditingSeqIdx(editingSeqIdx === idx ? null : idx)} title="Modifier"
+                                className="p-1 text-gray-400 hover:text-violet-600 cursor-pointer"><Pencil className="w-3 h-3" /></button>
+                            </div>
+                            {editingSeqIdx === idx ? (
+                              <div className="space-y-2">
+                                <input value={e.subject} onChange={(ev) => updateAiEmail(idx, "subject", ev.target.value)}
+                                  className="w-full px-2 py-1 text-xs border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400" />
+                                <textarea value={e.body} onChange={(ev) => updateAiEmail(idx, "body", ev.target.value)} rows={5}
+                                  className="w-full px-2 py-1 text-xs border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400 resize-none" />
+                                <div className="flex items-center gap-2 pt-1 border-t border-gray-200">
+                                  <input value={rewriteInstruction} onChange={(ev) => setRewriteInstruction(ev.target.value)}
+                                    placeholder="Instruction IA : Plus court, plus direct..."
+                                    className="flex-1 px-2 py-1 text-[10px] border border-gray-300 rounded-lg outline-none"
+                                    onKeyDown={(ev) => ev.key === "Enter" && rewriteEmail(idx)} />
+                                  <button onClick={() => rewriteEmail(idx)} disabled={rewriteLoading}
+                                    className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer">
+                                    {rewriteLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />} Réécrire IA
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <p className="text-xs font-semibold text-gray-800 mb-1">Sujet : {e.subject}</p>
+                                <div className="bg-gray-50 rounded p-2 text-[11px] text-gray-700 whitespace-pre-line">{e.body}</div>
+                              </>
+                            )}
                           </div>
-                          <p className="text-xs font-semibold text-gray-800 mb-1">Sujet : {e.subject}</p>
-                          <div className="bg-gray-50 rounded p-2 text-[11px] text-gray-700 whitespace-pre-line">{e.body}</div>
                         </div>
                       ))}
                     </div>
@@ -1228,7 +1447,7 @@ export default function SequencesPage() {
                 </div>
               )}
 
-              {/* Existing sequences */}
+              {/* Existing sequences — with delay editing & AI rewrite */}
               {sequences.length === 0 && !showAiGen ? (
                 <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
                   <Sparkles className="w-10 h-10 mx-auto mb-3 text-violet-300" />
@@ -1238,14 +1457,47 @@ export default function SequencesPage() {
                     <Sparkles className="w-3.5 h-3.5" /> Générer avec l&apos;IA
                   </button>
                 </div>
-              ) : sequences.map((seq) => (
-                <div key={seq.seq_number} className="bg-white rounded-lg border border-gray-200 p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-xs font-bold text-violet-600 bg-violet-50 px-2 py-1 rounded">Email {seq.seq_number}</span>
-                    <span className="text-xs text-gray-400">{seq.seq_delay_details?.delay_in_days ? `Envoyé +${seq.seq_delay_details.delay_in_days} jour(s) après le précédent` : "Premier email (J0)"}</span>
+              ) : sequences.map((seq, idx) => (
+                <div key={seq.seq_number}>
+                  {idx > 0 && (
+                    <div className="flex items-center gap-2 py-2 px-3">
+                      <div className="flex-1 h-px bg-gray-200" />
+                      <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1">
+                        <Timer className="w-3 h-3 text-amber-500" />
+                        <span className="text-[10px] text-amber-700">Attendre</span>
+                        <input type="number" min={1} max={30} value={seq.seq_delay_details?.delay_in_days || 0}
+                          onChange={(ev) => updateSavedDelay(idx, Number(ev.target.value))}
+                          className="w-10 text-center text-[10px] font-bold text-amber-800 border border-amber-300 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-amber-400" />
+                        <span className="text-[10px] text-amber-700">jour(s)</span>
+                      </div>
+                      <div className="flex-1 h-px bg-gray-200" />
+                    </div>
+                  )}
+                  <div className={cn("bg-white rounded-lg border border-gray-200 p-4 transition-all",
+                    editingSeqIdx === (idx + 200) ? "border-violet-300 bg-violet-50/30" : "")}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-violet-600 bg-violet-50 px-2 py-1 rounded">Email {seq.seq_number}</span>
+                        <span className="text-xs text-gray-400">{seq.seq_delay_details?.delay_in_days ? `+${seq.seq_delay_details.delay_in_days}j` : "J0"}</span>
+                      </div>
+                      <button onClick={() => setEditingSeqIdx(editingSeqIdx === (idx + 200) ? null : (idx + 200))} title="Modifier avec l'IA"
+                        className="p-1 text-gray-400 hover:text-violet-600 cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
+                    </div>
+                    <p className="text-sm font-semibold text-gray-800 mb-2">Sujet : {seq.subject || "(pas de sujet)"}</p>
+                    <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-700 max-h-40 overflow-y-auto" dangerouslySetInnerHTML={{ __html: seq.email_body || "<em>Pas de contenu</em>" }} />
+                    {editingSeqIdx === (idx + 200) && (
+                      <div className="flex items-center gap-2 mt-3 pt-2 border-t border-gray-200">
+                        <input value={rewriteInstruction} onChange={(ev) => setRewriteInstruction(ev.target.value)}
+                          placeholder="Instruction IA : Plus court, ajoute urgence, change l'angle..."
+                          className="flex-1 px-2 py-1.5 text-xs border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400"
+                          onKeyDown={(ev) => ev.key === "Enter" && rewriteSavedEmail(idx)} />
+                        <button onClick={() => rewriteSavedEmail(idx)} disabled={rewriteLoading}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer">
+                          {rewriteLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />} Réécrire IA
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  <p className="text-sm font-semibold text-gray-800 mb-2">Sujet : {seq.subject || "(pas de sujet)"}</p>
-                  <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-700 max-h-40 overflow-y-auto" dangerouslySetInnerHTML={{ __html: seq.email_body || "<em>Pas de contenu</em>" }} />
                 </div>
               ))}
             </div>
