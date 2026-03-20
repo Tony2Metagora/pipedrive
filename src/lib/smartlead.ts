@@ -292,6 +292,44 @@ export async function removeEmailAccountsFromCampaign(campaignId: number, emailA
   });
 }
 
+// ─── Warmup ────────────────────────────────────────────
+
+export interface WarmupDayStat {
+  date: string;
+  sent: number;
+  spam: number;
+  delivered: number;
+  opened: number;
+  replied: number;
+}
+
+export interface WarmupStats {
+  total_sent: number;
+  spam_count: number;
+  reputation_score: number;
+  daily_stats: WarmupDayStat[];
+}
+
+export interface WarmupSettings {
+  warmup_enabled?: boolean;
+  total_warmup_per_day?: number;
+  daily_rampup?: number;
+  reply_rate_percentage?: number;
+  auto_adjust_warmup?: boolean;
+  is_rampup_enabled?: boolean;
+}
+
+export async function getWarmupStats(emailAccountId: number): Promise<WarmupStats> {
+  return (await sl(`/email-accounts/${emailAccountId}/warmup-stats`)) as WarmupStats;
+}
+
+export async function updateWarmupSettings(emailAccountId: number, settings: WarmupSettings): Promise<unknown> {
+  return sl(`/email-accounts/${emailAccountId}/warmup`, {
+    method: "POST",
+    body: JSON.stringify(settings),
+  });
+}
+
 // ─── Webhooks ───────────────────────────────────────────
 
 export async function getCampaignWebhooks(campaignId: number): Promise<unknown> {
