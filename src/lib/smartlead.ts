@@ -292,6 +292,31 @@ export async function removeEmailAccountsFromCampaign(campaignId: number, emailA
   });
 }
 
+// ─── Create Email Account ──────────────────────────────
+
+export interface CreateEmailAccountPayload {
+  from_name: string;
+  from_email: string;
+  user_name: string;
+  password: string;
+  smtp_host: string;
+  smtp_port: number;
+  imap_host: string;
+  imap_port: number;
+  type?: "GMAIL" | "OUTLOOK" | "SMTP";
+  max_email_per_day?: number;
+  warmup_enabled?: boolean;
+  total_warmup_per_day?: number;
+  daily_rampup?: number;
+}
+
+export async function createEmailAccount(payload: CreateEmailAccountPayload): Promise<unknown> {
+  return sl("/email-accounts/save", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 // ─── Warmup ────────────────────────────────────────────
 
 export interface WarmupDayStat {

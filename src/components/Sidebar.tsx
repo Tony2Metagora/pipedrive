@@ -7,7 +7,7 @@ import { signOut } from "next-auth/react";
 import {
   Users, Database, LayoutDashboard, Linkedin, Globe,
   Mail, ChevronDown, ChevronRight, LogOut, Settings,
-  Home, Sparkles, Bot, PanelLeftClose, PanelLeftOpen,
+  Home, Sparkles, Bot, PanelLeftClose, PanelLeftOpen, Flame,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePermissions, canRead } from "@/hooks/usePermissions";
@@ -59,6 +59,7 @@ const NAV_GROUPS: NavGroup[] = [
     defaultOpen: false,
     items: [
       { href: "/sequences", label: "Campagnes", icon: Mail },
+      { href: "/sequences/warmup", label: "Warmup", icon: Flame },
     ],
   },
 ];

@@ -4,7 +4,9 @@ import {
   listEmailAccounts,
   getWarmupStats,
   updateWarmupSettings,
+  createEmailAccount,
   type WarmupSettings,
+  type CreateEmailAccountPayload,
 } from "@/lib/smartlead";
 
 /** GET /api/sequences/warmup — all email accounts + their warmup stats */
@@ -14,7 +16,6 @@ export async function GET() {
 
   try {
     const accounts = await listEmailAccounts();
-    // Fetch warmup stats for each account in parallel
     const warmupResults = await Promise.allSettled(
       accounts.map((a) => getWarmupStats(a.id))
     );
@@ -34,13 +35,25 @@ export async function GET() {
   }
 }
 
-/** POST /api/sequences/warmup — update warmup settings for an account */
+/** POST /api/sequences/warmup — action: "update-warmup" | "create-account" */
 export async function POST(request: Request) {
   const guard = await requireAuth("sequences" as never, "POST");
   if (guard.denied) return guard.denied;
 
   try {
     const body = await request.json();
+    const action = (body as { action?: string }).action || "update-warmup";
+
+    if (action === "create-account") {
+      const payload = body.payload as CreateEmailAccountPayload;
+      if (!payload?.from_email || !payload?.smtp_host) {
+        return NextResponse.json({ error: "Email et SMTP host requis" }, { status: 400 });
+      }
+      const result = await createEmailAccount(payload);
+      return NextResponse.json({ success: true, result });
+    }
+
+    // Default: update warmup settings
     const { email_account_id, settings } = body as {
       email_account_id: number;
       settings: WarmupSettings;

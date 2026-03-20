@@ -1,0 +1,594 @@
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import {
+  Flame, Loader2, Plus, X, Check, AlertTriangle, ShieldCheck,
+  TrendingUp, Activity, BarChart3, Info, Shield, Square, Mail,
+  Eye, EyeOff,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+
+// ─── Types ──────────────────────────────────────────────
+
+interface WarmupDayStat {
+  date: string;
+  sent: number;
+  spam: number;
+  delivered: number;
+  opened: number;
+  replied: number;
+}
+
+interface WarmupAccountData {
+  id: number;
+  from_name: string;
+  from_email: string;
+  type: string;
+  is_smtp_success: boolean;
+  is_imap_success?: boolean;
+  message_per_day?: number;
+  daily_sent_count?: number;
+  warmup_details?: { status: string; warmup_reputation: string; total_sent_count: number; total_spam_count: number };
+  warmup_stats: {
+    total_sent: number;
+    spam_count: number;
+    reputation_score: number;
+    daily_stats: WarmupDayStat[];
+  } | null;
+}
+
+// ─── Warmup ramp logic ─────────────────────────────────
+
+const RAMP_NEW_GOOGLE = [
+  { week: 1, daily: 10 },
+  { week: 2, daily: 15 },
+  { week: 3, daily: 25 },
+  { week: 4, daily: 35 },
+  { week: 5, daily: 50 },
+];
+const RAMP_NEW_HOSTINGER = [
+  { week: 1, daily: 5 },
+  { week: 2, daily: 10 },
+  { week: 3, daily: 15 },
+  { week: 4, daily: 25 },
+  { week: 5, daily: 35 },
+];
+
+function getAccountProfile(acc: WarmupAccountData) {
+  const email = acc.from_email.toLowerCase();
+  const isGoogle = email.endsWith("@metagora.tech");
+  const isHostinger = email.endsWith("@metagora-tech.fr");
+  const totalSent = acc.warmup_stats?.total_sent || acc.warmup_details?.total_sent_count || 0;
+  const rep = acc.warmup_stats?.reputation_score || 0;
+  const spamRate = acc.warmup_stats ? (acc.warmup_stats.spam_count / Math.max(acc.warmup_stats.total_sent, 1)) * 100 : 0;
+
+  let maturity: "new" | "warming" | "warm" | "mature" = "new";
+  if (totalSent > 500 && rep >= 80) maturity = "mature";
+  else if (totalSent > 200 && rep >= 60) maturity = "warm";
+  else if (totalSent > 50) maturity = "warming";
+
+  const rampTable = isGoogle ? RAMP_NEW_GOOGLE : RAMP_NEW_HOSTINGER;
+
+  // Estimate current week based on totalSent and daily average from stats
+  const ds = acc.warmup_stats?.daily_stats || [];
+  const avgDaily = ds.length > 0 ? ds.reduce((s, d) => s + d.sent, 0) / ds.length : 0;
+  let currentWeek = 1;
+  if (maturity === "mature") currentWeek = 5;
+  else if (maturity === "warm") currentWeek = 4;
+  else if (maturity === "warming") currentWeek = 3;
+  else if (avgDaily > 10) currentWeek = 2;
+
+  const rampEntry = rampTable.find((r) => r.week >= currentWeek) || rampTable[rampTable.length - 1];
+  const dailyTarget = rampEntry.daily;
+  const weeklyTarget = dailyTarget * 7;
+  const weeklySent = ds.reduce((s, d) => s + d.sent, 0);
+
+  // Health score
+  let health = 50;
+  if (rep > 0) health = rep;
+  if (spamRate > 5) health = Math.max(0, health - 30);
+  else if (spamRate > 2) health = Math.max(0, health - 15);
+  if (!acc.is_smtp_success) health = 0;
+
+  const healthColor = health >= 80 ? "text-green-600" : health >= 50 ? "text-yellow-600" : "text-red-600";
+  const healthBg = health >= 80 ? "bg-green-100" : health >= 50 ? "bg-yellow-100" : "bg-red-100";
+  const healthLabel = health >= 80 ? "Excellent" : health >= 50 ? "Moyen" : "Critique";
+
+  return {
+    isGoogle, isHostinger, totalSent, rep, spamRate, maturity, rampTable,
+    currentWeek, dailyTarget, weeklyTarget, weeklySent, avgDaily,
+    health, healthColor, healthBg, healthLabel,
+  };
+}
+
+// ─── Presets for providers ──────────────────────────────
+
+const PROVIDER_PRESETS: Record<string, { smtp_host: string; smtp_port: number; imap_host: string; imap_port: number; type: string }> = {
+  google: { smtp_host: "smtp.gmail.com", smtp_port: 587, imap_host: "imap.gmail.com", imap_port: 993, type: "GMAIL" },
+  outlook: { smtp_host: "smtp.office365.com", smtp_port: 587, imap_host: "outlook.office365.com", imap_port: 993, type: "OUTLOOK" },
+  hostinger: { smtp_host: "smtp.hostinger.com", smtp_port: 465, imap_host: "imap.hostinger.com", imap_port: 993, type: "SMTP" },
+  custom: { smtp_host: "", smtp_port: 587, imap_host: "", imap_port: 993, type: "SMTP" },
+};
+
+// ─── Main component ─────────────────────────────────────
+
+export default function WarmupPage() {
+  const [accounts, setAccounts] = useState<WarmupAccountData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [saving, setSaving] = useState<number | null>(null);
+
+  // Add account form
+  const [showAdd, setShowAdd] = useState(false);
+  const [addProvider, setAddProvider] = useState("hostinger");
+  const [addForm, setAddForm] = useState({
+    from_name: "",
+    from_email: "",
+    user_name: "",
+    password: "",
+    smtp_host: "smtp.hostinger.com",
+    smtp_port: 465,
+    imap_host: "imap.hostinger.com",
+    imap_port: 993,
+    type: "SMTP",
+    max_email_per_day: 10,
+    warmup_enabled: true,
+    total_warmup_per_day: 10,
+    daily_rampup: 5,
+  });
+  const [addSaving, setAddSaving] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+
+  const flash = (msg: string) => { setActionMsg(msg); setTimeout(() => setActionMsg(null), 3500); };
+
+  const fetchAccounts = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const res = await fetch("/api/sequences/warmup");
+      const d = await res.json();
+      if (d.error) throw new Error(d.error);
+      setAccounts(d.accounts || []);
+    } catch (e) { setError(String(e)); }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetchAccounts(); }, [fetchAccounts]);
+
+  const updateWarmup = async (accountId: number, settings: Record<string, unknown>) => {
+    setSaving(accountId); setError(null);
+    try {
+      const res = await fetch("/api/sequences/warmup", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email_account_id: accountId, settings }),
+      });
+      const d = await res.json();
+      if (d.error) throw new Error(d.error);
+      flash("Warmup mis à jour");
+      await fetchAccounts();
+    } catch (e) { setError(String(e)); }
+    setSaving(null);
+  };
+
+  const applyPreset = (key: string) => {
+    const p = PROVIDER_PRESETS[key];
+    setAddProvider(key);
+    setAddForm((prev) => ({ ...prev, ...p }));
+  };
+
+  const submitNewAccount = async () => {
+    if (!addForm.from_email || !addForm.smtp_host || !addForm.password) {
+      setError("Email, mot de passe et SMTP host requis");
+      return;
+    }
+    setAddSaving(true); setError(null);
+    try {
+      const res = await fetch("/api/sequences/warmup", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "create-account",
+          payload: {
+            ...addForm,
+            user_name: addForm.user_name || addForm.from_email,
+          },
+        }),
+      });
+      const d = await res.json();
+      if (d.error) throw new Error(d.error);
+      flash("Compte email ajouté !");
+      setShowAdd(false);
+      setAddForm({
+        from_name: "", from_email: "", user_name: "", password: "",
+        smtp_host: "smtp.hostinger.com", smtp_port: 465,
+        imap_host: "imap.hostinger.com", imap_port: 993,
+        type: "SMTP", max_email_per_day: 10, warmup_enabled: true,
+        total_warmup_per_day: 10, daily_rampup: 5,
+      });
+      await fetchAccounts();
+    } catch (e) { setError(String(e)); }
+    setAddSaving(false);
+  };
+
+  return (
+    <>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-orange-100 rounded-xl flex items-center justify-center">
+            <Flame className="w-5 h-5 text-orange-600" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-gray-900">Warmup</h1>
+            <p className="text-sm text-gray-500">{accounts.length} compte{accounts.length !== 1 ? "s" : ""} email • Réputation et progression</p>
+          </div>
+        </div>
+        <button onClick={() => setShowAdd(true)} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-orange-600 rounded-lg hover:bg-orange-700 cursor-pointer">
+          <Plus className="w-4 h-4" /> Nouveau compte
+        </button>
+      </div>
+
+      {/* Banners */}
+      {actionMsg && (
+        <div className="mb-3 px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-xs text-green-700 flex items-center gap-2">
+          <Check className="w-3.5 h-3.5" /> {actionMsg}
+        </div>
+      )}
+      {error && (
+        <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex items-center gap-2">
+          <AlertTriangle className="w-3.5 h-3.5" /> {error}
+          <button onClick={() => setError(null)} className="ml-auto cursor-pointer"><X className="w-3 h-3" /></button>
+        </div>
+      )}
+
+      {/* Best practices */}
+      <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-4">
+        <h3 className="text-xs font-semibold text-amber-800 flex items-center gap-1.5 mb-2">
+          <Info className="w-3.5 h-3.5" /> Bonnes pratiques warmup
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px] text-amber-700">
+          <div className="space-y-1">
+            <p><b>Rampe progressive :</b> Commencez à 5-10/jour, augmentez de 5/jour chaque semaine</p>
+            <p><b>Ratio spam :</b> Rester sous 2% (idéal &lt;1%). Au-dessus de 5% = action urgente</p>
+            <p><b>Taux de réponse warmup :</b> Viser 25-30% pour bâtir la réputation</p>
+          </div>
+          <div className="space-y-1">
+            <p><b>Google Workspace :</b> Limite technique 2000/jour, max recommandé 80/jour en cold email</p>
+            <p><b>Hostinger :</b> Plus risqué, plafonner à 40-50/jour max, surveiller le spam de près</p>
+            <p><b>Intervalle :</b> Minimum 3-5 min entre chaque envoi (Smartlead gère automatiquement)</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Loading */}
+      {loading ? (
+        <div className="flex justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-orange-400" /></div>
+      ) : accounts.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+          <Mail className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+          <p className="text-lg font-medium text-gray-600">Aucun compte email</p>
+          <p className="text-sm text-gray-400 mt-1">Ajoutez votre premier compte pour commencer le warmup.</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {accounts.map((acc) => {
+            const p = getAccountProfile(acc);
+            const ds = acc.warmup_stats?.daily_stats || [];
+            const maxSent = Math.max(...ds.map((d) => d.sent), 1);
+            const todaySent = acc.daily_sent_count || 0;
+
+            return (
+              <div key={acc.id} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                {/* Header row */}
+                <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
+                  <div className={cn("w-10 h-10 rounded-full flex items-center justify-center shrink-0", p.healthBg)}>
+                    <ShieldCheck className={cn("w-5 h-5", p.healthColor)} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-semibold text-gray-900">{acc.from_email}</p>
+                      <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded", p.healthBg, p.healthColor)}>{p.health}/100 — {p.healthLabel}</span>
+                      <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{p.isGoogle ? "Google Workspace" : p.isHostinger ? "Hostinger" : acc.type}</span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-0.5">{acc.from_name} • SMTP: {acc.is_smtp_success ? "✅" : "❌"} • Warmup: {acc.warmup_details?.status || "Inactif"} • Réputation: {acc.warmup_details?.warmup_reputation || "N/A"}</p>
+                  </div>
+
+                  {/* Daily / Weekly progress */}
+                  <div className="text-right shrink-0 space-y-0.5">
+                    <div className="flex items-center gap-1.5 justify-end">
+                      <span className="text-[10px] text-gray-400">Aujourd'hui</span>
+                      <span className={cn("text-xs font-bold", todaySent >= p.dailyTarget ? "text-green-600" : "text-blue-600")}>
+                        {todaySent}/{p.dailyTarget}
+                      </span>
+                    </div>
+                    <div className="w-24 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div className={cn("h-full rounded-full", todaySent >= p.dailyTarget ? "bg-green-500" : "bg-blue-500")} style={{ width: `${Math.min((todaySent / p.dailyTarget) * 100, 100)}%` }} />
+                    </div>
+                    <div className="flex items-center gap-1.5 justify-end">
+                      <span className="text-[10px] text-gray-400">Semaine</span>
+                      <span className={cn("text-xs font-bold", p.weeklySent >= p.weeklyTarget ? "text-green-600" : "text-indigo-600")}>
+                        {p.weeklySent}/{p.weeklyTarget}
+                      </span>
+                    </div>
+                    <div className="w-24 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div className={cn("h-full rounded-full", p.weeklySent >= p.weeklyTarget ? "bg-green-500" : "bg-indigo-500")} style={{ width: `${Math.min((p.weeklySent / p.weeklyTarget) * 100, 100)}%` }} />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-0 lg:divide-x divide-gray-100">
+                  {/* Stats summary */}
+                  <div className="p-4">
+                    <h4 className="text-[10px] font-semibold text-gray-500 uppercase mb-2 flex items-center gap-1">
+                      <BarChart3 className="w-3 h-3" /> Statistiques
+                    </h4>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="bg-blue-50 rounded-lg p-2 text-center">
+                        <p className="text-lg font-bold text-blue-700">{p.totalSent}</p>
+                        <p className="text-[9px] text-blue-500">Total envoyés</p>
+                      </div>
+                      <div className={cn("rounded-lg p-2 text-center", p.spamRate > 2 ? "bg-red-50" : "bg-green-50")}>
+                        <p className={cn("text-lg font-bold", p.spamRate > 2 ? "text-red-700" : "text-green-700")}>{p.spamRate.toFixed(1)}%</p>
+                        <p className={cn("text-[9px]", p.spamRate > 2 ? "text-red-500" : "text-green-500")}>Taux spam</p>
+                      </div>
+                      <div className="bg-indigo-50 rounded-lg p-2 text-center">
+                        <p className="text-lg font-bold text-indigo-700">{p.rep || "—"}</p>
+                        <p className="text-[9px] text-indigo-500">Réputation</p>
+                      </div>
+                      <div className="bg-gray-50 rounded-lg p-2 text-center">
+                        <p className="text-sm font-bold text-gray-700">{p.maturity === "new" ? "Nouveau" : p.maturity === "warming" ? "En warmup" : p.maturity === "warm" ? "Chaud" : "Mature"}</p>
+                        <p className="text-[9px] text-gray-500">Maturité</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 7-day chart */}
+                  <div className="p-4">
+                    <h4 className="text-[10px] font-semibold text-gray-500 uppercase mb-2 flex items-center gap-1">
+                      <Activity className="w-3 h-3" /> 7 derniers jours
+                    </h4>
+                    {ds.length === 0 ? (
+                      <p className="text-xs text-gray-400 text-center py-6">Pas de données warmup</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {ds.map((d) => (
+                          <div key={d.date} className="flex items-center gap-2 text-[10px]">
+                            <span className="text-gray-400 w-16 shrink-0">{new Date(d.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</span>
+                            <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden flex">
+                              <div className="h-full bg-blue-400 rounded-l-full" style={{ width: `${(d.delivered / maxSent) * 100}%` }} title={`${d.delivered} livrés`} />
+                              {d.spam > 0 && <div className="h-full bg-red-400" style={{ width: `${(d.spam / maxSent) * 100}%` }} title={`${d.spam} spam`} />}
+                            </div>
+                            <span className="text-gray-600 w-8 text-right font-medium">{d.sent}</span>
+                            {d.spam > 0 && <span className="text-red-500 text-[9px]">({d.spam} spam)</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Ramp + actions */}
+                  <div className="p-4">
+                    <h4 className="text-[10px] font-semibold text-gray-500 uppercase mb-2 flex items-center gap-1">
+                      <TrendingUp className="w-3 h-3" /> Rampe recommandée
+                    </h4>
+                    <div className="space-y-1">
+                      {p.rampTable.map((r) => (
+                        <div key={r.week} className={cn("flex items-center justify-between text-xs", r.week === p.currentWeek ? "font-bold text-orange-700" : "text-gray-500")}>
+                          <span>Semaine {r.week} {r.week === p.currentWeek ? "←" : ""}</span>
+                          <span>{r.daily}/jour • {r.daily * 7}/sem</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-3 pt-3 border-t border-gray-100 space-y-1.5">
+                      <button
+                        onClick={() => updateWarmup(acc.id, {
+                          warmup_enabled: true,
+                          total_warmup_per_day: p.dailyTarget,
+                          daily_rampup: 5,
+                          reply_rate_percentage: 30,
+                          auto_adjust_warmup: true,
+                          is_rampup_enabled: true,
+                        })}
+                        disabled={saving === acc.id}
+                        className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-[10px] font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 disabled:opacity-50 cursor-pointer"
+                      >
+                        {saving === acc.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Flame className="w-3 h-3" />}
+                        Activer warmup ({p.dailyTarget}/jour + rampe auto)
+                      </button>
+                      {acc.warmup_details?.status === "ENABLED" && (
+                        <button
+                          onClick={() => updateWarmup(acc.id, { warmup_enabled: false })}
+                          disabled={saving === acc.id}
+                          className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-[10px] font-medium text-gray-500 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 disabled:opacity-50 cursor-pointer"
+                        >
+                          <Square className="w-3 h-3" /> Désactiver warmup
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Alerts */}
+                    {p.spamRate > 2 && (
+                      <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-lg text-[10px] text-red-700 flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                        <span>Taux spam élevé ({p.spamRate.toFixed(1)}%) — réduisez le volume, vérifiez SPF/DKIM/DMARC</span>
+                      </div>
+                    )}
+                    {todaySent > p.dailyTarget * 1.5 && (
+                      <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded-lg text-[10px] text-yellow-700 flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                        <span>Volume ({todaySent}/jour) dépasse la recommandation ({p.dailyTarget}/jour)</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Global recommendations */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2 mb-3">
+              <Shield className="w-4 h-4 text-blue-500" /> Recommandations
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-gray-600">
+              {accounts.filter((a) => a.from_email.endsWith("@metagora.tech")).length > 0 && (
+                <div className="bg-blue-50 rounded-lg p-3">
+                  <p className="font-semibold text-blue-800 mb-1">Google Workspace (@metagora.tech)</p>
+                  <ul className="space-y-0.5 text-blue-700">
+                    <li>• tony@metagora.tech (2 ans) : peut monter à 50-80/jour</li>
+                    <li>• anna.i@metagora.tech (nouveau) : commencer à 10/jour</li>
+                    <li>• Activez le warmup Smartlead sur tous les comptes neufs</li>
+                  </ul>
+                </div>
+              )}
+              {accounts.filter((a) => a.from_email.endsWith("@metagora-tech.fr")).length > 0 && (
+                <div className="bg-orange-50 rounded-lg p-3">
+                  <p className="font-semibold text-orange-800 mb-1">Hostinger (@metagora-tech.fr)</p>
+                  <ul className="space-y-0.5 text-orange-700">
+                    <li>• Réputation plus fragile — soyez conservateur</li>
+                    <li>• Nouveaux comptes : 5/jour semaine 1, max 35-40/jour à terme</li>
+                    <li>• Vérifiez SPF, DKIM et DMARC sur Hostinger</li>
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Add account modal ──────────────────────────── */}
+      {showAdd && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowAdd(false)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-900">Nouveau compte email</h3>
+              <button onClick={() => setShowAdd(false)} className="p-1 text-gray-400 hover:text-gray-600 cursor-pointer"><X className="w-4 h-4" /></button>
+            </div>
+
+            {/* Provider presets */}
+            <div>
+              <label className="text-[10px] font-semibold text-gray-500 uppercase">Provider</label>
+              <div className="flex gap-2 mt-1">
+                {[
+                  { key: "google", label: "Google Workspace" },
+                  { key: "outlook", label: "Outlook/O365" },
+                  { key: "hostinger", label: "Hostinger" },
+                  { key: "custom", label: "Autre SMTP" },
+                ].map((p) => (
+                  <button
+                    key={p.key}
+                    onClick={() => applyPreset(p.key)}
+                    className={cn(
+                      "px-3 py-1.5 text-[10px] font-medium rounded-lg border cursor-pointer",
+                      addProvider === p.key
+                        ? "bg-orange-50 border-orange-300 text-orange-700"
+                        : "bg-white border-gray-200 text-gray-500 hover:border-gray-300"
+                    )}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Form fields */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-semibold text-gray-500">Nom affiché</label>
+                <input value={addForm.from_name} onChange={(e) => setAddForm({ ...addForm, from_name: e.target.value })}
+                  placeholder="Anna Islum" className="w-full mt-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-400 outline-none" />
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold text-gray-500">Email</label>
+                <input value={addForm.from_email} onChange={(e) => setAddForm({ ...addForm, from_email: e.target.value })}
+                  placeholder="anna@metagora-tech.fr" className="w-full mt-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-400 outline-none" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-semibold text-gray-500">Identifiant SMTP <span className="text-gray-400">(souvent = email)</span></label>
+                <input value={addForm.user_name} onChange={(e) => setAddForm({ ...addForm, user_name: e.target.value })}
+                  placeholder={addForm.from_email || "email@exemple.com"} className="w-full mt-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-400 outline-none" />
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold text-gray-500">Mot de passe</label>
+                <div className="relative mt-1">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={addForm.password}
+                    onChange={(e) => setAddForm({ ...addForm, password: e.target.value })}
+                    placeholder="Mot de passe SMTP"
+                    className="w-full px-3 py-1.5 pr-8 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-400 outline-none"
+                  />
+                  <button onClick={() => setShowPassword(!showPassword)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 cursor-pointer">
+                    {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-semibold text-gray-500">SMTP Host</label>
+                <input value={addForm.smtp_host} onChange={(e) => setAddForm({ ...addForm, smtp_host: e.target.value })}
+                  className="w-full mt-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-400 outline-none" />
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold text-gray-500">SMTP Port</label>
+                <input type="number" value={addForm.smtp_port} onChange={(e) => setAddForm({ ...addForm, smtp_port: Number(e.target.value) })}
+                  className="w-full mt-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-400 outline-none" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-semibold text-gray-500">IMAP Host <span className="text-gray-400">(pour recevoir les réponses)</span></label>
+                <input value={addForm.imap_host} onChange={(e) => setAddForm({ ...addForm, imap_host: e.target.value })}
+                  className="w-full mt-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-400 outline-none" />
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold text-gray-500">IMAP Port</label>
+                <input type="number" value={addForm.imap_port} onChange={(e) => setAddForm({ ...addForm, imap_port: Number(e.target.value) })}
+                  className="w-full mt-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-400 outline-none" />
+              </div>
+            </div>
+
+            <div className="h-px bg-gray-100" />
+
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-[10px] font-semibold text-gray-500">Max mails/jour</label>
+                <input type="number" value={addForm.max_email_per_day} onChange={(e) => setAddForm({ ...addForm, max_email_per_day: Number(e.target.value) })}
+                  className="w-full mt-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-400 outline-none" />
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold text-gray-500">Warmup/jour</label>
+                <input type="number" value={addForm.total_warmup_per_day} onChange={(e) => setAddForm({ ...addForm, total_warmup_per_day: Number(e.target.value) })}
+                  className="w-full mt-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-400 outline-none" />
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold text-gray-500">Rampe/jour</label>
+                <input type="number" value={addForm.daily_rampup} onChange={(e) => setAddForm({ ...addForm, daily_rampup: Number(e.target.value) })}
+                  className="w-full mt-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-400 outline-none" />
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+              <input type="checkbox" checked={addForm.warmup_enabled} onChange={(e) => setAddForm({ ...addForm, warmup_enabled: e.target.checked })} className="rounded" />
+              Activer le warmup dès la création
+            </label>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setShowAdd(false)} className="px-3 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-lg cursor-pointer">Annuler</button>
+              <button onClick={submitNewAccount} disabled={addSaving || !addForm.from_email || !addForm.password}
+                className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium text-white bg-orange-600 rounded-lg hover:bg-orange-700 disabled:opacity-50 cursor-pointer">
+                {addSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />} Ajouter le compte
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}

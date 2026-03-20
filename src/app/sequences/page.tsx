@@ -6,7 +6,6 @@ import {
   ChevronRight, Eye, Upload, Play, X, Check, FileUp,
   ArrowLeft, Clock, MousePointerClick, Reply, AlertTriangle,
   Settings2, CheckSquare, SquareIcon, Zap, Shield, MessageSquare,
-  Flame, TrendingUp, ShieldCheck, Info, BarChart3, Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -78,33 +77,7 @@ interface LeadMessage {
   from_email?: string;
 }
 
-interface WarmupDayStat {
-  date: string;
-  sent: number;
-  spam: number;
-  delivered: number;
-  opened: number;
-  replied: number;
-}
-
-interface WarmupAccountData {
-  id: number;
-  from_name: string;
-  from_email: string;
-  type: string;
-  is_smtp_success: boolean;
-  message_per_day?: number;
-  daily_sent_count?: number;
-  warmup_details?: { status: string; warmup_reputation: string; total_sent_count: number; total_spam_count: number };
-  warmup_stats: {
-    total_sent: number;
-    spam_count: number;
-    reputation_score: number;
-    daily_stats: WarmupDayStat[];
-  } | null;
-}
-
-type View = "list" | "detail" | "warmup";
+type View = "list" | "detail";
 type DetailTab = "overview" | "leads" | "sequences" | "settings";
 
 // ─── Helpers ────────────────────────────────────────────
@@ -190,11 +163,6 @@ export default function SequencesPage() {
     track_open: true,
     track_click: true,
   });
-
-  // Warmup dashboard
-  const [warmupAccounts, setWarmupAccounts] = useState<WarmupAccountData[]>([]);
-  const [warmupLoading, setWarmupLoading] = useState(false);
-  const [warmupSaving, setWarmupSaving] = useState<number | null>(null);
 
   // ─── Data fetching ──────────────────────────────────────
 
@@ -327,43 +295,6 @@ export default function SequencesPage() {
     }
   };
 
-  // ─── Warmup dashboard ──────────────────────────────────
-
-  const fetchWarmup = useCallback(async () => {
-    setWarmupLoading(true); setError(null);
-    try {
-      const res = await fetch("/api/sequences/warmup");
-      const d = await res.json();
-      if (d.error) throw new Error(d.error);
-      setWarmupAccounts(d.accounts || []);
-    } catch (e) { setError(String(e)); }
-    setWarmupLoading(false);
-  }, []);
-
-  const openWarmup = () => { setView("warmup"); fetchWarmup(); };
-
-  const updateAccountWarmup = async (accountId: number, settings: {
-    warmup_enabled?: boolean;
-    total_warmup_per_day?: number;
-    daily_rampup?: number;
-    reply_rate_percentage?: number;
-    auto_adjust_warmup?: boolean;
-    is_rampup_enabled?: boolean;
-  }) => {
-    setWarmupSaving(accountId); setError(null);
-    try {
-      const res = await fetch("/api/sequences/warmup", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email_account_id: accountId, settings }),
-      });
-      const d = await res.json();
-      if (d.error) throw new Error(d.error);
-      flash("Warmup mis à jour");
-      await fetchWarmup();
-    } catch (e) { setError(String(e)); }
-    setWarmupSaving(null);
-  };
-
   // ─── Save settings ─────────────────────────────────────
 
   const saveSettings = async () => {
@@ -415,14 +346,9 @@ export default function SequencesPage() {
               <p className="text-sm text-gray-500">{campaigns.length} campagne{campaigns.length !== 1 ? "s" : ""} Smartlead</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button onClick={openWarmup} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 cursor-pointer">
-              <Flame className="w-4 h-4" /> Warmup
-            </button>
-            <button onClick={() => setShowCreate(true)} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 cursor-pointer">
-              <Plus className="w-4 h-4" /> Nouvelle campagne
-            </button>
-          </div>
+          <button onClick={() => setShowCreate(true)} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 cursor-pointer">
+            <Plus className="w-4 h-4" /> Nouvelle campagne
+          </button>
         </div>
 
         <MsgBanner />
@@ -471,284 +397,6 @@ export default function SequencesPage() {
                 <button onClick={createCampaign} disabled={creating || !newName.trim()} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-violet-600 rounded-lg disabled:opacity-50 cursor-pointer">
                   {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />} Créer
                 </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </>
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════
-  // WARMUP VIEW
-  // ═══════════════════════════════════════════════════════
-  if (view === "warmup") {
-    // Warmup ramp recommendations based on account age/provider
-    const getAccountProfile = (acc: WarmupAccountData) => {
-      const email = acc.from_email.toLowerCase();
-      const isGoogle = email.endsWith("@metagora.tech");
-      const isHostinger = email.endsWith("@metagora-tech.fr");
-      const totalSent = acc.warmup_stats?.total_sent || acc.warmup_details?.total_sent_count || 0;
-      const rep = acc.warmup_stats?.reputation_score || 0;
-      const spamRate = acc.warmup_stats ? (acc.warmup_stats.spam_count / Math.max(acc.warmup_stats.total_sent, 1)) * 100 : 0;
-
-      // Determine maturity
-      let maturity: "new" | "warming" | "warm" | "mature" = "new";
-      if (totalSent > 500 && rep >= 80) maturity = "mature";
-      else if (totalSent > 200 && rep >= 60) maturity = "warm";
-      else if (totalSent > 50) maturity = "warming";
-
-      // Recommended daily volume per week
-      const ramp: Record<string, { label: string; daily: number }[]> = {
-        new: [
-          { label: "Semaine 1", daily: isGoogle ? 10 : 5 },
-          { label: "Semaine 2", daily: isGoogle ? 15 : 10 },
-          { label: "Semaine 3", daily: isGoogle ? 25 : 15 },
-          { label: "Semaine 4", daily: isGoogle ? 35 : 25 },
-          { label: "Semaine 5+", daily: isGoogle ? 50 : 35 },
-        ],
-        warming: [
-          { label: "Semaine 1", daily: isGoogle ? 15 : 10 },
-          { label: "Semaine 2", daily: isGoogle ? 25 : 15 },
-          { label: "Semaine 3", daily: isGoogle ? 35 : 25 },
-          { label: "Semaine 4+", daily: isGoogle ? 50 : 40 },
-        ],
-        warm: [
-          { label: "Actuel", daily: isGoogle ? 40 : 30 },
-          { label: "Cible", daily: isGoogle ? 60 : 45 },
-        ],
-        mature: [
-          { label: "Actuel", daily: isGoogle ? 60 : 40 },
-          { label: "Max recommandé", daily: isGoogle ? 80 : 50 },
-        ],
-      };
-
-      // Health score (0-100)
-      let health = 50;
-      if (rep > 0) health = rep;
-      if (spamRate > 5) health = Math.max(0, health - 30);
-      else if (spamRate > 2) health = Math.max(0, health - 15);
-      if (!acc.is_smtp_success) health = 0;
-
-      const healthColor = health >= 80 ? "text-green-600" : health >= 50 ? "text-yellow-600" : "text-red-600";
-      const healthBg = health >= 80 ? "bg-green-100" : health >= 50 ? "bg-yellow-100" : "bg-red-100";
-      const healthLabel = health >= 80 ? "Excellent" : health >= 50 ? "Moyen" : "Critique";
-
-      return { isGoogle, isHostinger, totalSent, rep, spamRate, maturity, ramp: ramp[maturity], health, healthColor, healthBg, healthLabel };
-    };
-
-    return (
-      <>
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-6">
-          <button onClick={() => { setView("list"); }} className="p-1.5 text-gray-400 hover:text-gray-600 cursor-pointer">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-orange-100 rounded-xl flex items-center justify-center">
-              <Flame className="w-5 h-5 text-orange-600" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">Analyse Warmup</h1>
-              <p className="text-sm text-gray-500">Réputation et santé de vos comptes email</p>
-            </div>
-          </div>
-        </div>
-
-        <MsgBanner />
-
-        {/* Best practices banner */}
-        <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-4">
-          <h3 className="text-xs font-semibold text-amber-800 flex items-center gap-1.5 mb-2">
-            <Info className="w-3.5 h-3.5" /> Bonnes pratiques warmup
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px] text-amber-700">
-            <div className="space-y-1">
-              <p><b>Rampe progressive :</b> Commencez à 5-10/jour, augmentez de 5/jour chaque semaine</p>
-              <p><b>Ratio spam :</b> Rester sous 2% (idéal &lt;1%). Au-dessus de 5% = action urgente</p>
-              <p><b>Taux de réponse warmup :</b> Viser 25-30% pour bâtir la réputation</p>
-            </div>
-            <div className="space-y-1">
-              <p><b>Google Workspace :</b> Limite technique 2000/jour, max recommandé 80/jour en cold email</p>
-              <p><b>Hostinger :</b> Plus risqué, plafonner à 40-50/jour max, surveiller le spam de près</p>
-              <p><b>Intervalle :</b> Minimum 3-5 min entre chaque envoi (Smartlead gère automatiquement)</p>
-            </div>
-          </div>
-        </div>
-
-        {warmupLoading ? (
-          <div className="flex justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-orange-400" /></div>
-        ) : warmupAccounts.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-            <Flame className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-            <p className="text-lg font-medium text-gray-600">Aucun compte email trouvé</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {warmupAccounts.map((acc) => {
-              const p = getAccountProfile(acc);
-              const ds = acc.warmup_stats?.daily_stats || [];
-              const maxSent = Math.max(...ds.map((d) => d.sent), 1);
-
-              return (
-                <div key={acc.id} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                  {/* Account header */}
-                  <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
-                    <div className={cn("w-10 h-10 rounded-full flex items-center justify-center", p.healthBg)}>
-                      <ShieldCheck className={cn("w-5 h-5", p.healthColor)} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-semibold text-gray-900">{acc.from_email}</p>
-                        <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded", p.healthBg, p.healthColor)}>{p.health}/100 — {p.healthLabel}</span>
-                        <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{p.isGoogle ? "Google Workspace" : p.isHostinger ? "Hostinger" : acc.type}</span>
-                      </div>
-                      <p className="text-[10px] text-gray-400">{acc.from_name} • SMTP: {acc.is_smtp_success ? "✅" : "❌"} • {acc.message_per_day || "?"} mails/jour configurés • Envoyés auj: {acc.daily_sent_count || 0}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-[10px] text-gray-400">Warmup: <span className="font-medium">{acc.warmup_details?.status || "Inconnu"}</span></p>
-                      <p className="text-[10px] text-gray-400">Réputation: <span className="font-medium">{acc.warmup_details?.warmup_reputation || "N/A"}</span></p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-0 lg:divide-x divide-gray-100">
-                    {/* Stats summary */}
-                    <div className="p-4">
-                      <h4 className="text-[10px] font-semibold text-gray-500 uppercase mb-2 flex items-center gap-1">
-                        <BarChart3 className="w-3 h-3" /> Statistiques warmup
-                      </h4>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="bg-blue-50 rounded-lg p-2 text-center">
-                          <p className="text-lg font-bold text-blue-700">{p.totalSent}</p>
-                          <p className="text-[9px] text-blue-500">Total envoyés</p>
-                        </div>
-                        <div className={cn("rounded-lg p-2 text-center", p.spamRate > 2 ? "bg-red-50" : "bg-green-50")}>
-                          <p className={cn("text-lg font-bold", p.spamRate > 2 ? "text-red-700" : "text-green-700")}>{p.spamRate.toFixed(1)}%</p>
-                          <p className={cn("text-[9px]", p.spamRate > 2 ? "text-red-500" : "text-green-500")}>Taux spam</p>
-                        </div>
-                        <div className="bg-indigo-50 rounded-lg p-2 text-center">
-                          <p className="text-lg font-bold text-indigo-700">{p.rep || "—"}</p>
-                          <p className="text-[9px] text-indigo-500">Score réputation</p>
-                        </div>
-                        <div className="bg-gray-50 rounded-lg p-2 text-center">
-                          <p className="text-lg font-bold text-gray-700 capitalize">{p.maturity === "new" ? "Nouveau" : p.maturity === "warming" ? "En warmup" : p.maturity === "warm" ? "Chaud" : "Mature"}</p>
-                          <p className="text-[9px] text-gray-500">Maturité</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* 7-day chart */}
-                    <div className="p-4">
-                      <h4 className="text-[10px] font-semibold text-gray-500 uppercase mb-2 flex items-center gap-1">
-                        <Activity className="w-3 h-3" /> 7 derniers jours
-                      </h4>
-                      {ds.length === 0 ? (
-                        <p className="text-xs text-gray-400 text-center py-6">Pas de données warmup</p>
-                      ) : (
-                        <div className="space-y-1">
-                          {ds.map((d) => (
-                            <div key={d.date} className="flex items-center gap-2 text-[10px]">
-                              <span className="text-gray-400 w-16 shrink-0">{new Date(d.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</span>
-                              <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden flex">
-                                <div className="h-full bg-blue-400 rounded-l-full" style={{ width: `${(d.delivered / maxSent) * 100}%` }} title={`${d.delivered} livrés`} />
-                                {d.spam > 0 && <div className="h-full bg-red-400" style={{ width: `${(d.spam / maxSent) * 100}%` }} title={`${d.spam} spam`} />}
-                              </div>
-                              <span className="text-gray-600 w-8 text-right font-medium">{d.sent}</span>
-                              {d.spam > 0 && <span className="text-red-500 text-[9px]">({d.spam} spam)</span>}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Recommended ramp */}
-                    <div className="p-4">
-                      <h4 className="text-[10px] font-semibold text-gray-500 uppercase mb-2 flex items-center gap-1">
-                        <TrendingUp className="w-3 h-3" /> Rampe recommandée
-                      </h4>
-                      <div className="space-y-1.5">
-                        {p.ramp.map((r, i) => (
-                          <div key={i} className="flex items-center justify-between text-xs">
-                            <span className="text-gray-500">{r.label}</span>
-                            <span className="font-semibold text-gray-800">{r.daily} mails/jour</span>
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Quick actions */}
-                      <div className="mt-3 pt-3 border-t border-gray-100 space-y-1.5">
-                        <button
-                          onClick={() => updateAccountWarmup(acc.id, {
-                            warmup_enabled: true,
-                            total_warmup_per_day: p.ramp[0].daily,
-                            daily_rampup: 5,
-                            reply_rate_percentage: 30,
-                            auto_adjust_warmup: true,
-                            is_rampup_enabled: true,
-                          })}
-                          disabled={warmupSaving === acc.id}
-                          className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-[10px] font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 disabled:opacity-50 cursor-pointer"
-                        >
-                          {warmupSaving === acc.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Flame className="w-3 h-3" />}
-                          Activer warmup ({p.ramp[0].daily}/jour + rampe auto)
-                        </button>
-                        {acc.warmup_details?.status === "ENABLED" && (
-                          <button
-                            onClick={() => updateAccountWarmup(acc.id, { warmup_enabled: false })}
-                            disabled={warmupSaving === acc.id}
-                            className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-[10px] font-medium text-gray-500 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 disabled:opacity-50 cursor-pointer"
-                          >
-                            <Square className="w-3 h-3" /> Désactiver warmup
-                          </button>
-                        )}
-                      </div>
-
-                      {/* Alerts */}
-                      {p.spamRate > 2 && (
-                        <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-lg text-[10px] text-red-700 flex items-center gap-1.5">
-                          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                          <span>Taux spam élevé ({p.spamRate.toFixed(1)}%) — réduisez le volume, vérifiez SPF/DKIM/DMARC</span>
-                        </div>
-                      )}
-                      {acc.daily_sent_count && p.ramp[0] && acc.daily_sent_count > p.ramp[0].daily * 1.5 && (
-                        <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded-lg text-[10px] text-yellow-700 flex items-center gap-1.5">
-                          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                          <span>Volume actuel ({acc.daily_sent_count}/jour) dépasse la recommandation ({p.ramp[0].daily}/jour)</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* Global recommendations */}
-            <div className="bg-white rounded-lg border border-gray-200 p-4">
-              <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2 mb-3">
-                <Shield className="w-4 h-4 text-blue-500" /> Recommandations pour vos comptes
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-gray-600">
-                {warmupAccounts.filter((a) => a.from_email.endsWith("@metagora.tech")).length > 0 && (
-                  <div className="bg-blue-50 rounded-lg p-3">
-                    <p className="font-semibold text-blue-800 mb-1">Google Workspace (@metagora.tech)</p>
-                    <ul className="space-y-0.5 text-blue-700">
-                      <li>• tony@metagora.tech (2 ans) : peut monter à 50-80/jour progressivement</li>
-                      <li>• anna.i@metagora.tech (nouveau) : commencer à 10/jour, augmenter de 5/semaine</li>
-                      <li>• Activez le warmup Smartlead sur tous les comptes neufs</li>
-                    </ul>
-                  </div>
-                )}
-                {warmupAccounts.filter((a) => a.from_email.endsWith("@metagora-tech.fr")).length > 0 && (
-                  <div className="bg-orange-50 rounded-lg p-3">
-                    <p className="font-semibold text-orange-800 mb-1">Hostinger (@metagora-tech.fr)</p>
-                    <ul className="space-y-0.5 text-orange-700">
-                      <li>• Réputation plus fragile que Google — soyez conservateur</li>
-                      <li>• tony@metagora-tech.fr (nouveau) : 5/jour semaine 1, max 40/jour à terme</li>
-                      <li>• anna.i@metagora-tech.fr (~10 envois) : 10/jour max pour le moment</li>
-                      <li>• Vérifiez que SPF, DKIM et DMARC sont correctement configurés</li>
-                    </ul>
-                  </div>
-                )}
               </div>
             </div>
           </div>
