@@ -3,9 +3,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Mail, Plus, Loader2, Send, Pause, Square, Users,
-  ChevronRight, Eye, Upload, Play, X, Check, FileUp,
+  ChevronRight, ChevronLeft, Eye, Upload, Play, X, Check, FileUp,
   ArrowLeft, Clock, MousePointerClick, Reply, AlertTriangle,
-  Settings2, CheckSquare, SquareIcon, Zap, Shield, MessageSquare, Sparkles, Save,
+  Settings2, CheckSquare, SquareIcon, Zap, Shield, MessageSquare, Sparkles, Save, UserCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -232,6 +232,12 @@ export default function SequencesPage() {
   const [aiGenLoading, setAiGenLoading] = useState(false);
   const [aiContext, setAiContext] = useState({ leadOrigin: "", leadProfile: "", campaignGoal: "", tone: "professionnel mais chaleureux, tutoiement" });
   const [aiEmails, setAiEmails] = useState<{ seq_number: number; delay_days: number; subject: string; body: string }[]>([]);
+
+  // Wizard
+  type WizardStep = 1 | 2 | 3 | 4;
+  const [wizardStep, setWizardStep] = useState<WizardStep>(1);
+  const [previewLeadIdx, setPreviewLeadIdx] = useState(0);
+  const [forceAdvancedView, setForceAdvancedView] = useState(false);
 
   // ─── Data fetching ──────────────────────────────────────
 
@@ -520,11 +526,413 @@ export default function SequencesPage() {
   const totalLeads = Number(leadsResp?.total_leads || 0);
   const assignedIds = new Set(campaignAccounts.map((a) => a.id));
 
+  // Wizard: show for DRAFTED campaigns
+  const isDrafted = campaign?.status === "DRAFTED";
+  const wizardReady = {
+    email: campaignAccounts.length > 0,
+    leads: totalLeads > 0,
+    sequences: sequences.length > 0,
+  };
+
+  // Helper: replace Smartlead variables with lead data for preview
+  const previewSubstitute = (text: string, lead?: { first_name: string; last_name: string; email: string; company_name: string | null }) => {
+    if (!lead) return text;
+    return text
+      .replace(/\{\{first_name\}\}/gi, lead.first_name || "")
+      .replace(/\{\{last_name\}\}/gi, lead.last_name || "")
+      .replace(/\{\{email\}\}/gi, lead.email || "")
+      .replace(/\{\{company_name\}\}/gi, lead.company_name || "")
+      .replace(/\{\{company\}\}/gi, lead.company_name || "");
+  };
+
+  // ─── WIZARD VIEW (for DRAFTED campaigns) ──────────────
+  if (isDrafted && !detailLoading && !forceAdvancedView) {
+    const STEPS = [
+      { num: 1 as WizardStep, label: "Compte email", icon: Mail, done: wizardReady.email },
+      { num: 2 as WizardStep, label: "Ajouter leads", icon: Users, done: wizardReady.leads },
+      { num: 3 as WizardStep, label: "Séquence IA", icon: Sparkles, done: wizardReady.sequences },
+      { num: 4 as WizardStep, label: "Preview & Lancer", icon: Eye, done: false },
+    ];
+
+    const previewLead = leads[previewLeadIdx]?.lead;
+
+    return (
+      <>
+        {/* Header */}
+        <div className="flex items-center gap-3 mb-4">
+          <button onClick={() => { setView("list"); setCampaign(null); fetchCampaigns(); setWizardStep(1); }} className="p-1.5 text-gray-400 hover:text-gray-600 cursor-pointer">
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-bold text-gray-900 truncate">{campaign?.name || "Campagne"}</h1>
+              {statusBadge(campaign.status)}
+            </div>
+            <p className="text-xs text-gray-400">Configuration de la campagne — Étape {wizardStep}/4</p>
+          </div>
+          <button onClick={() => { setForceAdvancedView(true); setDetailTab("overview"); }} className="text-[10px] text-gray-400 underline cursor-pointer">
+            Vue avancée →
+          </button>
+        </div>
+
+        <MsgBanner />
+
+        {/* Stepper */}
+        <div className="flex items-center gap-0 mb-6 bg-white rounded-xl border border-gray-200 p-3">
+          {STEPS.map((s, i) => (
+            <div key={s.num} className="flex items-center flex-1">
+              <button onClick={() => setWizardStep(s.num)}
+                className={cn("flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer w-full",
+                  wizardStep === s.num ? "bg-violet-100 text-violet-700 ring-1 ring-violet-300" :
+                  s.done ? "bg-green-50 text-green-700" : "bg-gray-50 text-gray-400 hover:bg-gray-100")}>
+                <div className={cn("w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0",
+                  wizardStep === s.num ? "bg-violet-600 text-white" : s.done ? "bg-green-500 text-white" : "bg-gray-300 text-white")}>
+                  {s.done && wizardStep !== s.num ? <Check className="w-3.5 h-3.5" /> : s.num}
+                </div>
+                <span className="truncate">{s.label}</span>
+              </button>
+              {i < STEPS.length - 1 && <ChevronRight className="w-4 h-4 text-gray-300 shrink-0 mx-1" />}
+            </div>
+          ))}
+        </div>
+
+        {/* ─── Step 1: Select email account ─── */}
+        {wizardStep === 1 && (
+          <div className="space-y-4">
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2 mb-1">
+                <Mail className="w-4 h-4 text-violet-500" /> Choisissez le compte d&apos;envoi
+              </h3>
+              <p className="text-[10px] text-gray-400 mb-4">Sélectionnez un ou plusieurs comptes email pour envoyer cette campagne. Les emails seront distribués en rotation.</p>
+              <div className="space-y-2">
+                {allAccounts.length === 0 ? (
+                  <p className="text-xs text-gray-400 text-center py-6">Aucun compte email configuré. Ajoutez-en un dans <a href="/sequences/warmup" className="text-violet-600 underline">Warmup</a>.</p>
+                ) : allAccounts.map((a) => {
+                  const assigned = assignedIds.has(a.id);
+                  const ok = a.is_smtp_success;
+                  return (
+                    <button key={a.id} onClick={() => toggleAccount(a.id)} disabled={actionLoading || !ok}
+                      className={cn("w-full flex items-center gap-3 p-4 rounded-lg border transition-all text-left cursor-pointer",
+                        assigned ? "border-violet-400 bg-violet-50 ring-1 ring-violet-300" :
+                        ok ? "border-gray-200 bg-white hover:border-violet-300 hover:shadow-sm" :
+                        "border-gray-200 bg-gray-50 opacity-50 cursor-not-allowed")}>
+                      <div className={cn("w-8 h-8 rounded-full flex items-center justify-center shrink-0",
+                        assigned ? "bg-violet-600" : "bg-gray-200")}>
+                        {assigned ? <Check className="w-4 h-4 text-white" /> : <UserCircle className="w-4 h-4 text-gray-400" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-800">{a.from_email}</p>
+                        <p className="text-[10px] text-gray-400">{a.from_name} • {a.type} • SMTP: {ok ? "✅" : "❌"} • {a.message_per_day || "?"} mails/jour</p>
+                        {a.warmup_details && <p className="text-[10px] text-gray-400">Warmup: {a.warmup_details.status} • Réputation: {a.warmup_details.warmup_reputation}</p>}
+                      </div>
+                      {assigned && <span className="text-[10px] font-medium text-violet-600 bg-violet-100 px-2 py-1 rounded">Sélectionné</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <button onClick={() => setWizardStep(2)} disabled={!wizardReady.email}
+                className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-40 cursor-pointer">
+                Suivant <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ─── Step 2: Import leads ─── */}
+        {wizardStep === 2 && (
+          <div className="space-y-4">
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2 mb-1">
+                <Users className="w-4 h-4 text-violet-500" /> Ajoutez vos leads
+              </h3>
+              <p className="text-[10px] text-gray-400 mb-4">Importez un fichier CSV ou collez directement vos contacts. La colonne Email est détectée automatiquement.</p>
+
+              {totalLeads > 0 && (
+                <div className="mb-4 px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-xs text-green-700 flex items-center gap-2">
+                  <Check className="w-3.5 h-3.5" /> {totalLeads} lead(s) déjà importé(s)
+                </div>
+              )}
+
+              <div className="flex items-center gap-3 mb-3">
+                <button onClick={() => fileRef.current?.click()} className="flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 cursor-pointer">
+                  <FileUp className="w-4 h-4" /> Charger un fichier CSV
+                </button>
+                <input ref={fileRef} type="file" accept=".csv,.txt,.tsv" onChange={handleFileUpload} className="hidden" />
+                <span className="text-[10px] text-gray-400">ou collez directement ci-dessous</span>
+              </div>
+
+              <textarea value={importText} onChange={(e) => setImportText(e.target.value)} rows={5}
+                placeholder={"Prénom;Nom;Email;Téléphone;Poste;Entreprise\nJohn;Doe;john@acme.com;0601020304;CEO;Acme Corp"}
+                className="w-full px-3 py-2 text-xs font-mono border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 outline-none resize-none" />
+
+              {importPreview.length > 0 && (
+                <div className="mt-3 border border-gray-200 rounded-lg overflow-hidden">
+                  <div className="px-3 py-1.5 bg-gray-50 text-[10px] font-medium text-gray-500">Aperçu : {importPreview.length} lead(s) valide(s)</div>
+                  <table className="w-full text-[10px]">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="text-left px-2 py-1">Email</th>
+                        <th className="text-left px-2 py-1">Prénom</th>
+                        <th className="text-left px-2 py-1">Nom</th>
+                        <th className="text-left px-2 py-1">Entreprise</th>
+                        <th className="text-left px-2 py-1">Poste</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importPreview.slice(0, 8).map((l, i) => (
+                        <tr key={i} className="border-t border-gray-100">
+                          <td className="px-2 py-1 font-mono">{l.email}</td>
+                          <td className="px-2 py-1">{l.first_name}</td>
+                          <td className="px-2 py-1">{l.last_name}</td>
+                          <td className="px-2 py-1">{l.company_name}</td>
+                          <td className="px-2 py-1 text-gray-400">{l.custom_fields?.title || ""}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {importPreview.length > 8 && <div className="px-2 py-1 text-[9px] text-gray-400">+{importPreview.length - 8} de plus...</div>}
+                </div>
+              )}
+
+              {importPreview.length > 0 && (
+                <button onClick={submitImport} disabled={actionLoading}
+                  className="mt-3 flex items-center gap-2 px-4 py-2 text-xs font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 cursor-pointer">
+                  {actionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                  Importer {importPreview.length} lead(s)
+                </button>
+              )}
+            </div>
+
+            <div className="flex justify-between">
+              <button onClick={() => setWizardStep(1)} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">
+                <ChevronLeft className="w-4 h-4" /> Retour
+              </button>
+              <button onClick={() => setWizardStep(3)} disabled={!wizardReady.leads}
+                className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-40 cursor-pointer">
+                Suivant <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ─── Step 3: Generate sequence ─── */}
+        {wizardStep === 3 && (
+          <div className="space-y-4">
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2 mb-1">
+                <Sparkles className="w-4 h-4 text-violet-500" /> Générez votre séquence email
+              </h3>
+              <p className="text-[10px] text-gray-400 mb-4">L&apos;IA génère 3 emails de prospection en appliquant les bonnes pratiques du cold emailing. Elle analyse aussi vos campagnes existantes.</p>
+
+              {sequences.length > 0 && (
+                <div className="mb-4 px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-xs text-green-700 flex items-center gap-2">
+                  <Check className="w-3.5 h-3.5" /> {sequences.length} email(s) déjà configuré(s) — vous pouvez régénérer ou passer à la suite.
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-semibold text-gray-600">Origine des leads</label>
+                    <input value={aiContext.leadOrigin} onChange={(e) => setAiContext({ ...aiContext, leadOrigin: e.target.value })}
+                      placeholder="Ex: Salon Learning Days, scraping LinkedIn..."
+                      className="w-full mt-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-semibold text-gray-600">Profil des leads (qui sont-ils ?)</label>
+                    <input value={aiContext.leadProfile} onChange={(e) => setAiContext({ ...aiContext, leadProfile: e.target.value })}
+                      placeholder="Ex: Responsables formation retail/luxe, 500+ salariés"
+                      className="w-full mt-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 outline-none" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-600">But de la campagne *</label>
+                  <textarea value={aiContext.campaignGoal} onChange={(e) => setAiContext({ ...aiContext, campaignGoal: e.target.value })} rows={2}
+                    placeholder="Ex: Obtenir un RDV de démo pour présenter Simsell (formation immersive IA)"
+                    className="w-full mt-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 outline-none resize-none" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-600">Ton</label>
+                  <input value={aiContext.tone} onChange={(e) => setAiContext({ ...aiContext, tone: e.target.value })}
+                    className="w-full mt-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 outline-none" />
+                </div>
+                <button onClick={generateAiEmails} disabled={aiGenLoading || !aiContext.campaignGoal.trim()}
+                  className="flex items-center gap-2 px-4 py-2 text-xs font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 cursor-pointer">
+                  {aiGenLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                  {aiGenLoading ? "Génération en cours (10-15s)..." : sequences.length > 0 ? "Régénérer les emails" : "Générer 3 emails"}
+                </button>
+              </div>
+
+              {/* AI preview */}
+              {aiEmails.length > 0 && (
+                <div className="mt-4 space-y-2 pt-3 border-t border-gray-200">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold text-violet-700">Aperçu des emails générés</p>
+                    <button onClick={saveAiEmails} disabled={actionLoading}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50 cursor-pointer">
+                      {actionLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                      Sauvegarder dans Smartlead
+                    </button>
+                  </div>
+                  {aiEmails.map((e) => (
+                    <div key={e.seq_number} className="bg-gray-50 rounded-lg border border-gray-100 p-3">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[10px] font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded">Email {e.seq_number}</span>
+                        <span className="text-[10px] text-gray-400">{e.delay_days === 0 ? "J0" : `+${e.delay_days}j`}</span>
+                      </div>
+                      <p className="text-xs font-semibold text-gray-800 mb-1">Sujet : {e.subject}</p>
+                      <div className="text-[11px] text-gray-700 whitespace-pre-line">{e.body}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Existing sequences */}
+              {sequences.length > 0 && aiEmails.length === 0 && (
+                <div className="mt-4 pt-3 border-t border-gray-200 space-y-2">
+                  <p className="text-xs font-semibold text-gray-700">Séquence actuelle</p>
+                  {sequences.map((seq) => (
+                    <div key={seq.seq_number} className="bg-gray-50 rounded-lg border border-gray-100 p-3">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[10px] font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded">Email {seq.seq_number}</span>
+                        <span className="text-[10px] text-gray-400">{seq.seq_delay_details?.delay_in_days ? `+${seq.seq_delay_details.delay_in_days}j` : "J0"}</span>
+                      </div>
+                      <p className="text-xs font-semibold text-gray-800 mb-1">Sujet : {seq.subject}</p>
+                      <div className="text-[11px] text-gray-700 max-h-20 overflow-y-auto" dangerouslySetInnerHTML={{ __html: seq.email_body || "" }} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-between">
+              <button onClick={() => setWizardStep(2)} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">
+                <ChevronLeft className="w-4 h-4" /> Retour
+              </button>
+              <button onClick={() => { setWizardStep(4); setPreviewLeadIdx(0); }} disabled={!wizardReady.sequences}
+                className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-40 cursor-pointer">
+                Preview & Lancer <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ─── Step 4: Preview & Launch ─── */}
+        {wizardStep === 4 && (
+          <div className="space-y-4">
+            {/* Recap */}
+            <div className="bg-white rounded-xl border border-gray-200 p-4">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">📋 Récapitulatif</h3>
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div className="bg-violet-50 rounded-lg p-3">
+                  <Mail className="w-5 h-5 mx-auto mb-1 text-violet-500" />
+                  <p className="text-lg font-bold text-gray-900">{campaignAccounts.length}</p>
+                  <p className="text-[10px] text-gray-500">Compte(s) email</p>
+                  <p className="text-[9px] text-gray-400 truncate">{campaignAccounts.map((a) => a.from_email).join(", ")}</p>
+                </div>
+                <div className="bg-violet-50 rounded-lg p-3">
+                  <Users className="w-5 h-5 mx-auto mb-1 text-violet-500" />
+                  <p className="text-lg font-bold text-gray-900">{totalLeads}</p>
+                  <p className="text-[10px] text-gray-500">Lead(s)</p>
+                </div>
+                <div className="bg-violet-50 rounded-lg p-3">
+                  <Clock className="w-5 h-5 mx-auto mb-1 text-violet-500" />
+                  <p className="text-lg font-bold text-gray-900">{sequences.length}</p>
+                  <p className="text-[10px] text-gray-500">Email(s) dans la séquence</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Preview per lead */}
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                  <Eye className="w-4 h-4 text-violet-500" /> Preview par lead
+                </h3>
+                {leads.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setPreviewLeadIdx(Math.max(0, previewLeadIdx - 1))} disabled={previewLeadIdx === 0}
+                      className="p-1 text-gray-400 hover:text-gray-600 disabled:opacity-30 cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>
+                    <span className="text-xs text-gray-500">Lead {previewLeadIdx + 1} / {leads.length}</span>
+                    <button onClick={() => setPreviewLeadIdx(Math.min(leads.length - 1, previewLeadIdx + 1))} disabled={previewLeadIdx >= leads.length - 1}
+                      className="p-1 text-gray-400 hover:text-gray-600 disabled:opacity-30 cursor-pointer"><ChevronRight className="w-4 h-4" /></button>
+                  </div>
+                )}
+              </div>
+
+              {previewLead ? (
+                <div className="space-y-3">
+                  {/* Lead info */}
+                  <div className="flex items-center gap-3 px-3 py-2 bg-gray-50 rounded-lg">
+                    <UserCircle className="w-8 h-8 text-gray-400 shrink-0" />
+                    <div>
+                      <p className="text-xs font-medium text-gray-800">{previewLead.first_name} {previewLead.last_name}</p>
+                      <p className="text-[10px] text-gray-400">{previewLead.email} • {previewLead.company_name || "—"}</p>
+                    </div>
+                  </div>
+
+                  {/* Each email preview */}
+                  {sequences.map((seq) => (
+                    <div key={seq.seq_number} className="border border-gray-200 rounded-lg overflow-hidden">
+                      <div className="px-3 py-2 bg-gray-50 border-b border-gray-200 flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded">Email {seq.seq_number}</span>
+                        <span className="text-[10px] text-gray-400">{seq.seq_delay_details?.delay_in_days ? `+${seq.seq_delay_details.delay_in_days} jour(s)` : "J0"}</span>
+                      </div>
+                      <div className="p-3 space-y-1.5">
+                        <div className="flex items-center gap-2 text-[10px] text-gray-500">
+                          <span className="font-medium">De :</span>
+                          <span>{campaignAccounts[0]?.from_email || "—"}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[10px] text-gray-500">
+                          <span className="font-medium">À :</span>
+                          <span className="font-mono">{previewLead.email}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-gray-800">
+                          <span className="font-medium text-[10px] text-gray-500">Sujet :</span>
+                          <span className="font-semibold">{previewSubstitute(seq.subject, previewLead)}</span>
+                        </div>
+                        <div className="mt-2 p-3 bg-white border border-gray-100 rounded-lg text-xs text-gray-700 whitespace-pre-line"
+                          dangerouslySetInnerHTML={{ __html: previewSubstitute(seq.email_body || "", previewLead) }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 text-center py-6">Aucun lead importé. Retournez à l&apos;étape 2 pour en ajouter.</p>
+              )}
+            </div>
+
+            {/* Navigation + Launch */}
+            <div className="flex justify-between items-center">
+              <button onClick={() => setWizardStep(3)} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">
+                <ChevronLeft className="w-4 h-4" /> Retour
+              </button>
+              <div className="flex items-center gap-3">
+                <div className="text-right text-[10px] text-gray-400">
+                  <p>{campaignAccounts.length} compte(s) • {totalLeads} lead(s) • {sequences.length} email(s)</p>
+                  <p>Max {campaign.max_leads_per_day || 10} leads/jour</p>
+                </div>
+                <button onClick={() => doAction("set-status", { status: "START" })} disabled={actionLoading || !wizardReady.email || !wizardReady.leads || !wizardReady.sequences}
+                  className="flex items-center gap-2 px-6 py-3 text-sm font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-40 shadow-lg cursor-pointer">
+                  {actionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                  Lancer la campagne
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
+
   return (
     <>
       {/* Header */}
       <div className="flex items-center gap-3 mb-4">
-        <button onClick={() => { setView("list"); setCampaign(null); fetchCampaigns(); }} className="p-1.5 text-gray-400 hover:text-gray-600 cursor-pointer">
+        <button onClick={() => { setView("list"); setCampaign(null); fetchCampaigns(); setForceAdvancedView(false); setWizardStep(1); }} className="p-1.5 text-gray-400 hover:text-gray-600 cursor-pointer">
           <ArrowLeft className="w-5 h-5" />
         </button>
         <div className="flex-1 min-w-0">
@@ -535,6 +943,11 @@ export default function SequencesPage() {
           <p className="text-xs text-gray-400">ID {selectedId} • {campaignAccounts.length} compte(s) email</p>
         </div>
         <div className="flex items-center gap-1.5">
+          {isDrafted && forceAdvancedView && (
+            <button onClick={() => setForceAdvancedView(false)} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100 cursor-pointer">
+              <Sparkles className="w-3.5 h-3.5" /> Assistant
+            </button>
+          )}
           <button onClick={() => doAction("set-status", { status: "START" })} disabled={actionLoading}
             className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50 cursor-pointer">
             <Play className="w-3.5 h-3.5" /> Lancer
