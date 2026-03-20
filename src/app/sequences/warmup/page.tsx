@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Flame, Loader2, Plus, X, Check, AlertTriangle, ShieldCheck,
   TrendingUp, Activity, BarChart3, Info, Shield, Square, Mail,
-  Eye, EyeOff,
+  Eye, EyeOff, Globe, Lock, RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -60,7 +60,7 @@ function getAccountProfile(acc: WarmupAccountData) {
   const isHostinger = email.endsWith("@metagora-tech.fr");
   const totalSent = acc.warmup_stats?.total_sent || acc.warmup_details?.total_sent_count || 0;
   const rep = acc.warmup_stats?.reputation_score || 0;
-  const spamRate = acc.warmup_stats ? (acc.warmup_stats.spam_count / Math.max(acc.warmup_stats.total_sent, 1)) * 100 : 0;
+  const spamRate = (acc.warmup_stats && acc.warmup_stats.total_sent > 0) ? (acc.warmup_stats.spam_count / acc.warmup_stats.total_sent) * 100 : 0;
 
   let maturity: "new" | "warming" | "warm" | "mature" = "new";
   if (totalSent > 500 && rep >= 80) maturity = "mature";
@@ -99,6 +99,18 @@ function getAccountProfile(acc: WarmupAccountData) {
     currentWeek, dailyTarget, weeklyTarget, weeklySent, avgDaily,
     health, healthColor, healthBg, healthLabel,
   };
+}
+
+// ─── Domain health check types ──────────────────────────
+
+interface DomainCheck {
+  domain: string;
+  spf: { found: boolean; record: string | null; valid: boolean; issue: string | null };
+  dkim: { found: boolean; record: string | null; selector: string };
+  dmarc: { found: boolean; record: string | null; policy: string | null; issue: string | null };
+  mx: { found: boolean; records: string[] };
+  score: number;
+  recommendations: string[];
 }
 
 // ─── Presets for providers ──────────────────────────────
@@ -140,7 +152,50 @@ export default function WarmupPage() {
   const [addSaving, setAddSaving] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
+  // Domain health check
+  const [domainChecks, setDomainChecks] = useState<Record<string, DomainCheck>>({});
+  const [domainLoading, setDomainLoading] = useState<string | null>(null);
+
   const flash = (msg: string) => { setActionMsg(msg); setTimeout(() => setActionMsg(null), 3500); };
+
+  const checkDomain = async (domain: string) => {
+    if (domainChecks[domain] && !domainLoading) return; // already checked
+    setDomainLoading(domain);
+    try {
+      const res = await fetch(`/api/sequences/domain-check?domain=${encodeURIComponent(domain)}`);
+      const d = await res.json();
+      if (!d.error) setDomainChecks((prev) => ({ ...prev, [domain]: d }));
+    } catch { /* ignore */ }
+    setDomainLoading(null);
+  };
+
+  const refreshDomain = async (domain: string) => {
+    setDomainLoading(domain);
+    try {
+      const res = await fetch(`/api/sequences/domain-check?domain=${encodeURIComponent(domain)}`);
+      const d = await res.json();
+      if (!d.error) setDomainChecks((prev) => ({ ...prev, [domain]: d }));
+    } catch { /* ignore */ }
+    setDomainLoading(null);
+  };
+
+  // Auto-check domains when accounts load
+  useEffect(() => {
+    if (accounts.length === 0) return;
+    const domains = [...new Set(accounts.map((a) => a.from_email.split("@")[1]).filter(Boolean))];
+    domains.forEach((d) => { if (!domainChecks[d]) checkDomain(d); });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts]);
+
+  // Auto-detect provider from email input
+  const onEmailChange = (email: string) => {
+    setAddForm((prev) => ({ ...prev, from_email: email }));
+    const domain = email.split("@")[1]?.toLowerCase();
+    if (!domain) return;
+    if (domain.includes("gmail.com") || domain === "metagora.tech") applyPreset("google");
+    else if (domain.includes("outlook") || domain.includes("hotmail") || domain.includes("office365")) applyPreset("outlook");
+    else if (domain === "metagora-tech.fr" || domain.includes("hostinger")) applyPreset("hostinger");
+  };
 
   const fetchAccounts = useCallback(async () => {
     setLoading(true); setError(null);
@@ -289,7 +344,13 @@ export default function WarmupPage() {
                       <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded", p.healthBg, p.healthColor)}>{p.health}/100 — {p.healthLabel}</span>
                       <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{p.isGoogle ? "Google Workspace" : p.isHostinger ? "Hostinger" : acc.type}</span>
                     </div>
-                    <p className="text-[10px] text-gray-400 mt-0.5">{acc.from_name} • SMTP: {acc.is_smtp_success ? "✅" : "❌"} • Warmup: {acc.warmup_details?.status || "Inactif"} • Réputation: {acc.warmup_details?.warmup_reputation || "N/A"}</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      {acc.from_name} • SMTP: {acc.is_smtp_success ? "✅" : "❌"} • Warmup:{" "}
+                      <span className={cn("font-medium", acc.warmup_details?.status === "ACTIVE" || acc.warmup_details?.status === "ENABLED" ? "text-green-600" : "text-gray-500")}>
+                        {acc.warmup_details?.status === "ACTIVE" || acc.warmup_details?.status === "ENABLED" ? "✅ Actif" : acc.warmup_details?.status || "Inactif"}
+                      </span>
+                      {" "}• Réputation: {acc.warmup_details?.warmup_reputation || "N/A"}
+                    </p>
                   </div>
 
                   {/* Daily / Weekly progress */}
@@ -456,6 +517,99 @@ export default function WarmupPage() {
         </div>
       )}
 
+      {/* ─── Domain Health Check ─────────────────────────── */}
+      {!loading && accounts.length > 0 && (() => {
+        const domains = [...new Set(accounts.map((a) => a.from_email.split("@")[1]).filter(Boolean))];
+        return (
+          <div className="mt-4 bg-white rounded-lg border border-gray-200 p-4">
+            <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2 mb-3">
+              <Globe className="w-4 h-4 text-indigo-500" /> Santé des domaines (SPF / DKIM / DMARC)
+            </h3>
+            <div className="space-y-3">
+              {domains.map((domain) => {
+                const dc = domainChecks[domain];
+                const isLoading = domainLoading === domain;
+                return (
+                  <div key={domain} className="border border-gray-100 rounded-lg p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <Lock className="w-3.5 h-3.5 text-gray-400" />
+                        <span className="text-xs font-semibold text-gray-800">{domain}</span>
+                        {dc && (
+                          <span className={cn(
+                            "text-[10px] font-bold px-1.5 py-0.5 rounded",
+                            dc.score >= 80 ? "bg-green-100 text-green-700" : dc.score >= 50 ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"
+                          )}>
+                            {dc.score}/100
+                          </span>
+                        )}
+                      </div>
+                      <button onClick={() => refreshDomain(domain)} disabled={isLoading}
+                        className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-600 cursor-pointer disabled:opacity-50">
+                        <RefreshCw className={cn("w-3 h-3", isLoading && "animate-spin")} /> {isLoading ? "Vérification..." : "Revérifier"}
+                      </button>
+                    </div>
+                    {!dc && !isLoading && (
+                      <p className="text-[10px] text-gray-400">Cliquez sur Revérifier pour analyser le domaine</p>
+                    )}
+                    {isLoading && !dc && (
+                      <div className="flex items-center gap-2 text-[10px] text-gray-400"><Loader2 className="w-3 h-3 animate-spin" /> Analyse DNS en cours...</div>
+                    )}
+                    {dc && (
+                      <div className="space-y-1.5">
+                        <div className="grid grid-cols-4 gap-2">
+                          <div className={cn("rounded-lg p-2 text-center text-[10px]", dc.spf.found ? (dc.spf.valid ? "bg-green-50" : "bg-yellow-50") : "bg-red-50")}>
+                            <p className={cn("font-bold", dc.spf.found ? (dc.spf.valid ? "text-green-700" : "text-yellow-700") : "text-red-700")}>
+                              {dc.spf.found ? (dc.spf.valid ? "✅ OK" : "⚠️ Partiel") : "❌ Absent"}
+                            </p>
+                            <p className="text-gray-500">SPF</p>
+                          </div>
+                          <div className={cn("rounded-lg p-2 text-center text-[10px]", dc.dkim.found ? "bg-green-50" : "bg-red-50")}>
+                            <p className={cn("font-bold", dc.dkim.found ? "text-green-700" : "text-red-700")}>
+                              {dc.dkim.found ? "✅ OK" : "❌ Absent"}
+                            </p>
+                            <p className="text-gray-500">DKIM</p>
+                          </div>
+                          <div className={cn("rounded-lg p-2 text-center text-[10px]", dc.dmarc.found ? (dc.dmarc.policy !== "none" ? "bg-green-50" : "bg-yellow-50") : "bg-red-50")}>
+                            <p className={cn("font-bold", dc.dmarc.found ? (dc.dmarc.policy !== "none" ? "text-green-700" : "text-yellow-700") : "text-red-700")}>
+                              {dc.dmarc.found ? (dc.dmarc.policy !== "none" ? "✅ OK" : "⚠️ none") : "❌ Absent"}
+                            </p>
+                            <p className="text-gray-500">DMARC</p>
+                          </div>
+                          <div className={cn("rounded-lg p-2 text-center text-[10px]", dc.mx.found ? "bg-green-50" : "bg-red-50")}>
+                            <p className={cn("font-bold", dc.mx.found ? "text-green-700" : "text-red-700")}>
+                              {dc.mx.found ? "✅ OK" : "❌ Absent"}
+                            </p>
+                            <p className="text-gray-500">MX</p>
+                          </div>
+                        </div>
+                        {dc.recommendations.length > 0 && (
+                          <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-lg">
+                            <p className="text-[10px] font-semibold text-red-700 mb-1">Actions requises :</p>
+                            {dc.recommendations.map((r, i) => (
+                              <p key={i} className="text-[10px] text-red-600">• {r}</p>
+                            ))}
+                          </div>
+                        )}
+                        {dc.spf.issue && (
+                          <p className="text-[10px] text-yellow-600">SPF : {dc.spf.issue}</p>
+                        )}
+                        {dc.dmarc.issue && (
+                          <p className="text-[10px] text-yellow-600">DMARC : {dc.dmarc.issue}</p>
+                        )}
+                        {dc.dkim.found && (
+                          <p className="text-[10px] text-gray-400">DKIM sélecteur : {dc.dkim.selector}</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ─── Add account modal ──────────────────────────── */}
       {showAdd && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowAdd(false)}>
@@ -500,7 +654,7 @@ export default function WarmupPage() {
               </div>
               <div>
                 <label className="text-[10px] font-semibold text-gray-500">Email</label>
-                <input value={addForm.from_email} onChange={(e) => setAddForm({ ...addForm, from_email: e.target.value })}
+                <input value={addForm.from_email} onChange={(e) => onEmailChange(e.target.value)}
                   placeholder="anna@metagora-tech.fr" className="w-full mt-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-400 outline-none" />
               </div>
             </div>
