@@ -86,6 +86,7 @@ export async function POST(request: Request) {
       existingSequences,
       emailCount: rawEmailCount,
       emailPrompts,
+      memoryContext,
     } = body as {
       campaignName: string;
       leadOrigin: string;
@@ -97,6 +98,7 @@ export async function POST(request: Request) {
       existingSequences?: { campaignName: string; sequences: { subject: string; email_body: string; seq_number: number }[] }[];
       emailCount?: number;
       emailPrompts?: string[];
+      memoryContext?: string;
     };
 
     const emailCount = Math.min(Math.max(rawEmailCount || 3, 1), 7);
@@ -164,6 +166,7 @@ ${emailDescriptions}
 - 50-125 mots par email MAX
 - UN SEUL CTA par email
 - Sujet : 5-10 mots, minuscules, pas de ponctuation excessive
+${memoryContext || ""}
 - Format de réponse STRICT (JSON) :
 
 \`\`\`json

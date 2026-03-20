@@ -6,7 +6,7 @@ import {
   ChevronRight, ChevronLeft, Eye, Upload, Play, X, Check, FileUp,
   ArrowLeft, Clock, MousePointerClick, Reply, AlertTriangle,
   Settings2, CheckSquare, SquareIcon, Zap, Shield, MessageSquare, Sparkles, Save, UserCircle,
-  Pencil, Timer, RotateCcw,
+  Pencil, Timer, RotateCcw, BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -242,6 +242,10 @@ export default function SequencesPage() {
   const [rewriteLoading, setRewriteLoading] = useState(false);
   const [localDelays, setLocalDelays] = useState<Record<number, number>>({});
   const [previewEditIdx, setPreviewEditIdx] = useState<number | null>(null);
+  const [editMotif, setEditMotif] = useState("");
+  type EditMemory = { date: string; emailNum: number; motif: string; instruction: string; type: "rewrite" | "manual" };
+  const [editMemories, setEditMemories] = useState<EditMemory[]>([]);
+  const [showMemories, setShowMemories] = useState(false);
 
   // Wizard
   type WizardStep = 1 | 2 | 3 | 4;
@@ -367,6 +371,7 @@ export default function SequencesPage() {
           senderName: "Tony",
           emailCount,
           emailPrompts: emailPrompts.slice(0, emailCount).filter(Boolean),
+          memoryContext,
         }),
       });
       const d = await res.json();
@@ -386,10 +391,11 @@ export default function SequencesPage() {
     setAiEmails((prev) => prev.map((e, i) => i === idx ? { ...e, [field]: value } : e));
   };
 
-  // AI rewrite a single email
+  // AI rewrite a single email (AI-generated, not yet saved)
   const rewriteEmail = async (idx: number) => {
     const email = aiEmails[idx];
     if (!email) return;
+    if (!editMotif.trim()) { setError("Ajoutez un motif de modification pour que l'IA apprenne."); return; }
     setRewriteLoading(true);
     try {
       const res = await fetch("/api/sequences/rewrite-email", {
@@ -400,13 +406,15 @@ export default function SequencesPage() {
           instruction: rewriteInstruction || "Améliore cet email pour le rendre plus percutant.",
           campaignGoal: aiContext.campaignGoal,
           tone: aiContext.tone,
+          memoryContext,
         }),
       });
       const d = await res.json();
       if (d.error) throw new Error(d.error);
+      addMemory({ date: new Date().toLocaleDateString("fr"), emailNum: email.seq_number, motif: editMotif, instruction: rewriteInstruction || "(amélioration auto)", type: "rewrite" });
       setAiEmails((prev) => prev.map((e, i) => i === idx ? { ...e, subject: d.subject || e.subject, body: d.body || e.body } : e));
-      setRewriteInstruction("");
-      flash("Email réécrit par l'IA");
+      setRewriteInstruction(""); setEditMotif("");
+      flash("Email réécrit par l'IA ✓ Motif mémorisé");
     } catch (e) { setError(String(e)); }
     setRewriteLoading(false);
   };
@@ -415,6 +423,7 @@ export default function SequencesPage() {
   const rewriteSavedEmail = async (seqIdx: number) => {
     const seq = sequences[seqIdx];
     if (!seq) return;
+    if (!editMotif.trim()) { setError("Ajoutez un motif de modification pour que l'IA apprenne."); return; }
     setRewriteLoading(true);
     try {
       const res = await fetch("/api/sequences/rewrite-email", {
@@ -425,10 +434,12 @@ export default function SequencesPage() {
           instruction: rewriteInstruction || "Améliore cet email pour le rendre plus percutant.",
           campaignGoal: aiContext.campaignGoal,
           tone: aiContext.tone,
+          memoryContext,
         }),
       });
       const d = await res.json();
       if (d.error) throw new Error(d.error);
+      addMemory({ date: new Date().toLocaleDateString("fr"), emailNum: seq.seq_number, motif: editMotif, instruction: rewriteInstruction || "(amélioration auto)", type: "rewrite" });
       // Save the rewritten email back to Smartlead
       const updated = sequences.map((s, i) => ({
         subject: i === seqIdx ? (d.subject || s.subject) : s.subject,
@@ -437,31 +448,50 @@ export default function SequencesPage() {
         seq_delay_details: { delay_in_days: s.seq_delay_details?.delay_in_days || 0 },
       }));
       await doAction("save-sequences", { sequences: updated });
-      setRewriteInstruction("");
-      setEditingSeqIdx(null);
-      flash("Email réécrit et sauvegardé");
+      setRewriteInstruction(""); setEditMotif("");
+      setEditingSeqIdx(null); setPreviewEditIdx(null);
+      flash("Email réécrit et sauvegardé ✓ Motif mémorisé");
       if (selectedId) openDetail(selectedId);
     } catch (e) { setError(String(e)); }
     setRewriteLoading(false);
   };
 
-  // Local delay editing — only saves on blur or Enter, not on every keystroke
+  // Local delay editing — batch save all at once
   const getLocalDelay = (idx: number) => localDelays[idx] ?? (sequences[idx]?.seq_delay_details?.delay_in_days || 0);
   const setLocalDelayVal = (idx: number, val: number) => setLocalDelays((prev) => ({ ...prev, [idx]: Math.max(0, val) }));
-  const commitSavedDelay = async (seqIdx: number) => {
-    const days = getLocalDelay(seqIdx);
-    const current = sequences[seqIdx]?.seq_delay_details?.delay_in_days || 0;
-    if (days === current) return;
+  const hasDelayChanges = sequences.some((s, i) => {
+    const local = localDelays[i];
+    return local !== undefined && local !== (s.seq_delay_details?.delay_in_days || 0);
+  });
+  const commitAllDelays = async () => {
+    if (!hasDelayChanges) return;
     const updated = sequences.map((s, i) => ({
       subject: s.subject,
       email_body: s.email_body,
       seq_number: s.seq_number,
-      seq_delay_details: { delay_in_days: i === seqIdx ? days : (s.seq_delay_details?.delay_in_days || 0) },
+      seq_delay_details: { delay_in_days: getLocalDelay(i) },
     }));
     await doAction("save-sequences", { sequences: updated });
-    flash("Délai mis à jour");
+    setLocalDelays({});
+    flash("Délais sauvegardés !");
     if (selectedId) openDetail(selectedId);
   };
+
+  // ─── Edit memory system ─────────────────────────────────
+  const MEMORY_KEY = "seq-edit-memories";
+  const loadMemories = useCallback(() => {
+    try { return JSON.parse(localStorage.getItem(MEMORY_KEY) || "[]") as EditMemory[]; } catch { return []; }
+  }, []);
+  useEffect(() => { setEditMemories(loadMemories()); }, [loadMemories]);
+  const addMemory = (mem: EditMemory) => {
+    const updated = [mem, ...editMemories].slice(0, 50);
+    setEditMemories(updated);
+    localStorage.setItem(MEMORY_KEY, JSON.stringify(updated));
+  };
+  const clearMemories = () => { setEditMemories([]); localStorage.removeItem(MEMORY_KEY); };
+  const memoryContext = editMemories.length > 0
+    ? `\n\n## Historique des modifications précédentes (mémoire)\nL'utilisateur a déjà modifié des emails. Tiens compte de ces retours pour améliorer ta réécriture :\n${editMemories.slice(0, 10).map((m) => `- Email ${m.emailNum} (${m.date}) : Motif="${m.motif}" | Instruction="${m.instruction}"`).join("\n")}`
+    : "";
 
   const saveAiEmails = async () => {
     if (!aiEmails.length || !selectedId) return;
@@ -948,16 +978,20 @@ export default function SequencesPage() {
                               <textarea value={e.body} onChange={(ev) => updateAiEmail(idx, "body", ev.target.value)} rows={5}
                                 className="w-full mt-0.5 px-2 py-1 text-xs border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400 resize-none" />
                             </div>
-                            <div className="flex items-center gap-2 pt-1 border-t border-gray-200">
-                              <input value={rewriteInstruction} onChange={(ev) => setRewriteInstruction(ev.target.value)}
-                                placeholder="Ex: Plus court, plus direct, ajoute un chiffre..."
-                                className="flex-1 px-2 py-1 text-[10px] border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400"
-                                onKeyDown={(ev) => ev.key === "Enter" && rewriteEmail(idx)} />
-                              <button onClick={() => rewriteEmail(idx)} disabled={rewriteLoading}
-                                className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer">
-                                {rewriteLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
-                                Réécrire IA
-                              </button>
+                            <div className="pt-1 border-t border-gray-200 space-y-1.5">
+                              <input value={editMotif} onChange={(ev) => setEditMotif(ev.target.value)}
+                                placeholder="Motif de modification * (ex: trop long, pas assez percutant, mauvais angle...)"
+                                className="w-full px-2 py-1 text-[10px] border border-orange-300 bg-orange-50 rounded-lg outline-none focus:ring-1 focus:ring-orange-400" />
+                              <div className="flex items-center gap-2">
+                                <input value={rewriteInstruction} onChange={(ev) => setRewriteInstruction(ev.target.value)}
+                                  placeholder="Instruction IA : Plus court, plus direct, ajoute un chiffre..."
+                                  className="flex-1 px-2 py-1 text-[10px] border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400" />
+                                <button onClick={() => rewriteEmail(idx)} disabled={rewriteLoading || !editMotif.trim()}
+                                  className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer">
+                                  {rewriteLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+                                  Réécrire IA
+                                </button>
+                              </div>
                             </div>
                           </div>
                         ) : (
@@ -975,7 +1009,16 @@ export default function SequencesPage() {
               {/* Existing sequences — with delay editing & AI rewrite */}
               {sequences.length > 0 && aiEmails.length === 0 && (
                 <div className="mt-4 pt-3 border-t border-gray-200 space-y-0">
-                  <p className="text-xs font-semibold text-gray-700 mb-3">Séquence actuelle</p>
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-xs font-semibold text-gray-700">Séquence actuelle</p>
+                    {hasDelayChanges && (
+                      <button onClick={commitAllDelays} disabled={actionLoading}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 disabled:opacity-50 cursor-pointer animate-pulse">
+                        {actionLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                        Sauvegarder les délais
+                      </button>
+                    )}
+                  </div>
                   {sequences.map((seq, idx) => (
                     <div key={seq.seq_number}>
                       {/* Delay step */}
@@ -987,8 +1030,6 @@ export default function SequencesPage() {
                             <span className="text-[10px] text-amber-700">Attendre</span>
                             <input type="number" min={1} max={30} value={getLocalDelay(idx)}
                               onChange={(ev) => setLocalDelayVal(idx, Number(ev.target.value))}
-                              onBlur={() => commitSavedDelay(idx)}
-                              onKeyDown={(ev) => ev.key === "Enter" && commitSavedDelay(idx)}
                               className="w-10 text-center text-[10px] font-bold text-amber-800 border border-amber-300 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-amber-400" />
                             <span className="text-[10px] text-amber-700">jour(s)</span>
                           </div>
@@ -1009,16 +1050,20 @@ export default function SequencesPage() {
                         <p className="text-xs font-semibold text-gray-800 mb-1">Sujet : {seq.subject}</p>
                         <div className="text-[11px] text-gray-700 max-h-20 overflow-y-auto" dangerouslySetInnerHTML={{ __html: seq.email_body || "" }} />
                         {editingSeqIdx === (idx + 100) && (
-                          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-gray-200">
-                            <input value={rewriteInstruction} onChange={(ev) => setRewriteInstruction(ev.target.value)}
-                              placeholder="Ex: Plus court, ajoute urgence, change l'angle..."
-                              className="flex-1 px-2 py-1 text-[10px] border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400"
-                              onKeyDown={(ev) => ev.key === "Enter" && rewriteSavedEmail(idx)} />
-                            <button onClick={() => rewriteSavedEmail(idx)} disabled={rewriteLoading}
-                              className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer">
-                              {rewriteLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
-                              Réécrire IA
-                            </button>
+                          <div className="mt-2 pt-2 border-t border-gray-200 space-y-2">
+                            <input value={editMotif} onChange={(ev) => setEditMotif(ev.target.value)}
+                              placeholder="Motif de modification * (ex: trop formel, manque de chiffres, CTA pas clair...)"
+                              className="w-full px-2 py-1 text-[10px] border border-orange-300 bg-orange-50 rounded-lg outline-none focus:ring-1 focus:ring-orange-400" />
+                            <div className="flex items-center gap-2">
+                              <input value={rewriteInstruction} onChange={(ev) => setRewriteInstruction(ev.target.value)}
+                                placeholder="Instruction IA : Plus court, ajoute urgence, change l'angle..."
+                                className="flex-1 px-2 py-1 text-[10px] border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400" />
+                              <button onClick={() => rewriteSavedEmail(idx)} disabled={rewriteLoading || !editMotif.trim()}
+                                className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer">
+                                {rewriteLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+                                Réécrire IA
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -1072,16 +1117,50 @@ export default function SequencesPage() {
                 <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
                   <Eye className="w-4 h-4 text-violet-500" /> Preview par lead
                 </h3>
-                {leads.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => setPreviewLeadIdx(Math.max(0, previewLeadIdx - 1))} disabled={previewLeadIdx === 0}
-                      className="p-1 text-gray-400 hover:text-gray-600 disabled:opacity-30 cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>
-                    <span className="text-xs text-gray-500">Lead {previewLeadIdx + 1} / {leads.length}</span>
-                    <button onClick={() => setPreviewLeadIdx(Math.min(leads.length - 1, previewLeadIdx + 1))} disabled={previewLeadIdx >= leads.length - 1}
-                      className="p-1 text-gray-400 hover:text-gray-600 disabled:opacity-30 cursor-pointer"><ChevronRight className="w-4 h-4" /></button>
-                  </div>
-                )}
+                <div className="flex items-center gap-2">
+                  {editMemories.length > 0 && (
+                    <button onClick={() => setShowMemories(!showMemories)}
+                      className={cn("flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-lg border cursor-pointer transition-all",
+                        showMemories ? "bg-orange-100 text-orange-700 border-orange-300" : "bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-100")}>
+                      <BookOpen className="w-3 h-3" /> Mémoire ({editMemories.length})
+                    </button>
+                  )}
+                  {leads.length > 0 && (
+                    <>
+                      <button onClick={() => setPreviewLeadIdx(Math.max(0, previewLeadIdx - 1))} disabled={previewLeadIdx === 0}
+                        className="p-1 text-gray-400 hover:text-gray-600 disabled:opacity-30 cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>
+                      <span className="text-xs text-gray-500">Lead {previewLeadIdx + 1} / {leads.length}</span>
+                      <button onClick={() => setPreviewLeadIdx(Math.min(leads.length - 1, previewLeadIdx + 1))} disabled={previewLeadIdx >= leads.length - 1}
+                        className="p-1 text-gray-400 hover:text-gray-600 disabled:opacity-30 cursor-pointer"><ChevronRight className="w-4 h-4" /></button>
+                    </>
+                  )}
+                </div>
               </div>
+
+              {/* Memory panel */}
+              {showMemories && editMemories.length > 0 && (
+                <div className="mb-3 bg-orange-50 border border-orange-200 rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-[10px] font-semibold text-orange-800 flex items-center gap-1">
+                      <BookOpen className="w-3 h-3" /> Mémoire des modifications — L&apos;IA utilise ces retours
+                    </h4>
+                    <button onClick={clearMemories} className="text-[9px] text-orange-500 hover:text-orange-700 cursor-pointer">Vider la mémoire</button>
+                  </div>
+                  <div className="space-y-1 max-h-32 overflow-y-auto">
+                    {editMemories.map((m, i) => (
+                      <div key={i} className="flex items-start gap-2 text-[10px] text-orange-700">
+                        <span className="font-bold shrink-0">Email {m.emailNum}</span>
+                        <span className="text-orange-400">•</span>
+                        <span className="font-medium">{m.motif}</span>
+                        {m.instruction && m.instruction !== "(amélioration auto)" && (
+                          <><span className="text-orange-400">→</span><span className="italic">{m.instruction}</span></>
+                        )}
+                        <span className="text-orange-400 ml-auto shrink-0">{m.date}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {previewLead ? (
                 <div className="space-y-3">
@@ -1133,12 +1212,14 @@ export default function SequencesPage() {
                             dangerouslySetInnerHTML={{ __html: previewSubstitute(seq.email_body || "", previewLead) }} />
                           {previewEditIdx === sIdx && (
                             <div className="mt-2 pt-2 border-t border-gray-200 space-y-2">
+                              <input value={editMotif} onChange={(ev) => setEditMotif(ev.target.value)}
+                                placeholder="Motif de modification * (ex: trop formel, manque de chiffres, CTA pas clair...)"
+                                className="w-full px-2 py-1.5 text-[10px] border border-orange-300 bg-orange-50 rounded-lg outline-none focus:ring-1 focus:ring-orange-400" />
                               <div className="flex items-center gap-2">
                                 <input value={rewriteInstruction} onChange={(ev) => setRewriteInstruction(ev.target.value)}
                                   placeholder="Instruction IA : Plus court, change l'angle, ajoute un chiffre..."
-                                  className="flex-1 px-2 py-1.5 text-[10px] border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400"
-                                  onKeyDown={(ev) => ev.key === "Enter" && rewriteSavedEmail(sIdx)} />
-                                <button onClick={() => rewriteSavedEmail(sIdx)} disabled={rewriteLoading}
+                                  className="flex-1 px-2 py-1.5 text-[10px] border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400" />
+                                <button onClick={() => rewriteSavedEmail(sIdx)} disabled={rewriteLoading || !editMotif.trim()}
                                   className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer">
                                   {rewriteLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
                                   Réécrire IA
@@ -1511,15 +1592,19 @@ export default function SequencesPage() {
                                   className="w-full px-2 py-1 text-xs border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400" />
                                 <textarea value={e.body} onChange={(ev) => updateAiEmail(idx, "body", ev.target.value)} rows={5}
                                   className="w-full px-2 py-1 text-xs border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400 resize-none" />
-                                <div className="flex items-center gap-2 pt-1 border-t border-gray-200">
-                                  <input value={rewriteInstruction} onChange={(ev) => setRewriteInstruction(ev.target.value)}
-                                    placeholder="Instruction IA : Plus court, plus direct..."
-                                    className="flex-1 px-2 py-1 text-[10px] border border-gray-300 rounded-lg outline-none"
-                                    onKeyDown={(ev) => ev.key === "Enter" && rewriteEmail(idx)} />
-                                  <button onClick={() => rewriteEmail(idx)} disabled={rewriteLoading}
-                                    className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer">
-                                    {rewriteLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />} Réécrire IA
-                                  </button>
+                                <div className="pt-1 border-t border-gray-200 space-y-1.5">
+                                  <input value={editMotif} onChange={(ev) => setEditMotif(ev.target.value)}
+                                    placeholder="Motif de modification * (ex: trop long, pas assez percutant...)"
+                                    className="w-full px-2 py-1 text-[10px] border border-orange-300 bg-orange-50 rounded-lg outline-none focus:ring-1 focus:ring-orange-400" />
+                                  <div className="flex items-center gap-2">
+                                    <input value={rewriteInstruction} onChange={(ev) => setRewriteInstruction(ev.target.value)}
+                                      placeholder="Instruction IA : Plus court, plus direct..."
+                                      className="flex-1 px-2 py-1 text-[10px] border border-gray-300 rounded-lg outline-none" />
+                                    <button onClick={() => rewriteEmail(idx)} disabled={rewriteLoading || !editMotif.trim()}
+                                      className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer">
+                                      {rewriteLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />} Réécrire IA
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
                             ) : (
@@ -1546,51 +1631,66 @@ export default function SequencesPage() {
                     <Sparkles className="w-3.5 h-3.5" /> Générer avec l&apos;IA
                   </button>
                 </div>
-              ) : sequences.map((seq, idx) => (
-                <div key={seq.seq_number}>
-                  {idx > 0 && (
-                    <div className="flex items-center gap-2 py-2 px-3">
-                      <div className="flex-1 h-px bg-gray-200" />
-                      <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1">
-                        <Timer className="w-3 h-3 text-amber-500" />
-                        <span className="text-[10px] text-amber-700">Attendre</span>
-                        <input type="number" min={1} max={30} value={getLocalDelay(idx)}
-                          onChange={(ev) => setLocalDelayVal(idx, Number(ev.target.value))}
-                          onBlur={() => commitSavedDelay(idx)}
-                          onKeyDown={(ev) => ev.key === "Enter" && commitSavedDelay(idx)}
-                          className="w-10 text-center text-[10px] font-bold text-amber-800 border border-amber-300 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-amber-400" />
-                        <span className="text-[10px] text-amber-700">jour(s)</span>
-                      </div>
-                      <div className="flex-1 h-px bg-gray-200" />
+              ) : (
+                <>
+                  {hasDelayChanges && (
+                    <div className="flex justify-end">
+                      <button onClick={commitAllDelays} disabled={actionLoading}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 disabled:opacity-50 cursor-pointer animate-pulse">
+                        {actionLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                        Sauvegarder les délais
+                      </button>
                     </div>
                   )}
-                  <div className={cn("bg-white rounded-lg border border-gray-200 p-4 transition-all",
-                    editingSeqIdx === (idx + 200) ? "border-violet-300 bg-violet-50/30" : "")}>
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-violet-600 bg-violet-50 px-2 py-1 rounded">Email {seq.seq_number}</span>
-                        <span className="text-xs text-gray-400">{seq.seq_delay_details?.delay_in_days ? `+${seq.seq_delay_details.delay_in_days}j` : "J0"}</span>
+                  {sequences.map((seq, idx) => (
+                    <div key={seq.seq_number}>
+                      {idx > 0 && (
+                        <div className="flex items-center gap-2 py-2 px-3">
+                          <div className="flex-1 h-px bg-gray-200" />
+                          <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1">
+                            <Timer className="w-3 h-3 text-amber-500" />
+                            <span className="text-[10px] text-amber-700">Attendre</span>
+                            <input type="number" min={1} max={30} value={getLocalDelay(idx)}
+                              onChange={(ev) => setLocalDelayVal(idx, Number(ev.target.value))}
+                              className="w-10 text-center text-[10px] font-bold text-amber-800 border border-amber-300 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-amber-400" />
+                            <span className="text-[10px] text-amber-700">jour(s)</span>
+                          </div>
+                          <div className="flex-1 h-px bg-gray-200" />
+                        </div>
+                      )}
+                      <div className={cn("bg-white rounded-lg border border-gray-200 p-4 transition-all",
+                        editingSeqIdx === (idx + 200) ? "border-violet-300 bg-violet-50/30" : "")}>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-violet-600 bg-violet-50 px-2 py-1 rounded">Email {seq.seq_number}</span>
+                            <span className="text-xs text-gray-400">{seq.seq_delay_details?.delay_in_days ? `+${seq.seq_delay_details.delay_in_days}j` : "J0"}</span>
+                          </div>
+                          <button onClick={() => setEditingSeqIdx(editingSeqIdx === (idx + 200) ? null : (idx + 200))} title="Modifier avec l'IA"
+                            className="p-1 text-gray-400 hover:text-violet-600 cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
+                        </div>
+                        <p className="text-sm font-semibold text-gray-800 mb-2">Sujet : {seq.subject || "(pas de sujet)"}</p>
+                        <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-700 max-h-40 overflow-y-auto" dangerouslySetInnerHTML={{ __html: seq.email_body || "<em>Pas de contenu</em>" }} />
+                        {editingSeqIdx === (idx + 200) && (
+                          <div className="mt-3 pt-2 border-t border-gray-200 space-y-2">
+                            <input value={editMotif} onChange={(ev) => setEditMotif(ev.target.value)}
+                              placeholder="Motif de modification * (ex: trop formel, manque de chiffres, CTA pas clair...)"
+                              className="w-full px-2 py-1.5 text-xs border border-orange-300 bg-orange-50 rounded-lg outline-none focus:ring-1 focus:ring-orange-400" />
+                            <div className="flex items-center gap-2">
+                              <input value={rewriteInstruction} onChange={(ev) => setRewriteInstruction(ev.target.value)}
+                                placeholder="Instruction IA : Plus court, ajoute urgence, change l'angle..."
+                                className="flex-1 px-2 py-1.5 text-xs border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400" />
+                              <button onClick={() => rewriteSavedEmail(idx)} disabled={rewriteLoading || !editMotif.trim()}
+                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer">
+                                {rewriteLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />} Réécrire IA
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <button onClick={() => setEditingSeqIdx(editingSeqIdx === (idx + 200) ? null : (idx + 200))} title="Modifier avec l'IA"
-                        className="p-1 text-gray-400 hover:text-violet-600 cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
                     </div>
-                    <p className="text-sm font-semibold text-gray-800 mb-2">Sujet : {seq.subject || "(pas de sujet)"}</p>
-                    <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-700 max-h-40 overflow-y-auto" dangerouslySetInnerHTML={{ __html: seq.email_body || "<em>Pas de contenu</em>" }} />
-                    {editingSeqIdx === (idx + 200) && (
-                      <div className="flex items-center gap-2 mt-3 pt-2 border-t border-gray-200">
-                        <input value={rewriteInstruction} onChange={(ev) => setRewriteInstruction(ev.target.value)}
-                          placeholder="Instruction IA : Plus court, ajoute urgence, change l'angle..."
-                          className="flex-1 px-2 py-1.5 text-xs border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400"
-                          onKeyDown={(ev) => ev.key === "Enter" && rewriteSavedEmail(idx)} />
-                        <button onClick={() => rewriteSavedEmail(idx)} disabled={rewriteLoading}
-                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer">
-                          {rewriteLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />} Réécrire IA
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
+                  ))}
+                </>
+              )}
             </div>
           )}
 

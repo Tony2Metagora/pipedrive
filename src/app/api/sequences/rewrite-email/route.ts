@@ -8,7 +8,7 @@ export async function POST(request: Request) {
   if (guard.denied) return guard.denied;
 
   try {
-    const { subject, body, instruction, campaignGoal, tone } = await request.json();
+    const { subject, body, instruction, campaignGoal, tone, memoryContext } = await request.json();
 
     if (!body && !subject) {
       return NextResponse.json({ error: "Email vide" }, { status: 400 });
@@ -24,6 +24,7 @@ Règles :
 - Garde les variables Smartlead : {{first_name}}, {{last_name}}, {{company_name}}
 - Texte plain, pas d'HTML
 ${campaignGoal ? `- But de la campagne : ${campaignGoal}` : ""}
+${memoryContext || ""}
 
 Réponds UNIQUEMENT en JSON :
 \`\`\`json
