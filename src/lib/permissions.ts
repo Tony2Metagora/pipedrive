@@ -22,6 +22,7 @@ export const APP_VIEWS = [
   { key: "landing", label: "Landing Generator", path: "/landing-generator" },
   { key: "deal", label: "Fiche affaire", path: "/deal" },
   { key: "linkedin", label: "LinkedIn", path: "/linkedin" },
+  { key: "sequences", label: "Séquence Mail", path: "/sequences" },
 ] as const;
 
 export type ViewKey = (typeof APP_VIEWS)[number]["key"];
@@ -66,6 +67,7 @@ function defaultPermissions(): Record<ViewKey, PermissionLevel> {
     landing: "none",
     deal: "read",
     linkedin: "none",
+    sequences: "none",
   };
 }
 
@@ -80,6 +82,7 @@ function adminPermissions(): Record<ViewKey, PermissionLevel> {
     landing: "write",
     deal: "write",
     linkedin: "write",
+    sequences: "write",
   };
 }
 

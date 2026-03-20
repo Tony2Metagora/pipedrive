@@ -1,4 +1,4 @@
-import Navbar from "@/components/Navbar";
+import AppShell from "@/components/AppShell";
 
 export default function ScrappingLayout({
   children,
@@ -6,11 +6,10 @@ export default function ScrappingLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen">
-      <Navbar />
-      <main className="mx-auto px-4 sm:px-6 lg:px-8 py-6 max-w-[1600px]">
+    <AppShell>
+      <div className="mx-auto px-4 sm:px-6 lg:px-8 py-6 max-w-[1600px]">
         {children}
-      </main>
-    </div>
+      </div>
+    </AppShell>
   );
 }

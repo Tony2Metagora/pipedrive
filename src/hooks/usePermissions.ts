@@ -28,6 +28,7 @@ export function usePermissions(): UserInfo {
       landing: "none",
       deal: "none",
       linkedin: "none",
+      sequences: "none",
     },
     loading: true,
   });

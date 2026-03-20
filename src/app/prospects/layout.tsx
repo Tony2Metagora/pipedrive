@@ -1,4 +1,4 @@
-import Navbar from "@/components/Navbar";
+import AppShell from "@/components/AppShell";
 
 export default function ProspectsLayout({
   children,
@@ -6,11 +6,10 @@ export default function ProspectsLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen">
-      <Navbar />
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <AppShell>
+      <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {children}
-      </main>
-    </div>
+      </div>
+    </AppShell>
   );
 }

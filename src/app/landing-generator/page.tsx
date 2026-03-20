@@ -26,7 +26,6 @@ import {
   Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import Navbar from "@/components/Navbar";
 
 // ─── Types ────────────────────────────────────────────────
 
@@ -448,8 +447,7 @@ export default function LandingGeneratorPage() {
 
   return (
     <>
-      <Navbar />
-      <div className="max-w-4xl mx-auto px-4 py-8">
+      <div>
         {/* Header */}
         <div className="flex items-center gap-3 mb-8">
           <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center">
