@@ -83,16 +83,29 @@ function getAccountProfile(acc: WarmupAccountData) {
   const weeklyTarget = dailyTarget * 7;
   const weeklySent = ds.reduce((s, d) => s + d.sent, 0);
 
-  // Health score
-  let health = 50;
-  if (rep > 0) health = rep;
-  if (spamRate > 5) health = Math.max(0, health - 30);
-  else if (spamRate > 2) health = Math.max(0, health - 15);
-  if (!acc.is_smtp_success) health = 0;
+  // Health score — contextual based on account state
+  let health = 0;
+  const warmupActive = acc.warmup_details?.status === "ACTIVE" || acc.warmup_details?.status === "ENABLED";
+  if (!acc.is_smtp_success) {
+    health = 0; // SMTP broken = critical
+  } else if (rep > 0) {
+    // Has reputation data from Smartlead — use it directly
+    health = rep;
+    if (spamRate > 5) health = Math.max(0, health - 30);
+    else if (spamRate > 2) health = Math.max(0, health - 15);
+  } else {
+    // No reputation data yet — score based on setup quality
+    health = 40; // base: SMTP works
+    if (warmupActive) health += 25; // warmup is on
+    if (totalSent > 0) health += 10; // has started sending
+    if (spamRate === 0 && totalSent > 5) health += 10; // no spam so far
+    if (totalSent > 50) health += 15; // decent volume
+  }
+  health = Math.min(100, Math.max(0, health));
 
-  const healthColor = health >= 80 ? "text-green-600" : health >= 50 ? "text-yellow-600" : "text-red-600";
-  const healthBg = health >= 80 ? "bg-green-100" : health >= 50 ? "bg-yellow-100" : "bg-red-100";
-  const healthLabel = health >= 80 ? "Excellent" : health >= 50 ? "Moyen" : "Critique";
+  const healthColor = health >= 70 ? "text-green-600" : health >= 40 ? "text-yellow-600" : "text-red-600";
+  const healthBg = health >= 70 ? "bg-green-100" : health >= 40 ? "bg-yellow-100" : "bg-red-100";
+  const healthLabel = health >= 70 ? "Bon" : health >= 40 ? "En cours" : "Critique";
 
   return {
     isGoogle, isHostinger, totalSent, rep, spamRate, maturity, rampTable,
@@ -599,6 +612,57 @@ export default function WarmupPage() {
                         )}
                         {dc.dkim.found && (
                           <p className="text-[10px] text-gray-400">DKIM sélecteur : {dc.dkim.selector}</p>
+                        )}
+
+                        {/* DNS Config Guide — shown when something is missing */}
+                        {(!dc.spf.found || !dc.dkim.found || !dc.dmarc.found) && (
+                          <div className="mt-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+                            <p className="text-[11px] font-semibold text-indigo-800 mb-2">📋 Guide de configuration DNS — {domain}</p>
+                            <p className="text-[10px] text-indigo-600 mb-2">
+                              Connectez-vous à <b>Hostinger → hPanel → DNS Zone</b> (ou votre registrar DNS) et ajoutez ces enregistrements TXT :
+                            </p>
+                            <div className="space-y-2">
+                              {!dc.spf.found && (
+                                <div className="bg-white rounded p-2 border border-indigo-100">
+                                  <p className="text-[10px] font-bold text-indigo-800">1. SPF (empêche l&apos;usurpation d&apos;identité)</p>
+                                  <div className="mt-1 grid grid-cols-[80px_1fr] gap-1 text-[10px]">
+                                    <span className="text-gray-500">Type :</span><span className="font-mono text-gray-800">TXT</span>
+                                    <span className="text-gray-500">Nom :</span><span className="font-mono text-gray-800">@</span>
+                                    <span className="text-gray-500">Valeur :</span>
+                                    <span className="font-mono text-gray-800 bg-gray-50 px-1 rounded select-all break-all">v=spf1 include:_spf.google.com include:spf.hostinger.com ~all</span>
+                                    <span className="text-gray-500">TTL :</span><span className="font-mono text-gray-800">3600</span>
+                                  </div>
+                                </div>
+                              )}
+                              {!dc.dkim.found && (
+                                <div className="bg-white rounded p-2 border border-indigo-100">
+                                  <p className="text-[10px] font-bold text-indigo-800">2. DKIM (signe vos emails cryptographiquement)</p>
+                                  <div className="mt-1 text-[10px] text-gray-600 space-y-1">
+                                    <p><b>Hostinger :</b> hPanel → Emails → Gérer → DKIM → Copier la clé publique, puis :</p>
+                                    <div className="grid grid-cols-[80px_1fr] gap-1">
+                                      <span className="text-gray-500">Type :</span><span className="font-mono text-gray-800">TXT</span>
+                                      <span className="text-gray-500">Nom :</span><span className="font-mono text-gray-800 select-all">default._domainkey</span>
+                                      <span className="text-gray-500">Valeur :</span><span className="font-mono text-gray-800 bg-gray-50 px-1 rounded break-all">v=DKIM1; k=rsa; p=VOTRE_CLE_PUBLIQUE_ICI</span>
+                                    </div>
+                                    <p className="text-indigo-500"><b>Google Workspace :</b> Admin Console → Apps → Gmail → Authentification → Générer DKIM → Copier l&apos;enregistrement TXT</p>
+                                  </div>
+                                </div>
+                              )}
+                              {!dc.dmarc.found && (
+                                <div className="bg-white rounded p-2 border border-indigo-100">
+                                  <p className="text-[10px] font-bold text-indigo-800">3. DMARC (indique aux serveurs quoi faire si SPF/DKIM échouent)</p>
+                                  <div className="mt-1 grid grid-cols-[80px_1fr] gap-1 text-[10px]">
+                                    <span className="text-gray-500">Type :</span><span className="font-mono text-gray-800">TXT</span>
+                                    <span className="text-gray-500">Nom :</span><span className="font-mono text-gray-800 select-all">_dmarc</span>
+                                    <span className="text-gray-500">Valeur :</span>
+                                    <span className="font-mono text-gray-800 bg-gray-50 px-1 rounded select-all break-all">v=DMARC1; p=quarantine; rua=mailto:dmarc@{domain}; pct=100</span>
+                                    <span className="text-gray-500">TTL :</span><span className="font-mono text-gray-800">3600</span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            <p className="text-[9px] text-indigo-400 mt-2">⏱ Après modification, les DNS prennent 1-24h pour se propager. Revenez cliquer &quot;Revérifier&quot; demain.</p>
+                          </div>
                         )}
                       </div>
                     )}
