@@ -84,6 +84,8 @@ export async function POST(request: Request) {
       language,
       senderName,
       existingSequences,
+      emailCount: rawEmailCount,
+      emailPrompts,
     } = body as {
       campaignName: string;
       leadOrigin: string;
@@ -93,7 +95,11 @@ export async function POST(request: Request) {
       language?: string;
       senderName?: string;
       existingSequences?: { campaignName: string; sequences: { subject: string; email_body: string; seq_number: number }[] }[];
+      emailCount?: number;
+      emailPrompts?: string[];
     };
+
+    const emailCount = Math.min(Math.max(rawEmailCount || 3, 1), 7);
 
     if (!campaignGoal) {
       return NextResponse.json({ error: "Le but de la campagne est requis" }, { status: 400 });
@@ -122,18 +128,35 @@ export async function POST(request: Request) {
         ).join("\n\n")}`
       : "";
 
-    const systemPrompt = `Tu es un expert en cold emailing B2B pour Metagora. Tu génères des séquences de 3 emails de prospection.
+    // Build per-email instructions
+    const defaultEmailDescriptions: Record<number, string> = {
+      1: "Introduction — first line personnalisée, proposition de valeur, CTA doux",
+      2: "Relance douce — même thread, plus court, angle différent ou question",
+      3: "Valeur ajoutée — case study, insight, preuve sociale",
+      4: "Relance plus directe — urgence légère ou nouvelle valeur",
+      5: "Breakup — dernière tentative de contact, ton amical, bonne continuation",
+    };
+    const emailDescriptions = Array.from({ length: emailCount }, (_, i) => {
+      const userPromptForEmail = emailPrompts?.[i]?.trim();
+      const defaultDesc = defaultEmailDescriptions[i + 1] || `Email de relance #${i + 1}`;
+      return `- Email ${i + 1} : ${userPromptForEmail ? userPromptForEmail : defaultDesc}`;
+    }).join("\n");
+
+    const defaultDelays = [0, 3, 7, 14, 21, 28, 35];
+    const emailJsonExample = Array.from({ length: emailCount }, (_, i) => (
+      `    { "seq_number": ${i + 1}, "delay_days": ${defaultDelays[i] || (i * 5)}, "subject": "...", "body": "..." }`
+    )).join(",\n");
+
+    const systemPrompt = `Tu es un expert en cold emailing B2B pour Metagora. Tu génères des séquences de ${emailCount} emails de prospection.
 
 ${METAGORA_CONTEXT}
 
 ${COLD_EMAIL_BEST_PRACTICES}
 
 ## Règles de génération
-- Génère exactement 3 emails (Email 1, Email 2, Email 3)
+- Génère exactement ${emailCount} emails
 - Chaque email : sujet + corps
-- Email 1 : Introduction (J1) — first line personnalisée, proposition de valeur, CTA doux
-- Email 2 : Relance (J3) — même thread, plus court, angle différent ou question
-- Email 3 : Valeur ajoutée (J7) — case study, insight, ou breakup doux
+${emailDescriptions}
 - Utilise les variables Smartlead : {{first_name}}, {{last_name}}, {{company_name}} pour la personnalisation
 - Signe toujours "${senderName || "Tony"}" à la fin
 - Ton : ${tone || "professionnel mais chaleureux, tutoiement"}
@@ -146,16 +169,14 @@ ${COLD_EMAIL_BEST_PRACTICES}
 \`\`\`json
 {
   "emails": [
-    { "seq_number": 1, "delay_days": 0, "subject": "...", "body": "..." },
-    { "seq_number": 2, "delay_days": 3, "subject": "...", "body": "..." },
-    { "seq_number": 3, "delay_days": 7, "subject": "...", "body": "..." }
+${emailJsonExample}
   ]
 }
 \`\`\`
 
 Réponds UNIQUEMENT avec le JSON, sans commentaire.`;
 
-    const userPrompt = `Génère une séquence de 3 cold emails pour cette campagne :
+    const userPrompt = `Génère une séquence de ${emailCount} cold emails pour cette campagne :
 
 **Nom campagne :** ${campaignName || "Nouvelle campagne"}
 **Origine des leads :** ${leadOrigin || "Non précisé"}
@@ -163,7 +184,7 @@ Réponds UNIQUEMENT avec le JSON, sans commentaire.`;
 **But de la campagne :** ${campaignGoal}
 ${refContext}
 
-Génère les 3 emails maintenant.`;
+Génère les ${emailCount} emails maintenant.`;
 
     const response = await askAzureFast([
       { role: "system", content: systemPrompt },

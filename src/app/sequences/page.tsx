@@ -233,11 +233,15 @@ export default function SequencesPage() {
   const [aiGenLoading, setAiGenLoading] = useState(false);
   const [aiContext, setAiContext] = useState({ leadOrigin: "", leadProfile: "", campaignGoal: "", tone: "professionnel mais chaleureux, tutoiement" });
   const [aiEmails, setAiEmails] = useState<{ seq_number: number; delay_days: number; subject: string; body: string }[]>([]);
+  const [emailCount, setEmailCount] = useState(3);
+  const [emailPrompts, setEmailPrompts] = useState<string[]>(["", "", ""]);
 
   // Sequence editing (delays + AI rewrite)
   const [editingSeqIdx, setEditingSeqIdx] = useState<number | null>(null);
   const [rewriteInstruction, setRewriteInstruction] = useState("");
   const [rewriteLoading, setRewriteLoading] = useState(false);
+  const [localDelays, setLocalDelays] = useState<Record<number, number>>({});
+  const [previewEditIdx, setPreviewEditIdx] = useState<number | null>(null);
 
   // Wizard
   type WizardStep = 1 | 2 | 3 | 4;
@@ -361,6 +365,8 @@ export default function SequencesPage() {
           campaignGoal: aiContext.campaignGoal,
           tone: aiContext.tone,
           senderName: "Tony",
+          emailCount,
+          emailPrompts: emailPrompts.slice(0, emailCount).filter(Boolean),
         }),
       });
       const d = await res.json();
@@ -439,13 +445,18 @@ export default function SequencesPage() {
     setRewriteLoading(false);
   };
 
-  // Save delay change on a saved sequence
-  const updateSavedDelay = async (seqIdx: number, days: number) => {
+  // Local delay editing — only saves on blur or Enter, not on every keystroke
+  const getLocalDelay = (idx: number) => localDelays[idx] ?? (sequences[idx]?.seq_delay_details?.delay_in_days || 0);
+  const setLocalDelayVal = (idx: number, val: number) => setLocalDelays((prev) => ({ ...prev, [idx]: Math.max(0, val) }));
+  const commitSavedDelay = async (seqIdx: number) => {
+    const days = getLocalDelay(seqIdx);
+    const current = sequences[seqIdx]?.seq_delay_details?.delay_in_days || 0;
+    if (days === current) return;
     const updated = sequences.map((s, i) => ({
       subject: s.subject,
       email_body: s.email_body,
       seq_number: s.seq_number,
-      seq_delay_details: { delay_in_days: i === seqIdx ? Math.max(0, days) : (s.seq_delay_details?.delay_in_days || 0) },
+      seq_delay_details: { delay_in_days: i === seqIdx ? days : (s.seq_delay_details?.delay_in_days || 0) },
     }));
     await doAction("save-sequences", { sequences: updated });
     flash("Délai mis à jour");
@@ -813,7 +824,7 @@ export default function SequencesPage() {
               <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2 mb-1">
                 <Sparkles className="w-4 h-4 text-violet-500" /> Générez votre séquence email
               </h3>
-              <p className="text-[10px] text-gray-400 mb-4">L&apos;IA génère 3 emails de prospection en appliquant les bonnes pratiques du cold emailing. Elle analyse aussi vos campagnes existantes.</p>
+              <p className="text-[10px] text-gray-400 mb-4">L&apos;IA génère vos emails de prospection en appliquant les bonnes pratiques du cold emailing. Choisissez le nombre d&apos;emails et décrivez chacun.</p>
 
               {sequences.length > 0 && (
                 <div className="mb-4 px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-xs text-green-700 flex items-center gap-2">
@@ -847,10 +858,40 @@ export default function SequencesPage() {
                   <input value={aiContext.tone} onChange={(e) => setAiContext({ ...aiContext, tone: e.target.value })}
                     className="w-full mt-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 outline-none" />
                 </div>
+
+                {/* Email count selector */}
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-600">Nombre d&apos;emails dans la séquence</label>
+                  <div className="flex items-center gap-2 mt-1">
+                    {[2, 3, 4, 5].map((n) => (
+                      <button key={n} onClick={() => { setEmailCount(n); setEmailPrompts((prev) => { const next = [...prev]; while (next.length < n) next.push(""); return next.slice(0, n); }); }}
+                        className={cn("px-3 py-1.5 text-xs font-medium rounded-lg border cursor-pointer transition-all",
+                          emailCount === n ? "bg-violet-600 text-white border-violet-600" : "bg-white text-gray-600 border-gray-300 hover:border-violet-300")}>
+                        {n} emails
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Per-email prompt fields */}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-semibold text-gray-600">Prompt par email (optionnel — guidez l&apos;IA)</label>
+                  {Array.from({ length: emailCount }).map((_, i) => (
+                    <div key={i} className="flex items-start gap-2">
+                      <span className="text-[10px] font-bold text-violet-600 bg-violet-50 px-2 py-1 rounded mt-0.5 shrink-0">#{i + 1}</span>
+                      <input value={emailPrompts[i] || ""} onChange={(ev) => setEmailPrompts((prev) => { const next = [...prev]; next[i] = ev.target.value; return next; })}
+                        placeholder={i === 0 ? "Ex: Introduction, accroche personnalisée, proposition de valeur"
+                          : i === emailCount - 1 ? "Ex: Breakup email, dernière tentative de contact"
+                          : "Ex: Relance avec angle différent, social proof"}
+                        className="flex-1 px-2 py-1.5 text-[11px] border border-gray-300 rounded-lg focus:ring-1 focus:ring-violet-400 outline-none" />
+                    </div>
+                  ))}
+                </div>
+
                 <button onClick={generateAiEmails} disabled={aiGenLoading || !aiContext.campaignGoal.trim()}
                   className="flex items-center gap-2 px-4 py-2 text-xs font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 cursor-pointer">
                   {aiGenLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                  {aiGenLoading ? "Génération en cours (10-15s)..." : sequences.length > 0 ? "Régénérer les emails" : "Générer 3 emails"}
+                  {aiGenLoading ? "Génération en cours..." : sequences.length > 0 ? `Régénérer ${emailCount} emails` : `Générer ${emailCount} emails`}
                 </button>
               </div>
 
@@ -944,8 +985,10 @@ export default function SequencesPage() {
                           <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1">
                             <Timer className="w-3 h-3 text-amber-500" />
                             <span className="text-[10px] text-amber-700">Attendre</span>
-                            <input type="number" min={1} max={30} value={seq.seq_delay_details?.delay_in_days || 0}
-                              onChange={(ev) => updateSavedDelay(idx, Number(ev.target.value))}
+                            <input type="number" min={1} max={30} value={getLocalDelay(idx)}
+                              onChange={(ev) => setLocalDelayVal(idx, Number(ev.target.value))}
+                              onBlur={() => commitSavedDelay(idx)}
+                              onKeyDown={(ev) => ev.key === "Enter" && commitSavedDelay(idx)}
                               className="w-10 text-center text-[10px] font-bold text-amber-800 border border-amber-300 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-amber-400" />
                             <span className="text-[10px] text-amber-700">jour(s)</span>
                           </div>
@@ -1051,28 +1094,59 @@ export default function SequencesPage() {
                     </div>
                   </div>
 
-                  {/* Each email preview */}
-                  {sequences.map((seq) => (
-                    <div key={seq.seq_number} className="border border-gray-200 rounded-lg overflow-hidden">
-                      <div className="px-3 py-2 bg-gray-50 border-b border-gray-200 flex items-center gap-2">
-                        <span className="text-[10px] font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded">Email {seq.seq_number}</span>
-                        <span className="text-[10px] text-gray-400">{seq.seq_delay_details?.delay_in_days ? `+${seq.seq_delay_details.delay_in_days} jour(s)` : "J0"}</span>
-                      </div>
-                      <div className="p-3 space-y-1.5">
-                        <div className="flex items-center gap-2 text-[10px] text-gray-500">
-                          <span className="font-medium">De :</span>
-                          <span>{campaignAccounts[0]?.from_email || "—"}</span>
+                  {/* Each email preview — with edit */}
+                  {sequences.map((seq, sIdx) => (
+                    <div key={seq.seq_number}>
+                      {sIdx > 0 && (
+                        <div className="flex items-center gap-2 py-1.5 px-3">
+                          <div className="flex-1 h-px bg-gray-200" />
+                          <span className="text-[9px] text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                            ⏱ {seq.seq_delay_details?.delay_in_days || 0} jour(s) d&apos;attente
+                          </span>
+                          <div className="flex-1 h-px bg-gray-200" />
                         </div>
-                        <div className="flex items-center gap-2 text-[10px] text-gray-500">
-                          <span className="font-medium">À :</span>
-                          <span className="font-mono">{previewLead.email}</span>
+                      )}
+                      <div className={cn("border rounded-lg overflow-hidden transition-all",
+                        previewEditIdx === sIdx ? "border-violet-300 bg-violet-50/30" : "border-gray-200")}>
+                        <div className="px-3 py-2 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded">Email {seq.seq_number}</span>
+                            <span className="text-[10px] text-gray-400">{seq.seq_delay_details?.delay_in_days ? `+${seq.seq_delay_details.delay_in_days}j` : "J0"}</span>
+                          </div>
+                          <button onClick={() => setPreviewEditIdx(previewEditIdx === sIdx ? null : sIdx)} title="Modifier"
+                            className="p-1 text-gray-400 hover:text-violet-600 cursor-pointer"><Pencil className="w-3 h-3" /></button>
                         </div>
-                        <div className="flex items-center gap-2 text-xs text-gray-800">
-                          <span className="font-medium text-[10px] text-gray-500">Sujet :</span>
-                          <span className="font-semibold">{previewSubstitute(seq.subject, previewLead)}</span>
+                        <div className="p-3 space-y-1.5">
+                          <div className="flex items-center gap-2 text-[10px] text-gray-500">
+                            <span className="font-medium">De :</span>
+                            <span>{campaignAccounts[0]?.from_email || "—"}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-[10px] text-gray-500">
+                            <span className="font-medium">À :</span>
+                            <span className="font-mono">{previewLead.email}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-gray-800">
+                            <span className="font-medium text-[10px] text-gray-500">Sujet :</span>
+                            <span className="font-semibold">{previewSubstitute(seq.subject, previewLead)}</span>
+                          </div>
+                          <div className="mt-2 p-3 bg-white border border-gray-100 rounded-lg text-xs text-gray-700 whitespace-pre-line"
+                            dangerouslySetInnerHTML={{ __html: previewSubstitute(seq.email_body || "", previewLead) }} />
+                          {previewEditIdx === sIdx && (
+                            <div className="mt-2 pt-2 border-t border-gray-200 space-y-2">
+                              <div className="flex items-center gap-2">
+                                <input value={rewriteInstruction} onChange={(ev) => setRewriteInstruction(ev.target.value)}
+                                  placeholder="Instruction IA : Plus court, change l'angle, ajoute un chiffre..."
+                                  className="flex-1 px-2 py-1.5 text-[10px] border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400"
+                                  onKeyDown={(ev) => ev.key === "Enter" && rewriteSavedEmail(sIdx)} />
+                                <button onClick={() => rewriteSavedEmail(sIdx)} disabled={rewriteLoading}
+                                  className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer">
+                                  {rewriteLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+                                  Réécrire IA
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <div className="mt-2 p-3 bg-white border border-gray-100 rounded-lg text-xs text-gray-700 whitespace-pre-line"
-                          dangerouslySetInnerHTML={{ __html: previewSubstitute(seq.email_body || "", previewLead) }} />
                       </div>
                     </div>
                   ))}
@@ -1081,6 +1155,21 @@ export default function SequencesPage() {
                 <p className="text-xs text-gray-400 text-center py-6">Aucun lead importé. Retournez à l&apos;étape 2 pour en ajouter.</p>
               )}
             </div>
+
+            {/* Lead navigation — bottom */}
+            {leads.length > 1 && (
+              <div className="flex items-center justify-center gap-3">
+                <button onClick={() => setPreviewLeadIdx(Math.max(0, previewLeadIdx - 1))} disabled={previewLeadIdx === 0}
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-30 cursor-pointer">
+                  <ChevronLeft className="w-3.5 h-3.5" /> Lead précédent
+                </button>
+                <span className="text-[10px] text-gray-400">{previewLeadIdx + 1} / {leads.length}</span>
+                <button onClick={() => setPreviewLeadIdx(Math.min(leads.length - 1, previewLeadIdx + 1))} disabled={previewLeadIdx >= leads.length - 1}
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-30 cursor-pointer">
+                  Lead suivant <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
 
             {/* Navigation + Launch */}
             <div className="flex justify-between items-center">
@@ -1465,8 +1554,10 @@ export default function SequencesPage() {
                       <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1">
                         <Timer className="w-3 h-3 text-amber-500" />
                         <span className="text-[10px] text-amber-700">Attendre</span>
-                        <input type="number" min={1} max={30} value={seq.seq_delay_details?.delay_in_days || 0}
-                          onChange={(ev) => updateSavedDelay(idx, Number(ev.target.value))}
+                        <input type="number" min={1} max={30} value={getLocalDelay(idx)}
+                          onChange={(ev) => setLocalDelayVal(idx, Number(ev.target.value))}
+                          onBlur={() => commitSavedDelay(idx)}
+                          onKeyDown={(ev) => ev.key === "Enter" && commitSavedDelay(idx)}
                           className="w-10 text-center text-[10px] font-bold text-amber-800 border border-amber-300 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-amber-400" />
                         <span className="text-[10px] text-amber-700">jour(s)</span>
                       </div>
