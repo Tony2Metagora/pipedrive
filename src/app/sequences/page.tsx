@@ -5,7 +5,7 @@ import {
   Mail, Plus, Loader2, Send, Pause, Square, Users,
   ChevronRight, Eye, Upload, Play, X, Check, FileUp,
   ArrowLeft, Clock, MousePointerClick, Reply, AlertTriangle,
-  Settings2, CheckSquare, SquareIcon, Zap, Shield, MessageSquare,
+  Settings2, CheckSquare, SquareIcon, Zap, Shield, MessageSquare, Sparkles, Save,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -227,6 +227,12 @@ export default function SequencesPage() {
     track_click: true,
   });
 
+  // AI email generation
+  const [showAiGen, setShowAiGen] = useState(false);
+  const [aiGenLoading, setAiGenLoading] = useState(false);
+  const [aiContext, setAiContext] = useState({ leadOrigin: "", leadProfile: "", campaignGoal: "", tone: "professionnel mais chaleureux, tutoiement" });
+  const [aiEmails, setAiEmails] = useState<{ seq_number: number; delay_days: number; subject: string; body: string }[]>([]);
+
   // ─── Data fetching ──────────────────────────────────────
 
   const flash = (msg: string) => { setActionMsg(msg); setTimeout(() => setActionMsg(null), 3500); };
@@ -326,6 +332,45 @@ export default function SequencesPage() {
     if (!importPreview.length) { setError("Aucun email valide"); return; }
     await doAction("add-leads", { leads: importPreview });
     setShowImport(false); setImportText(""); setImportPreview([]);
+  };
+
+  // ─── AI email generation ────────────────────────────────
+
+  const generateAiEmails = async () => {
+    if (!aiContext.campaignGoal.trim()) { setError("Décrivez le but de la campagne"); return; }
+    setAiGenLoading(true); setError(null);
+    try {
+      const res = await fetch("/api/sequences/generate-emails", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          campaignName: campaign?.name || "",
+          leadOrigin: aiContext.leadOrigin,
+          leadProfile: aiContext.leadProfile,
+          campaignGoal: aiContext.campaignGoal,
+          tone: aiContext.tone,
+          senderName: "Tony",
+        }),
+      });
+      const d = await res.json();
+      if (d.error) throw new Error(d.error);
+      setAiEmails(d.emails || []);
+    } catch (e) { setError(String(e)); }
+    setAiGenLoading(false);
+  };
+
+  const saveAiEmails = async () => {
+    if (!aiEmails.length || !selectedId) return;
+    const formatted = aiEmails.map((e) => ({
+      subject: e.subject,
+      email_body: e.body,
+      seq_number: e.seq_number,
+      seq_delay_details: { delay_in_days: e.delay_days },
+    }));
+    await doAction("save-sequences", { sequences: formatted });
+    setAiEmails([]);
+    setShowAiGen(false);
+    flash("Séquence IA sauvegardée !");
+    if (selectedId) openDetail(selectedId);
   };
 
   // ─── Create campaign ───────────────────────────────────
@@ -695,11 +740,90 @@ export default function SequencesPage() {
           {/* ═══ SEQUENCES TAB ═══ */}
           {detailTab === "sequences" && (
             <div className="space-y-3">
-              {sequences.length === 0 ? (
+              {/* AI Generation button */}
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-violet-500" /> Séquences ({sequences.length})
+                </h3>
+                <button onClick={() => setShowAiGen(!showAiGen)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 cursor-pointer">
+                  <Sparkles className="w-3.5 h-3.5" /> Générer avec l&apos;IA
+                </button>
+              </div>
+
+              {/* AI Generation form */}
+              {showAiGen && (
+                <div className="bg-gradient-to-br from-violet-50 to-indigo-50 rounded-lg border border-violet-200 p-4 space-y-3">
+                  <h4 className="text-xs font-semibold text-violet-800 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5" /> Génération IA — Décrivez votre campagne
+                  </h4>
+                  <p className="text-[10px] text-violet-600">L&apos;IA analysera les séquences de vos autres campagnes et appliquera les bonnes pratiques du cold emailing pour générer 3 emails optimisés.</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] font-semibold text-gray-600">Origine des leads</label>
+                      <input value={aiContext.leadOrigin} onChange={(e) => setAiContext({ ...aiContext, leadOrigin: e.target.value })}
+                        placeholder="Ex: Salon Learning Days, scraping LinkedIn, base Dropcontact..."
+                        className="w-full mt-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 outline-none" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-semibold text-gray-600">Profil des leads (qui sont-ils ?)</label>
+                      <input value={aiContext.leadProfile} onChange={(e) => setAiContext({ ...aiContext, leadProfile: e.target.value })}
+                        placeholder="Ex: Responsables formation dans le retail/luxe, 500+ salariés"
+                        className="w-full mt-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 outline-none" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-semibold text-gray-600">But de la campagne *</label>
+                    <textarea value={aiContext.campaignGoal} onChange={(e) => setAiContext({ ...aiContext, campaignGoal: e.target.value })} rows={2}
+                      placeholder="Ex: Obtenir un RDV de démo pour présenter Simsell (formation immersive IA) aux responsables formation retail"
+                      className="w-full mt-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 outline-none resize-none" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-semibold text-gray-600">Ton</label>
+                    <input value={aiContext.tone} onChange={(e) => setAiContext({ ...aiContext, tone: e.target.value })}
+                      className="w-full mt-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 outline-none" />
+                  </div>
+                  <button onClick={generateAiEmails} disabled={aiGenLoading || !aiContext.campaignGoal.trim()}
+                    className="flex items-center gap-2 px-4 py-2 text-xs font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 cursor-pointer">
+                    {aiGenLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                    {aiGenLoading ? "Génération en cours (10-15s)..." : "Générer 3 emails"}
+                  </button>
+
+                  {/* AI Generated preview */}
+                  {aiEmails.length > 0 && (
+                    <div className="space-y-2 pt-2 border-t border-violet-200">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[10px] font-semibold text-violet-700">Aperçu des emails générés</p>
+                        <button onClick={saveAiEmails} disabled={actionLoading}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50 cursor-pointer">
+                          {actionLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                          Sauvegarder dans Smartlead
+                        </button>
+                      </div>
+                      {aiEmails.map((e) => (
+                        <div key={e.seq_number} className="bg-white rounded-lg border border-violet-100 p-3">
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <span className="text-[10px] font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded">Email {e.seq_number}</span>
+                            <span className="text-[10px] text-gray-400">{e.delay_days === 0 ? "Premier email (J0)" : `+${e.delay_days} jour(s)`}</span>
+                          </div>
+                          <p className="text-xs font-semibold text-gray-800 mb-1">Sujet : {e.subject}</p>
+                          <div className="bg-gray-50 rounded p-2 text-[11px] text-gray-700 whitespace-pre-line">{e.body}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Existing sequences */}
+              {sequences.length === 0 && !showAiGen ? (
                 <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
-                  <Clock className="w-10 h-10 mx-auto mb-3 text-gray-300" />
-                  <p className="text-sm font-medium text-gray-600">Aucune séquence email configurée</p>
-                  <p className="text-xs text-gray-400 mt-1">Configurez vos emails directement dans Smartlead puis retrouvez-les ici.</p>
+                  <Sparkles className="w-10 h-10 mx-auto mb-3 text-violet-300" />
+                  <p className="text-sm font-medium text-gray-600">Aucune séquence email</p>
+                  <p className="text-xs text-gray-400 mt-1">Utilisez l&apos;IA pour générer vos emails ou configurez-les dans Smartlead.</p>
+                  <button onClick={() => setShowAiGen(true)} className="mt-3 flex items-center gap-1.5 mx-auto px-4 py-2 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 cursor-pointer">
+                    <Sparkles className="w-3.5 h-3.5" /> Générer avec l&apos;IA
+                  </button>
                 </div>
               ) : sequences.map((seq) => (
                 <div key={seq.seq_number} className="bg-white rounded-lg border border-gray-200 p-4">
