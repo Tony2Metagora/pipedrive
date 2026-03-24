@@ -39,7 +39,7 @@ const STYLE_EXAMPLES = `STYLE D'ÉCRITURE DE TONY (à reproduire fidèlement) :
 - Termine par une question ouverte pour engager les lecteurs.
 - Utilise des tirets longs "—" et "→" pour structurer.
 - Tags des personnes quand pertinent.
-- Hashtags en fin de post : #RetailTech #IA #Formation #Retail #Luxe
+- JAMAIS de hashtags (#). Pas de #RetailTech, #IA, etc. Les hashtags nuisent à la portée organique LinkedIn.
 - Longueur : 150-300 mots (ni trop court ni pavé).
 - JAMAIS de jargon corporate vide ("synergie", "disruption", "innovation paradigmatique").
 - Ton humble mais affirmé : il partage ce qu'il apprend, pas ce qu'il sait déjà.
@@ -333,7 +333,7 @@ MISSION : Tony a assisté ou est intervenu à un événement (en ligne ou en pr�
 5. Garde les données/chiffres intéressants du post original
 6. Entre 150 et 300 mots
 7. Termine par une question ouverte pour l'engagement
-8. Hashtags pertinents en fin de post
+8. PAS de hashtags (#) — jamais
 - IMPORTANT pour le thème "IA dans la formation" : le e-learning (SCORM, LMS) n'est PAS obsolète. Ton constructif : constat terrain + solution IA.`,
         },
         {
@@ -386,7 +386,7 @@ MISSION : Tony a trouvé un post LinkedIn inspirant et veut s'en inspirer pour �
 6. Entre 150 et 300 mots
 7. Commence par une accroche forte
 8. Termine par une question ouverte
-9. Hashtags pertinents en fin de post
+9. PAS de hashtags (#) — jamais
 - IMPORTANT pour le thème "IA dans la formation" : le e-learning (SCORM, LMS) n'est PAS obsolète. Ton constructif : constat terrain + solution IA.`,
         },
         {
@@ -435,7 +435,7 @@ CONSIGNES IMPÉRATIVES :
 - Le post doit faire entre 150 et 300 mots.
 - Commence par une accroche forte (fait choc, question rhétorique, ou anecdote).
 - Termine par une question ouverte pour l'engagement.
-- Ajoute des hashtags pertinents à la fin.
+- PAS de hashtags (#) — jamais. Les hashtags nuisent à la portée organique LinkedIn.
 - N'utilise JAMAIS de jargon corporate vide.
 - Écris en FRANÇAIS.
 - IMPORTANT pour le thème "IA dans la formation" : le e-learning (SCORM, LMS) n'est PAS obsolète ni à critiquer. 90% des entreprises utilisent encore ce modèle. Le ton doit être constructif : constat terrain (les entreprises sont coincées avec SCORM) + solution (l'IA vient enrichir et compléter le e-learning existant, pas le remplacer). Le e-learning sert à ancrer les connaissances. Pas de discours "le e-learning est mort" mais plutôt "comment l'IA transforme le e-learning".
@@ -703,6 +703,7 @@ Chaque idée doit être un MINI-POST structuré de 3-4 lignes selon les bonnes p
 - Ligne 4 : Conclusion/question ouverte ou CTA
 
 Format : chaque idée fait 3-4 lignes, lisible, structurée. PAS juste un titre.
+JAMAIS de hashtags (#). Pas de lignes qui ne contiennent que des hashtags.
 Ton direct, authentique, emojis modérés, style Tony.`,
         },
         {
@@ -759,6 +760,7 @@ Chaque idée doit être un MINI-POST structuré de 3-4 lignes selon les bonnes p
 
 Format : chaque idée fait 3-4 lignes, lisible, structurée. PAS juste un titre.
 Extrais les insights les plus intéressants, les données chiffrées, les anecdotes, les tendances.
+JAMAIS de hashtags (#). Pas de lignes qui ne contiennent que des hashtags.
 Ton direct, authentique, emojis modérés, style Tony.`,
         },
         {

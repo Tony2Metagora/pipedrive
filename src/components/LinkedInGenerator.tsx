@@ -99,7 +99,7 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
   const getGeneratePhase = (elapsed: number) => {
     if (elapsed < 3) return "Préparation du prompt…";
     if (elapsed < 8) return "Rédaction du post…";
-    if (elapsed < 15) return "Structuration & hashtags…";
+    if (elapsed < 15) return "Structuration & finalisation…";
     return "Finalisation…";
   };
 
@@ -399,8 +399,10 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
             <textarea
               value={promptInput}
               onChange={(e) => setPromptInput(e.target.value)}
-              placeholder="Ex: Je veux parler de l'impact de l'IA sur la formation retail, de mon expérience au salon NRF, ou de comment les dupes changent le luxe..."
-              rows={4}
+              placeholder={ideas.length > 0
+                ? "Modifie ou précise ton prompt pour regénérer les idées…"
+                : "Ex: Je veux parler de l'impact de l'IA sur la formation retail, de mon expérience au salon NRF, ou de comment les dupes changent le luxe..."}
+              rows={ideas.length > 0 ? 3 : 4}
               className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-300 outline-none resize-y mb-3"
             />
             <button
@@ -409,7 +411,7 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
               className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
             >
               {ideasLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              {ideasLoading ? "Génération en cours…" : "Générer 6 idées de posts"}
+              {ideasLoading ? "Génération en cours…" : ideas.length > 0 ? "Regénérer les idées" : "Générer 6 idées de posts"}
             </button>
           </div>
         )}
@@ -470,14 +472,16 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
               <p className="text-xs text-gray-400 py-2 mb-3">Aucun fichier uploadé. Commence par en importer un.</p>
             )}
 
-            {/* Additional prompt for file mode */}
+            {/* Additional prompt for file mode — always visible once a file is selected */}
             {selectedFileId && (
-              <input
-                type="text"
+              <textarea
                 value={fileAdditionalPrompt}
                 onChange={(e) => setFileAdditionalPrompt(e.target.value)}
-                placeholder="Indication supplémentaire (optionnel) : angle, focus, public cible..."
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-violet-300 outline-none mb-3"
+                placeholder={ideas.length > 0
+                  ? "Donne un nouveau contexte ou angle pour regénérer les idées…"
+                  : "Indication supplémentaire (optionnel) : angle, focus, public cible..."}
+                rows={ideas.length > 0 ? 3 : 2}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-violet-300 outline-none resize-y mb-3"
               />
             )}
 
@@ -487,7 +491,7 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
               className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-violet-600 rounded-xl hover:bg-violet-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
             >
               {ideasLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              {ideasLoading ? "Analyse en cours…" : "Analyser et générer 6 idées"}
+              {ideasLoading ? "Analyse en cours…" : ideas.length > 0 ? "Regénérer avec ce contexte" : "Analyser et générer 6 idées"}
             </button>
           </div>
         )}
