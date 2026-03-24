@@ -121,9 +121,13 @@ export async function deleteSource(id: string): Promise<void> {
 
 export interface LinkedInFile {
   id: string;
-  name: string;           // original filename
+  name: string;           // original filename or URL
   size: number;           // bytes
-  mimeType: string;       // "application/pdf", "text/plain", etc.
+  mimeType: string;       // "application/pdf", "text/plain", "text/html", etc.
+  sourceType: "file" | "web";  // file upload or web link
+  url?: string;           // original URL (web sources only)
+  theme?: string;         // associated theme key: "journal-ceo" | "ia-formation" | ...
+  comment?: string;       // user comment about this source
   extractedText: string;  // full extracted text content
   createdAt: string;      // ISO
 }
@@ -151,6 +155,19 @@ export async function createFile(file: Omit<LinkedInFile, "id" | "createdAt">): 
     await writeBlob(FILES_KEY, files);
   });
   return entry;
+}
+
+export async function updateFile(id: string, data: Partial<LinkedInFile>): Promise<LinkedInFile | null> {
+  let result: LinkedInFile | null = null;
+  await withLock(FILES_KEY, async () => {
+    const files = await readBlob<LinkedInFile>(FILES_KEY);
+    const idx = files.findIndex((f) => f.id === id);
+    if (idx === -1) return;
+    files[idx] = { ...files[idx], ...data, id };
+    result = files[idx];
+    await writeBlob(FILES_KEY, files);
+  });
+  return result;
 }
 
 export async function deleteFile(id: string): Promise<void> {

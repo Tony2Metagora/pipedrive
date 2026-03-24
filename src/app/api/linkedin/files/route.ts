@@ -1,13 +1,14 @@
 /**
- * API Route — LinkedIn File Sources
- * POST   : upload a file (PDF/TXT/MD/DOCX) → extract text → store
- * GET    : list all uploaded files (without full text for performance)
- * DELETE : remove a file by id
+ * API Route — LinkedIn Sources (files + web links)
+ * POST   : upload a file (PDF/TXT/MD/DOCX) or add a web link → extract text → store
+ * GET    : list all sources (without full text for performance)
+ * PATCH  : update theme / comment on a source
+ * DELETE : remove a source by id
  */
 
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-guard";
-import { getFiles, getFile, createFile, deleteFile } from "@/lib/linkedin-store";
+import { getFiles, createFile, updateFile, deleteFile } from "@/lib/linkedin-store";
 
 export const dynamic = "force-dynamic";
 
@@ -73,15 +74,101 @@ function extractTextFromPdfBuffer(buffer: ArrayBuffer): string {
   return deduped.join(" ").replace(/\s+/g, " ").trim();
 }
 
-/* ── POST: upload file ──────────────────────────────────── */
+/* ── Web page text extraction ─────────────────────────────── */
+
+async function extractTextFromUrl(url: string): Promise<{ text: string; title: string }> {
+  const res = await fetch(url, {
+    headers: { "User-Agent": "Mozilla/5.0 (compatible; MetagoraBot/1.0)" },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status} — impossible de charger la page`);
+  const html = await res.text();
+
+  // Extract <title>
+  const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+  const title = titleMatch?.[1]?.trim() || new URL(url).hostname;
+
+  // Strip scripts, styles, tags → plain text
+  const cleaned = html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<nav[\s\S]*?<\/nav>/gi, " ")
+    .replace(/<footer[\s\S]*?<\/footer>/gi, " ")
+    .replace(/<header[\s\S]*?<\/header>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return { text: cleaned, title };
+}
+
+/* ── POST: upload file or add web link ─────────────────────── */
 
 export async function POST(request: Request) {
   const guard = await requireAuth("linkedin", "POST");
   if (guard.denied) return guard.denied;
 
   try {
+    const contentType = request.headers.get("content-type") || "";
+
+    // ── Web link source (JSON body) ──
+    if (contentType.includes("application/json")) {
+      const body = await request.json();
+      const { url, theme, comment } = body as { url?: string; theme?: string; comment?: string };
+
+      if (!url || !url.startsWith("http")) {
+        return NextResponse.json({ error: "URL valide requise (https://...)" }, { status: 400 });
+      }
+
+      const { text, title } = await extractTextFromUrl(url);
+      if (!text || text.length < 50) {
+        return NextResponse.json({ error: "Impossible d'extraire du texte de cette page." }, { status: 400 });
+      }
+
+      // Truncate
+      const MAX_TEXT_LENGTH = 100_000;
+      const extractedText = text.length > MAX_TEXT_LENGTH
+        ? text.slice(0, MAX_TEXT_LENGTH) + "\n\n[... texte tronqué]"
+        : text;
+
+      const stored = await createFile({
+        name: title,
+        size: new TextEncoder().encode(extractedText).length,
+        mimeType: "text/html",
+        sourceType: "web",
+        url,
+        theme: theme || undefined,
+        comment: comment || undefined,
+        extractedText,
+      });
+
+      return NextResponse.json({
+        data: {
+          id: stored.id,
+          name: stored.name,
+          size: stored.size,
+          sourceType: stored.sourceType,
+          url: stored.url,
+          theme: stored.theme,
+          comment: stored.comment,
+          textLength: extractedText.length,
+          createdAt: stored.createdAt,
+        },
+      });
+    }
+
+    // ── File upload source (FormData body) ──
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
+    const theme = (formData.get("theme") as string) || undefined;
+    const comment = (formData.get("comment") as string) || undefined;
+
     if (!file) {
       return NextResponse.json({ error: "Fichier requis" }, { status: 400 });
     }
@@ -141,6 +228,9 @@ export async function POST(request: Request) {
       name: file.name,
       size: file.size,
       mimeType: file.type || "application/octet-stream",
+      sourceType: "file",
+      theme,
+      comment,
       extractedText,
     });
 
@@ -149,6 +239,9 @@ export async function POST(request: Request) {
         id: stored.id,
         name: stored.name,
         size: stored.size,
+        sourceType: stored.sourceType,
+        theme: stored.theme,
+        comment: stored.comment,
         mimeType: stored.mimeType,
         textLength: extractedText.length,
         createdAt: stored.createdAt,
@@ -160,7 +253,7 @@ export async function POST(request: Request) {
   }
 }
 
-/* ── GET: list files (without full text) ─────────────────── */
+/* ── GET: list sources (without full text) ────────────────── */
 
 export async function GET() {
   const guard = await requireAuth("linkedin", "GET");
@@ -174,6 +267,10 @@ export async function GET() {
       name: f.name,
       size: f.size,
       mimeType: f.mimeType,
+      sourceType: f.sourceType || "file",
+      url: f.url,
+      theme: f.theme,
+      comment: f.comment,
       textLength: f.extractedText.length,
       preview: f.extractedText.slice(0, 200),
       createdAt: f.createdAt,
@@ -185,7 +282,31 @@ export async function GET() {
   }
 }
 
-/* ── DELETE: remove a file ──────────────────────────────── */
+/* ── PATCH: update theme / comment on a source ────────────── */
+
+export async function PATCH(request: Request) {
+  const guard = await requireAuth("linkedin", "PATCH");
+  if (guard.denied) return guard.denied;
+
+  try {
+    const body = await request.json();
+    const { id, theme, comment } = body as { id: string; theme?: string; comment?: string };
+    if (!id) return NextResponse.json({ error: "ID requis" }, { status: 400 });
+
+    const updated = await updateFile(id, {
+      ...(theme !== undefined ? { theme } : {}),
+      ...(comment !== undefined ? { comment } : {}),
+    });
+
+    if (!updated) return NextResponse.json({ error: "Source introuvable" }, { status: 404 });
+    return NextResponse.json({ data: { id: updated.id, theme: updated.theme, comment: updated.comment } });
+  } catch (error) {
+    console.error("PATCH /api/linkedin/files error:", error);
+    return NextResponse.json({ error: String(error) }, { status: 500 });
+  }
+}
+
+/* ── DELETE: remove a source ──────────────────────────────── */
 
 export async function DELETE(request: Request) {
   const guard = await requireAuth("linkedin", "DELETE");
