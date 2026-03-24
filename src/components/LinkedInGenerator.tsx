@@ -238,9 +238,15 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
       const json = await res.json();
       if (json.error) { setError(json.error); return; }
       setGeneratedPost(json.data?.post || "");
-      setImagePrompt(json.data?.imagePrompt || "");
+      const imgPrompt = json.data?.imagePrompt || "";
+      setImagePrompt(imgPrompt);
       setEditMode(false);
       setEditedPost("");
+      // Auto-search images with the generated prompt
+      if (imgPrompt) {
+        setImageQuery(imgPrompt);
+        handleImageSearch(imgPrompt);
+      }
     } catch (err) { setError(String(err)); }
     finally { setGenerateLoading(false); }
   };
