@@ -7,7 +7,7 @@ import { signOut } from "next-auth/react";
 import {
   Users, Database, LayoutDashboard, Linkedin, Globe,
   Mail, ChevronDown, ChevronRight, LogOut, Settings,
-  Home, Sparkles, Bot, PanelLeftClose, PanelLeftOpen, Flame,
+  Home, Sparkles, Bot, PanelLeftClose, PanelLeftOpen, Flame, BarChart3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePermissions, canRead } from "@/hooks/usePermissions";
@@ -34,7 +34,8 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/scrapping", label: "Scrapping", icon: Database, viewKey: "scrapping" },
       { href: "/prospects", label: "Prospects", icon: Users, viewKey: "prospects" },
-      { href: "/pipeline", label: "Affaires", icon: LayoutDashboard, viewKey: "pipeline" },
+      { href: "/dashboard", label: "Affaires", icon: LayoutDashboard, viewKey: "dashboard" },
+      { href: "/pipeline", label: "Analytics", icon: BarChart3, viewKey: "pipeline" },
     ],
   },
   {
