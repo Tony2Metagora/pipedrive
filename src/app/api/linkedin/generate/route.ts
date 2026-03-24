@@ -12,6 +12,7 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-guard";
 import { askAzureAI, askAzureFast } from "@/lib/azure-ai";
+import { getFile } from "@/lib/linkedin-store";
 
 export const dynamic = "force-dynamic";
 
@@ -676,6 +677,112 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       } catch {
         const lines = result.split("\n").filter(Boolean).slice(0, 10);
         return NextResponse.json({ data: { ideas: lines } });
+      }
+    }
+
+    // ── prompt-ideas: generate 6 post ideas from a free prompt ──
+    if (action === "prompt-ideas") {
+      const { prompt } = body;
+      if (!prompt) return NextResponse.json({ error: "Prompt requis" }, { status: 400 });
+
+      const result = await askAzureFast([
+        {
+          role: "system",
+          content: `Tu es un expert LinkedIn et content strategist pour Tony, CEO de Metagora.
+
+${EDITORIAL_LINE}
+
+${METAGORA_KNOWLEDGE}
+
+${STYLE_EXAMPLES}
+
+MISSION : À partir du prompt de Tony, propose exactement 6 idées de posts LinkedIn.
+Chaque idée doit être un MINI-POST structuré de 3-4 lignes selon les bonnes pratiques LinkedIn :
+- Ligne 1 : Accroche forte (fait choc, question, anecdote)
+- Ligne 2-3 : Développement (angle, argument, donnée)
+- Ligne 4 : Conclusion/question ouverte ou CTA
+
+Format : chaque idée fait 3-4 lignes, lisible, structurée. PAS juste un titre.
+Ton direct, authentique, emojis modérés, style Tony.`,
+        },
+        {
+          role: "user",
+          content: `Prompt de Tony : "${prompt}"
+
+Propose exactement 6 idées de posts LinkedIn (3-4 lignes chacune).
+Réponds en JSON : {"ideas": ["idée 1 (3-4 lignes)", "idée 2 (3-4 lignes)", ...]}
+Chaque idée = un mini-post structuré de 3-4 lignes avec sauts de ligne (\\n).
+Pas de markdown, pas de backticks, juste le JSON.`,
+        },
+      ], 2500);
+
+      try {
+        const cleaned = result.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+        const parsed = JSON.parse(cleaned);
+        return NextResponse.json({ data: parsed });
+      } catch {
+        const lines = result.split("\n\n").filter(Boolean).slice(0, 6);
+        return NextResponse.json({ data: { ideas: lines } });
+      }
+    }
+
+    // ── file-ideas: analyze an uploaded file and suggest 6 post ideas ──
+    if (action === "file-ideas") {
+      const { fileId, additionalPrompt } = body;
+      if (!fileId) return NextResponse.json({ error: "fileId requis" }, { status: 400 });
+
+      const file = await getFile(fileId);
+      if (!file) return NextResponse.json({ error: "Fichier introuvable" }, { status: 404 });
+
+      // Truncate text to fit in context window (~30K chars max for the file content)
+      const maxChars = 30000;
+      const fileText = file.extractedText.length > maxChars
+        ? file.extractedText.slice(0, maxChars) + "\n[... tronqué]"
+        : file.extractedText;
+
+      const result = await askAzureFast([
+        {
+          role: "system",
+          content: `Tu es un expert LinkedIn et content strategist pour Tony, CEO de Metagora.
+
+${EDITORIAL_LINE}
+
+${METAGORA_KNOWLEDGE}
+
+${STYLE_EXAMPLES}
+
+MISSION : Analyse le document fourni par Tony et propose exactement 6 idées de posts LinkedIn inspirées du contenu.
+Chaque idée doit être un MINI-POST structuré de 3-4 lignes selon les bonnes pratiques LinkedIn :
+- Ligne 1 : Accroche forte (fait choc, question, anecdote tirée du document)
+- Ligne 2-3 : Développement (angle, argument, donnée du document)
+- Ligne 4 : Conclusion/question ouverte ou CTA
+
+Format : chaque idée fait 3-4 lignes, lisible, structurée. PAS juste un titre.
+Extrais les insights les plus intéressants, les données chiffrées, les anecdotes, les tendances.
+Ton direct, authentique, emojis modérés, style Tony.`,
+        },
+        {
+          role: "user",
+          content: `Document : "${file.name}"
+---
+${fileText}
+---
+${additionalPrompt ? `\nIndication supplémentaire de Tony : ${additionalPrompt}` : ""}
+
+Analyse ce document et propose exactement 6 idées de posts LinkedIn (3-4 lignes chacune).
+Réponds en JSON : {"ideas": ["idée 1 (3-4 lignes)", "idée 2 (3-4 lignes)", ...]}
+Chaque idée = un mini-post structuré de 3-4 lignes avec sauts de ligne (\\n).
+Pas de markdown, pas de backticks, juste le JSON.`,
+        },
+      ], 2500);
+
+      try {
+        const cleaned = result.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+        const parsed = JSON.parse(cleaned);
+        return NextResponse.json({ data: parsed });
+      } catch {
+        const ideas = result.split("\n\n").filter(Boolean).slice(0, 6);
+        return NextResponse.json({ data: { ideas } });
       }
     }
 

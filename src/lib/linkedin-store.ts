@@ -1,9 +1,10 @@
 /**
- * LinkedIn Store — persistence for calendar posts & sourcing sites.
+ * LinkedIn Store — persistence for calendar posts, sourcing sites & uploaded files.
  *
  * Keys:
  *   linkedin-posts    → LinkedInPost[]
  *   linkedin-sources  → LinkedInSource[]
+ *   linkedin-files    → LinkedInFile[]
  */
 
 import { readBlob, writeBlob, withLock } from "@/lib/blob-store";
@@ -112,5 +113,48 @@ export async function deleteSource(id: string): Promise<void> {
   await withLock(SOURCES_KEY, async () => {
     const sources = await readBlob<LinkedInSource>(SOURCES_KEY);
     await writeBlob(SOURCES_KEY, sources.filter((s) => s.id !== id));
+  });
+}
+
+// ─── Files (uploaded document sources) ──────────────────
+
+export interface LinkedInFile {
+  id: string;
+  name: string;           // original filename
+  size: number;           // bytes
+  mimeType: string;       // "application/pdf", "text/plain", etc.
+  extractedText: string;  // full extracted text content
+  createdAt: string;      // ISO
+}
+
+const FILES_KEY = "linkedin-files.json";
+
+export async function getFiles(): Promise<LinkedInFile[]> {
+  return readBlob<LinkedInFile>(FILES_KEY);
+}
+
+export async function getFile(id: string): Promise<LinkedInFile | null> {
+  const files = await getFiles();
+  return files.find((f) => f.id === id) ?? null;
+}
+
+export async function createFile(file: Omit<LinkedInFile, "id" | "createdAt">): Promise<LinkedInFile> {
+  const entry: LinkedInFile = {
+    ...file,
+    id: `lf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    createdAt: new Date().toISOString(),
+  };
+  await withLock(FILES_KEY, async () => {
+    const files = await readBlob<LinkedInFile>(FILES_KEY);
+    files.push(entry);
+    await writeBlob(FILES_KEY, files);
+  });
+  return entry;
+}
+
+export async function deleteFile(id: string): Promise<void> {
+  await withLock(FILES_KEY, async () => {
+    const files = await readBlob<LinkedInFile>(FILES_KEY);
+    await writeBlob(FILES_KEY, files.filter((f) => f.id !== id));
   });
 }

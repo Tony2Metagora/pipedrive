@@ -7,7 +7,7 @@ import { signOut } from "next-auth/react";
 import {
   Users, Database, LayoutDashboard, Linkedin, Globe,
   Mail, ChevronDown, ChevronRight, LogOut, Settings,
-  Home, Sparkles, Bot, PanelLeftClose, PanelLeftOpen, Flame, BarChart3,
+  Home, Sparkles, Bot, PanelLeftClose, PanelLeftOpen, Flame, BarChart3, FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePermissions, canRead } from "@/hooks/usePermissions";
@@ -44,6 +44,7 @@ const NAV_GROUPS: NavGroup[] = [
     defaultOpen: false,
     items: [
       { href: "/linkedin", label: "Posts", icon: Linkedin, viewKey: "linkedin" },
+      { href: "/linkedin/sources", label: "Sources", icon: FileText, viewKey: "linkedin" },
     ],
   },
   {
@@ -176,8 +177,8 @@ export default function Sidebar() {
               {isOpen && (
                 <div className="ml-3 mt-0.5 space-y-0.5">
                   {group.items.map((item) => {
-                    const isActive = item.href === "/sequences"
-                      ? pathname === "/sequences"
+                    const isActive = (item.href === "/sequences" || item.href === "/linkedin")
+                      ? pathname === item.href
                       : pathname.startsWith(item.href);
                     return (
                       <Link
