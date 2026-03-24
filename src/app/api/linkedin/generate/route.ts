@@ -12,7 +12,7 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-guard";
 import { askAzureAI, askAzureFast } from "@/lib/azure-ai";
-import { getFile } from "@/lib/linkedin-store";
+import { getFile, getLearnings } from "@/lib/linkedin-store";
 
 export const dynamic = "force-dynamic";
 
@@ -175,6 +175,17 @@ async function searchSource(url: string, theme: string): Promise<string> {
   }
 }
 
+/* ── Build learnings context block for AI prompts ─────────── */
+
+function formatLearningsBlock(learnings: { type: string; before: string; after: string; reason: string }[]): string {
+  if (learnings.length === 0) return "";
+  const items = learnings.slice(-20).map((l, i) => {
+    const label = l.type === "idea-edit" ? "Correction d'idée" : l.type === "post-edit" ? "Correction de post" : "Feedback style";
+    return `${i + 1}. [${label}] Raison : "${l.reason}"${l.before ? `\n   Avant : "${l.before.slice(0, 150)}…"` : ""}${l.after ? `\n   Après : "${l.after.slice(0, 150)}…"` : ""}`;
+  }).join("\n");
+  return `\nMÉMOIRE DES CORRECTIONS DE TONY (respecte ces apprentissages pour coller à son style) :\n${items}\n`;
+}
+
 /* ── POST handler ────────────────────────────────────────── */
 
 export async function POST(request: Request) {
@@ -184,6 +195,10 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { action } = body;
+
+    // Load learnings once for all actions that need them
+    const learnings = await getLearnings();
+    const learningsBlock = formatLearningsBlock(learnings);
 
     // ── suggest: 5 subjects without sources ──────────────
     if (action === "suggest") {
@@ -428,7 +443,7 @@ ${EDITORIAL_LINE}
 
 ${METAGORA_KNOWLEDGE}
 
-${STYLE_EXAMPLES}
+${STYLE_EXAMPLES}${learningsBlock}
 
 CONSIGNES IMPÉRATIVES :
 - Reproduis fidèlement le STYLE de Tony (ton direct, phrases courtes, emojis visuels, storytelling).
@@ -544,7 +559,7 @@ CONSIGNES :
 - Garde le même style et ton que le post original.
 - Applique les modifications demandées par Tony.
 - Garde entre 150 et 300 mots.
-- Retourne UNIQUEMENT le post modifié, rien d'autre.`,
+- Retourne UNIQUEMENT le post modifié, rien d'autre.${learningsBlock}`,
         },
         {
           role: "user",
@@ -704,7 +719,7 @@ Chaque idée doit être un MINI-POST structuré de 3-4 lignes selon les bonnes p
 
 Format : chaque idée fait 3-4 lignes, lisible, structurée. PAS juste un titre.
 JAMAIS de hashtags (#). Pas de lignes qui ne contiennent que des hashtags.
-Ton direct, authentique, emojis modérés, style Tony.`,
+Ton direct, authentique, emojis modérés, style Tony.${learningsBlock}`,
         },
         {
           role: "user",
@@ -761,7 +776,7 @@ Chaque idée doit être un MINI-POST structuré de 3-4 lignes selon les bonnes p
 Format : chaque idée fait 3-4 lignes, lisible, structurée. PAS juste un titre.
 Extrais les insights les plus intéressants, les données chiffrées, les anecdotes, les tendances.
 JAMAIS de hashtags (#). Pas de lignes qui ne contiennent que des hashtags.
-Ton direct, authentique, emojis modérés, style Tony.`,
+Ton direct, authentique, emojis modérés, style Tony.${learningsBlock}`,
         },
         {
           role: "user",
@@ -785,6 +800,46 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       } catch {
         const ideas = result.split("\n\n").filter(Boolean).slice(0, 6);
         return NextResponse.json({ data: { ideas } });
+      }
+    }
+
+    // ── refine-idea: modify a single idea based on user prompt ──
+    if (action === "refine-idea") {
+      const { idea, instructions } = body;
+      if (!idea || !instructions) return NextResponse.json({ error: "Idée et instructions requises" }, { status: 400 });
+
+      const result = await askAzureFast([
+        {
+          role: "system",
+          content: `Tu es un expert LinkedIn et content strategist pour Tony, CEO de Metagora.
+
+${EDITORIAL_LINE}
+
+${STYLE_EXAMPLES}${learningsBlock}
+
+MISSION : Tony a une idée de post LinkedIn qu'il veut modifier selon ses instructions.
+Réécris l'idée en gardant le format mini-post de 3-4 lignes.
+JAMAIS de hashtags (#).`,
+        },
+        {
+          role: "user",
+          content: `Idée actuelle :
+"${idea}"
+
+Instructions de modification : ${instructions}
+
+Réécris l'idée modifiée (3-4 lignes, même format mini-post).
+Réponds en JSON : {"idea": "l'idée modifiée (3-4 lignes avec \\n)"}
+Pas de markdown, juste le JSON.`,
+        },
+      ], 1000);
+
+      try {
+        const cleaned = result.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+        const parsed = JSON.parse(cleaned);
+        return NextResponse.json({ data: parsed });
+      } catch {
+        return NextResponse.json({ data: { idea: result.trim() } });
       }
     }
 

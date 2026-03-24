@@ -5,43 +5,31 @@ import {
   Sparkles, Loader2, Copy, Check, RefreshCw, Send,
   ImageIcon, Search, Download, ChevronRight,
   CheckCircle2, Calendar, Clock,
-  MessageSquare, FileUp, X,
+  MessageSquare, FileUp, X, Pencil, Save,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// ─── Types ──────────────────────────────────────────────
-
-interface FileItem {
-  id: string;
-  name: string;
-  size: number;
-  textLength: number;
-  preview: string;
-  createdAt: string;
-}
-
-const THEMES = [
-  { key: "journal-ceo", emoji: "1️⃣", name: "Journal d'un CEO", desc: "Rencontres retail/luxe, bonnes pratiques, personnes et marques inspirantes", color: "amber" },
-  { key: "ia-formation", emoji: "2️⃣", name: "IA dans la formation", desc: "E-learning (SCORM/LMS) = réalité de 90% des entreprises. L'IA l'enrichit, pas le remplace. Constat + solutions.", color: "blue" },
-  { key: "ia-operationnelle", emoji: "3️⃣", name: "IA Opérationnelle", desc: "Vulgarisation IA (agentique, LLM) → exploitation réelle chez Metagora", color: "emerald" },
-  { key: "evenement", emoji: "🎯", name: "Événement", desc: "Salons, conférences, webinars, meetups — avant/pendant/après", color: "purple" },
-];
-
-// ─── Reusable elapsed timer hook ─────────────────────────
+/* ── tiny elapsed-seconds hook ─────────────────────────── */
 function useElapsedTimer(active: boolean) {
   const [elapsed, setElapsed] = useState(0);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
-    if (active) {
-      setElapsed(0);
-      intervalRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
-    } else {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    }
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+    if (!active) { setElapsed(0); return; }
+    const t0 = Date.now();
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 500);
+    return () => clearInterval(id);
   }, [active]);
   return elapsed;
 }
+
+/* ── theme list ────────────────────────────────────────── */
+const THEMES = [
+  { key: "journal-ceo", emoji: "📓", name: "Journal d'un CEO", description: "Rencontres, bonnes pratiques, anecdotes business" },
+  { key: "ia-formation", emoji: "🧠", name: "L'IA dans la formation", description: "IA & formation retail/luxe, Simsell, upskilling" },
+  { key: "ia-operationnelle", emoji: "⚡", name: "L'IA opérationnelle", description: "IA concrète sur le terrain, ROI, cas d'usage" },
+  { key: "evenement", emoji: "🎤", name: "Événement", description: "Salons, conférences, rencontres terrain" },
+];
+
+type FileItem = { id: string; name: string; size: number; textLength: number; createdAt: string };
 
 export default function LinkedInGenerator({ onPostValidated }: { onPostValidated?: () => void }) {
   // Step 1: Mode
@@ -60,6 +48,12 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
   const [ideasLoading, setIdeasLoading] = useState(false);
   const [selectedIdeaIdx, setSelectedIdeaIdx] = useState<number | null>(null);
 
+  // Idea edit popup
+  const [editingIdeaIdx, setEditingIdeaIdx] = useState<number | null>(null);
+  const [ideaEditPrompt, setIdeaEditPrompt] = useState("");
+  const [ideaEditReason, setIdeaEditReason] = useState("");
+  const [ideaEditLoading, setIdeaEditLoading] = useState(false);
+
   // Step 3: Theme selection (after idea is chosen)
   const [selectedTheme, setSelectedTheme] = useState<string | null>(null);
 
@@ -69,12 +63,14 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
   const [copied, setCopied] = useState(false);
   const [imagePrompt, setImagePrompt] = useState("");
 
-  // Hooks
-  const [hooks, setHooks] = useState<string[]>([]);
-  const [hooksLoading, setHooksLoading] = useState(false);
-  const [selectedHook, setSelectedHook] = useState<string | null>(null);
-  const [hookRefineInput, setHookRefineInput] = useState("");
-  const [hookRefineLoading, setHookRefineLoading] = useState(false);
+  // Post manual edit mode
+  const [editMode, setEditMode] = useState(false);
+  const [editedPost, setEditedPost] = useState("");
+
+  // Save post popup (learning)
+  const [showSavePopup, setShowSavePopup] = useState(false);
+  const [saveReason, setSaveReason] = useState("");
+  const [saveLoading, setSaveLoading] = useState(false);
 
   // Refine
   const [refineInstructions, setRefineInstructions] = useState("");
@@ -103,26 +99,18 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
     return "Finalisation…";
   };
 
-  const getHookRefinePhase = (elapsed: number) => {
-    if (elapsed < 2) return "Analyse de l'accroche…";
-    if (elapsed < 5) return "Réécriture en cours…";
-    return "Finalisation…";
-  };
-
   const getIdeasPhase = (elapsed: number) => {
-    if (elapsed < 3) return "Analyse du prompt…";
-    if (elapsed < 6) return "Génération des idées…";
-    if (elapsed < 10) return "Structuration…";
+    if (elapsed < 3) return "Analyse du contenu…";
+    if (elapsed < 8) return "Extraction des insights…";
+    if (elapsed < 15) return "Création des idées…";
     return "Finalisation…";
   };
 
-  // Elapsed timers
-  const ideasElapsed = useElapsedTimer(ideasLoading);
   const generateElapsed = useElapsedTimer(generateLoading);
-  const hookRefineElapsed = useElapsedTimer(hookRefineLoading);
+  const ideasElapsed = useElapsedTimer(ideasLoading);
   const refineElapsed = useElapsedTimer(refineLoading);
 
-  // ─── Load files ──────────────────────────────────────
+  // ─── Load files when file mode activated ───────────────
 
   const loadFiles = useCallback(async () => {
     setFilesLoading(true);
@@ -130,58 +118,40 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
       const res = await fetch("/api/linkedin/files");
       const json = await res.json();
       setFiles(json.data || []);
-    } catch (err) {
-      console.error("Error loading files:", err);
-    } finally {
-      setFilesLoading(false);
-    }
+    } catch { /* ignore */ }
+    finally { setFilesLoading(false); }
   }, []);
 
-  useEffect(() => { loadFiles(); }, [loadFiles]);
+  useEffect(() => {
+    if (mode === "file") loadFiles();
+  }, [mode, loadFiles]);
 
-  // ─── Actions ──────────────────────────────────────────
+  // ─── File upload handler ───────────────────────────────
 
-  const resetFlow = () => {
-    setIdeas([]);
-    setSelectedIdeaIdx(null);
-    setSelectedTheme(null);
-    setGeneratedPost("");
-    setHooks([]);
-    setSelectedHook(null);
-    setImagePrompt("");
-    setError(null);
-  };
-
-  const handleModeSwitch = (newMode: Mode) => {
-    setMode(newMode);
-    resetFlow();
-    setPromptInput("");
-    setSelectedFileId(null);
-    setFileAdditionalPrompt("");
-  };
-
-  const handleUploadFile = async (file: File) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
     setUploading(true);
     setError(null);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch("/api/linkedin/files", { method: "POST", body: formData });
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/linkedin/files", { method: "POST", body: form });
       const json = await res.json();
       if (json.error) { setError(json.error); return; }
       await loadFiles();
-      setSelectedFileId(json.data.id);
+      setSelectedFileId(json.data?.id || null);
     } catch (err) { setError(String(err)); }
-    finally { setUploading(false); }
+    finally { setUploading(false); if (fileInputRef.current) fileInputRef.current.value = ""; }
   };
+
+  // ─── Generate ideas ────────────────────────────────────
 
   const handleGenerateIdeas = async () => {
     setIdeasLoading(true);
     setIdeas([]);
     setSelectedIdeaIdx(null);
     setGeneratedPost("");
-    setHooks([]);
-    setSelectedHook(null);
     setError(null);
 
     try {
@@ -208,61 +178,77 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
     finally { setIdeasLoading(false); }
   };
 
-  const handleSelectIdea = (idx: number) => {
-    setSelectedIdeaIdx(idx);
-    setGeneratedPost("");
-    setHooks([]);
-    setSelectedHook(null);
+  // ─── Edit idea via AI ──────────────────────────────────
+
+  const handleEditIdea = async () => {
+    if (editingIdeaIdx === null || !ideaEditPrompt.trim()) return;
+    setIdeaEditLoading(true);
+    setError(null);
+    try {
+      // 1. Ask AI to refine the idea
+      const res = await fetch("/api/linkedin/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "refine-idea",
+          idea: ideas[editingIdeaIdx],
+          instructions: ideaEditPrompt,
+        }),
+      });
+      const json = await res.json();
+      if (json.error) { setError(json.error); return; }
+
+      const newIdea = json.data?.idea || ideas[editingIdeaIdx];
+
+      // 2. Save learning if reason provided
+      if (ideaEditReason.trim()) {
+        await fetch("/api/linkedin/learnings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "idea-edit",
+            before: ideas[editingIdeaIdx],
+            after: newIdea,
+            reason: ideaEditReason,
+          }),
+        });
+      }
+
+      // 3. Update idea in list
+      setIdeas(prev => prev.map((idea, i) => i === editingIdeaIdx ? newIdea : idea));
+      setEditingIdeaIdx(null);
+      setIdeaEditPrompt("");
+      setIdeaEditReason("");
+    } catch (err) { setError(String(err)); }
+    finally { setIdeaEditLoading(false); }
   };
 
-  const handleGenerate = async () => {
-    if (selectedIdeaIdx === null || !selectedTheme) return;
-    const subject = ideas[selectedIdeaIdx];
-    if (!subject) return;
+  // ─── Generate post ─────────────────────────────────────
 
+  const handleGeneratePost = async () => {
+    if (selectedIdeaIdx === null || !selectedTheme) return;
     setGenerateLoading(true);
     setError(null);
-    setGeneratedPost("");
-    setHooks([]);
-    setSelectedHook(null);
-    setImagePrompt("");
-
     try {
       const res = await fetch("/api/linkedin/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "generate", theme: selectedTheme, subject }),
+        body: JSON.stringify({ action: "generate", theme: selectedTheme, subject: ideas[selectedIdeaIdx] }),
       });
       const json = await res.json();
       if (json.error) { setError(json.error); return; }
       setGeneratedPost(json.data?.post || "");
-      const ip = json.data?.imagePrompt || "";
-      setImagePrompt(ip);
-      setImageQuery(ip);
-
-      // Auto-generate hooks
-      if (json.data?.post) {
-        setHooksLoading(true);
-        try {
-          const hRes = await fetch("/api/linkedin/generate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "hooks", post: json.data.post }),
-          });
-          const hJson = await hRes.json();
-          setHooks(hJson.data?.hooks || []);
-        } catch { /* ignore */ }
-        setHooksLoading(false);
-      }
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setGenerateLoading(false);
-    }
+      setImagePrompt(json.data?.imagePrompt || "");
+      setEditMode(false);
+      setEditedPost("");
+    } catch (err) { setError(String(err)); }
+    finally { setGenerateLoading(false); }
   };
 
+  // ─── Refine post via AI prompt ─────────────────────────
+
   const handleRefine = async () => {
-    if (!generatedPost || !refineInstructions) return;
+    if (!generatedPost || !refineInstructions.trim()) return;
     setRefineLoading(true);
     setError(null);
     try {
@@ -279,117 +265,151 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
     finally { setRefineLoading(false); }
   };
 
-  const handleRefineHook = async (hook: string) => {
-    if (!hookRefineInput) return;
-    setHookRefineLoading(true);
+  // ─── Save post edit with learning ──────────────────────
+
+  const handleSaveEdit = async () => {
+    if (!editedPost.trim()) return;
+    setSaveLoading(true);
     try {
-      const res = await fetch("/api/linkedin/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "refine-hook", hook, instructions: hookRefineInput }),
-      });
-      const json = await res.json();
-      if (json.data?.hook) {
-        setSelectedHook(json.data.hook);
-        setHookRefineInput("");
+      // Save learning if reason provided
+      if (saveReason.trim()) {
+        await fetch("/api/linkedin/learnings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "post-edit",
+            before: generatedPost,
+            after: editedPost,
+            reason: saveReason,
+          }),
+        });
       }
-    } catch { /* ignore */ }
-    finally { setHookRefineLoading(false); }
+      setGeneratedPost(editedPost);
+      setEditMode(false);
+      setEditedPost("");
+      setShowSavePopup(false);
+      setSaveReason("");
+    } catch (err) { setError(String(err)); }
+    finally { setSaveLoading(false); }
   };
 
-  const handleCopy = () => {
-    const hookLine = selectedHook ? selectedHook + "\n\n" : "";
-    const fullPost = hookLine + generatedPost;
-    navigator.clipboard.writeText(fullPost);
+  // ─── Copy to clipboard ────────────────────────────────
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(generatedPost);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleImageSearch = async () => {
-    if (!imageQuery.trim()) return;
+  // ─── Image search ──────────────────────────────────────
+
+  const handleImageSearch = async (query?: string) => {
+    const q = query || imageQuery || imagePrompt;
+    if (!q.trim()) return;
     setImageLoading(true);
-    setImageResults([]);
     try {
-      const res = await fetch("/api/linkedin/images", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: imageQuery }),
-      });
+      const res = await fetch(`/api/linkedin/images?q=${encodeURIComponent(q)}`);
       const json = await res.json();
       setImageResults(json.data || []);
-    } catch (err) { setError(String(err)); }
+    } catch { /* ignore */ }
     finally { setImageLoading(false); }
   };
 
-  const handleSchedulePost = async () => {
-    if (!generatedPost || !scheduleDate || !scheduleTime) return;
-    setScheduleLoading(true);
-    try {
-      const title = selectedIdeaIdx !== null ? ideas[selectedIdeaIdx]?.slice(0, 80) || "Post LinkedIn" : "Post LinkedIn";
-      const hookText = selectedHook || "";
-      const content = hookText ? hookText + "\n\n" + generatedPost : generatedPost;
+  // ─── Schedule / validate ───────────────────────────────
 
-      await fetch("/api/linkedin/posts", {
+  const handleSchedule = async () => {
+    if (!generatedPost) return;
+    setScheduleLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/linkedin/posts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title,
-          content,
+          title: ideas[selectedIdeaIdx ?? 0]?.slice(0, 80) || "Post LinkedIn",
+          content: generatedPost,
           theme: selectedTheme || "journal-ceo",
-          hook: hookText,
+          hook: generatedPost.split("\n")[0],
           publishDate: scheduleDate,
           publishTime: scheduleTime,
           imagePrompt,
         }),
       });
+      const json = await res.json();
+      if (json.error) { setError(json.error); return; }
       setShowSchedule(false);
-      if (onPostValidated) onPostValidated();
+      onPostValidated?.();
     } catch (err) { setError(String(err)); }
     finally { setScheduleLoading(false); }
   };
 
-  // ─── Render ───────────────────────────────────────────
+  // ─── Step indicators ───────────────────────────────────
+
+  const currentStep = !ideas.length ? 1 : selectedIdeaIdx === null ? 2 : !generatedPost ? 3 : 4;
+
+  const steps = [
+    { n: 1, label: "Source & Prompt" },
+    { n: 2, label: "Idées" },
+    { n: 3, label: "Thème & Génération" },
+    { n: 4, label: "Post final" },
+  ];
+
+  // ─── Render ────────────────────────────────────────────
 
   return (
-    <div className="space-y-4 sm:space-y-5">
+    <div className="max-w-3xl mx-auto space-y-6">
+      {/* ── Step indicator ─────────────────────────────── */}
+      <div className="flex items-center gap-1 text-xs overflow-x-auto pb-1">
+        {steps.map((s, i) => (
+          <div key={s.n} className="flex items-center gap-1 flex-shrink-0">
+            <div className={cn(
+              "flex items-center gap-1.5 px-2.5 py-1 rounded-full font-medium transition-all",
+              currentStep >= s.n ? "bg-violet-100 text-violet-700" : "bg-gray-100 text-gray-400"
+            )}>
+              {currentStep > s.n ? <CheckCircle2 className="w-3.5 h-3.5" /> : <span className="w-4 text-center">{s.n}</span>}
+              {s.label}
+            </div>
+            {i < steps.length - 1 && <ChevronRight className="w-3.5 h-3.5 text-gray-300 flex-shrink-0" />}
+          </div>
+        ))}
+      </div>
+
       {/* Error banner */}
       {error && (
-        <div className="flex items-center gap-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
-          <X className="w-4 h-4 flex-shrink-0 cursor-pointer hover:text-red-900" onClick={() => setError(null)} />
+        <div className="bg-red-50 text-red-700 text-sm px-4 py-2 rounded-lg flex items-center justify-between">
           {error}
+          <button onClick={() => setError(null)} className="ml-2 text-red-400 hover:text-red-600 cursor-pointer"><X className="w-4 h-4" /></button>
         </div>
       )}
 
-      {/* ─── Step 1: Mode Selection + Input ─────────────── */}
-      <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-5">
-        <h2 className="text-sm font-semibold text-gray-800 mb-1">Étape 1 — Choisis ton mode</h2>
-        <p className="text-xs text-gray-400 mb-4">Décris ton idée ou importe un document pour générer des idées de posts</p>
+      {/* ════════════════════════════════════════════════ */}
+      {/* ── Step 1: Mode selection ─────────────────────── */}
+      {/* ════════════════════════════════════════════════ */}
+
+      <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
+        <h2 className="text-sm font-semibold text-gray-700 mb-3">Étape 1 — Source</h2>
 
         {/* Mode toggle */}
         <div className="flex gap-2 mb-4">
           <button
-            onClick={() => handleModeSwitch("chatgpt")}
+            onClick={() => setMode("chatgpt")}
             className={cn(
-              "flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-all cursor-pointer border",
-              mode === "chatgpt"
-                ? "bg-blue-50 border-blue-300 text-blue-700 shadow-sm"
-                : "bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300"
+              "flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer",
+              mode === "chatgpt" ? "bg-blue-50 text-blue-700 ring-2 ring-blue-300" : "bg-gray-50 text-gray-500 hover:bg-gray-100"
             )}
           >
             <MessageSquare className="w-4 h-4" />
             Prompt libre
           </button>
           <button
-            onClick={() => handleModeSwitch("file")}
+            onClick={() => setMode("file")}
             className={cn(
-              "flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-all cursor-pointer border",
-              mode === "file"
-                ? "bg-violet-50 border-violet-300 text-violet-700 shadow-sm"
-                : "bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300"
+              "flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer",
+              mode === "file" ? "bg-violet-50 text-violet-700 ring-2 ring-violet-300" : "bg-gray-50 text-gray-500 hover:bg-gray-100"
             )}
           >
             <FileUp className="w-4 h-4" />
-            Importer un fichier
+            Fichier source
           </button>
         </div>
 
@@ -422,46 +442,36 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
             <input
               ref={fileInputRef}
               type="file"
-              accept=".pdf,.txt,.md,.markdown,.docx"
+              accept=".pdf,.txt,.md,.docx"
+              onChange={handleFileUpload}
               className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) handleUploadFile(f);
-                e.target.value = "";
-              }}
             />
-
-            <div className="flex items-center gap-2 mb-3">
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 cursor-pointer disabled:opacity-50 transition-colors"
-              >
-                {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileUp className="w-4 h-4" />}
-                {uploading ? "Upload en cours…" : "Uploader un fichier"}
-              </button>
-              <span className="text-[10px] text-gray-400">PDF, TXT, MD, DOCX — max 5MB (~50 pages)</span>
-            </div>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-violet-400 hover:text-violet-600 transition-colors cursor-pointer mb-3"
+            >
+              {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileUp className="w-4 h-4" />}
+              {uploading ? "Upload en cours…" : "Importer un fichier"}
+            </button>
 
             {/* File list */}
             {filesLoading ? (
-              <div className="flex items-center gap-2 text-sm text-gray-400 py-2"><Loader2 className="w-4 h-4 animate-spin" /> Chargement…</div>
+              <div className="flex items-center gap-2 text-xs text-gray-400 py-2 mb-3"><Loader2 className="w-3 h-3 animate-spin" /> Chargement…</div>
             ) : files.length > 0 ? (
-              <div className="space-y-1.5 mb-3 max-h-48 overflow-y-auto">
+              <div className="space-y-1 mb-3 max-h-40 overflow-y-auto">
                 {files.map((f) => (
                   <button
                     key={f.id}
-                    onClick={() => setSelectedFileId(f.id)}
+                    onClick={() => setSelectedFileId(selectedFileId === f.id ? null : f.id)}
                     className={cn(
-                      "w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg border transition-all cursor-pointer",
-                      selectedFileId === f.id
-                        ? "border-violet-400 bg-violet-50"
-                        : "border-gray-200 bg-gray-50 hover:border-violet-300"
+                      "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left text-sm transition-all cursor-pointer",
+                      selectedFileId === f.id ? "bg-violet-50 ring-2 ring-violet-300" : "bg-gray-50 hover:bg-gray-100"
                     )}
                   >
-                    <FileUp className={cn("w-4 h-4 flex-shrink-0", selectedFileId === f.id ? "text-violet-600" : "text-gray-400")} />
-                    <div className="min-w-0 flex-1">
-                      <p className={cn("text-sm truncate", selectedFileId === f.id ? "text-violet-800" : "text-gray-700")}>{f.name}</p>
+                    <FileUp className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-700 truncate">{f.name}</p>
                       <p className="text-[10px] text-gray-400">{(f.size / 1024).toFixed(0)}KB — {f.textLength.toLocaleString()} caractères extraits</p>
                     </div>
                     {selectedFileId === f.id && <Check className="w-4 h-4 text-violet-600 flex-shrink-0" />}
@@ -503,21 +513,21 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
               <span className="font-medium">{getIdeasPhase(ideasElapsed)}</span>
               <span className="ml-auto tabular-nums text-blue-400">{ideasElapsed}s</span>
             </div>
-            <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
-              <div className="h-full bg-blue-400 rounded-full transition-all duration-1000" style={{ width: `${Math.min(95, Math.round((ideasElapsed / 12) * 100))}%` }} />
+            <div className="h-1 bg-blue-100 rounded-full overflow-hidden">
+              <div className="h-full bg-blue-500 rounded-full animate-pulse" style={{ width: `${Math.min(90, ideasElapsed * 5)}%` }} />
             </div>
           </div>
         )}
       </div>
 
-      {/* ─── Step 2: Ideas ─────────────────────────────── */}
+      {/* ════════════════════════════════════════════════ */}
+      {/* ── Step 2: Ideas list ─────────────────────────── */}
+      {/* ════════════════════════════════════════════════ */}
+
       {ideas.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-5">
-          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-            <div>
-              <h2 className="text-sm font-semibold text-gray-800">Étape 2 — Choisis une idée</h2>
-              <p className="text-xs text-gray-400">{ideas.length} idées proposées — clique sur celle qui t&apos;inspire</p>
-            </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-gray-700">Étape 2 — Choisis une idée</h2>
             <button
               onClick={handleGenerateIdeas}
               disabled={ideasLoading}
@@ -528,43 +538,102 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
             </button>
           </div>
 
-          <div className="space-y-2 mb-4">
+          <div className="space-y-2">
             {ideas.map((idea, i) => (
-              <button
-                key={i}
-                onClick={() => handleSelectIdea(i)}
-                className={cn(
-                  "w-full text-left rounded-lg border transition-all cursor-pointer p-3",
-                  selectedIdeaIdx === i
-                    ? "border-blue-500 bg-blue-50"
-                    : "border-gray-200 bg-gray-50 hover:border-blue-300 hover:bg-blue-50/50"
-                )}
-              >
-                <div className="flex items-start gap-2">
-                  <ChevronRight className={cn("w-4 h-4 flex-shrink-0 mt-0.5 transition-transform", selectedIdeaIdx === i && "text-blue-500 rotate-90")} />
-                  <div className="min-w-0 flex-1">
-                    <span className={cn(
-                      "text-[10px] font-semibold px-1.5 py-0.5 rounded-full mr-2",
-                      selectedIdeaIdx === i ? "bg-blue-200 text-blue-800" : "bg-gray-200 text-gray-600"
-                    )}>
-                      {i + 1}
-                    </span>
-                    <span className={cn("text-sm leading-relaxed whitespace-pre-line", selectedIdeaIdx === i ? "text-blue-800" : "text-gray-700")}>
-                      {idea}
-                    </span>
+              <div key={i} className={cn(
+                "relative group rounded-lg border transition-all",
+                selectedIdeaIdx === i
+                  ? "bg-blue-50 border-blue-300 ring-2 ring-blue-200"
+                  : "bg-gray-50 border-gray-200 hover:border-gray-300"
+              )}>
+                <button
+                  onClick={() => setSelectedIdeaIdx(selectedIdeaIdx === i ? null : i)}
+                  className="w-full px-3 py-2.5 text-left cursor-pointer"
+                >
+                  <div className="flex items-start gap-2">
+                    <span className="text-xs font-bold text-gray-400 mt-0.5 flex-shrink-0">{i + 1}</span>
+                    <p className="text-sm text-gray-700 whitespace-pre-line leading-relaxed">{idea}</p>
                   </div>
-                </div>
-              </button>
+                </button>
+
+                {/* Edit idea button */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEditingIdeaIdx(i);
+                    setIdeaEditPrompt("");
+                    setIdeaEditReason("");
+                  }}
+                  className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1 rounded bg-white border border-gray-200 text-gray-400 hover:text-violet-600 hover:border-violet-300 transition-all cursor-pointer"
+                  title="Modifier cette idée"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+              </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* ─── Step 3: Theme + Generate ──────────────────── */}
+      {/* ── Idea edit popup ──────────────────────────────── */}
+      {editingIdeaIdx !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-700">Modifier l&apos;idée {editingIdeaIdx + 1}</h3>
+              <button onClick={() => setEditingIdeaIdx(null)} className="text-gray-400 hover:text-gray-600 cursor-pointer"><X className="w-4 h-4" /></button>
+            </div>
+
+            <div className="bg-gray-50 rounded-lg p-3 mb-3 text-sm text-gray-600 whitespace-pre-line max-h-32 overflow-y-auto">
+              {ideas[editingIdeaIdx]}
+            </div>
+
+            <label className="block text-xs font-medium text-gray-500 mb-1">Comment modifier cette idée ?</label>
+            <textarea
+              value={ideaEditPrompt}
+              onChange={(e) => setIdeaEditPrompt(e.target.value)}
+              placeholder="Ex: Rends-la plus personnelle, ajoute un chiffre concret, change l'angle vers..."
+              rows={3}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-violet-300 outline-none resize-y mb-3"
+              autoFocus
+            />
+
+            <label className="block text-xs font-medium text-gray-500 mb-1">Pourquoi ? <span className="text-gray-400">(pour que l&apos;IA apprenne ton style)</span></label>
+            <input
+              type="text"
+              value={ideaEditReason}
+              onChange={(e) => setIdeaEditReason(e.target.value)}
+              placeholder="Ex: Je préfère les angles concrets avec des exemples terrain..."
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-violet-300 outline-none mb-4"
+            />
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setEditingIdeaIdx(null)}
+                className="flex-1 px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleEditIdea}
+                disabled={!ideaEditPrompt.trim() || ideaEditLoading}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors cursor-pointer"
+              >
+                {ideaEditLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {ideaEditLoading ? "Modification…" : "Modifier l'idée"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════ */}
+      {/* ── Step 3: Theme + Generate ───────────────────── */}
+      {/* ════════════════════════════════════════════════ */}
+
       {selectedIdeaIdx !== null && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-5">
-          <h2 className="text-sm font-semibold text-gray-800 mb-1">Étape 3 — Thème & Génération</h2>
-          <p className="text-xs text-gray-400 mb-3">Choisis le thème éditorial puis génère le post</p>
+        <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
+          <h2 className="text-sm font-semibold text-gray-700 mb-3">Étape 3 — Thème & Génération</h2>
 
           <div className="grid grid-cols-2 gap-2 mb-4">
             {THEMES.map((t) => (
@@ -572,264 +641,255 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
                 key={t.key}
                 onClick={() => setSelectedTheme(t.key)}
                 className={cn(
-                  "flex items-start gap-2 px-3 py-2.5 rounded-lg border text-left transition-all cursor-pointer",
+                  "px-3 py-2 rounded-lg text-sm text-left transition-all cursor-pointer",
                   selectedTheme === t.key
-                    ? t.color === "amber" ? "border-amber-400 bg-amber-50" :
-                      t.color === "blue" ? "border-blue-400 bg-blue-50" :
-                      t.color === "emerald" ? "border-emerald-400 bg-emerald-50" :
-                      "border-purple-400 bg-purple-50"
-                    : "border-gray-200 bg-gray-50 hover:border-gray-300"
+                    ? "bg-violet-50 ring-2 ring-violet-300 text-violet-700"
+                    : "bg-gray-50 text-gray-600 hover:bg-gray-100"
                 )}
               >
-                <span className="text-base flex-shrink-0">{t.emoji}</span>
-                <div className="min-w-0">
-                  <p className={cn("text-xs font-semibold", selectedTheme === t.key ? "text-gray-800" : "text-gray-600")}>{t.name}</p>
-                  <p className="text-[10px] text-gray-400 line-clamp-2">{t.desc}</p>
-                </div>
+                <span className="font-medium">{t.emoji} {t.name}</span>
+                <p className="text-[10px] text-gray-400 mt-0.5">{t.description}</p>
               </button>
             ))}
           </div>
 
           <button
-            onClick={handleGenerate}
+            onClick={handleGeneratePost}
             disabled={!selectedTheme || generateLoading}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-violet-600 to-blue-600 rounded-xl hover:from-violet-700 hover:to-blue-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
           >
-            {generateLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            {generateLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             {generateLoading ? "Rédaction en cours…" : "Générer le post"}
           </button>
+
           {generateLoading && (
-            <div className="mt-2 space-y-1">
-              <div className="flex items-center gap-2 text-xs text-blue-600">
+            <div className="mt-3 space-y-1">
+              <div className="flex items-center gap-2 text-xs text-violet-600">
                 <span className="font-medium">{getGeneratePhase(generateElapsed)}</span>
-                <span className="ml-auto tabular-nums text-blue-400">{generateElapsed}s</span>
+                <span className="ml-auto tabular-nums text-violet-400">{generateElapsed}s</span>
               </div>
-              <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                <div className="h-full bg-blue-400 rounded-full transition-all duration-1000" style={{ width: `${Math.min(95, Math.round((generateElapsed / 15) * 100))}%` }} />
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ─── Step 4: Hooks ───────────────────────────── */}
-      {generatedPost && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-5">
-          <h2 className="text-sm font-semibold text-gray-800 mb-1">Étape 4 — Choisis une accroche</h2>
-          <p className="text-xs text-gray-400 mb-3">Les 2-3 premières lignes visibles avant &quot;…voir plus&quot;</p>
-
-          {hooksLoading ? (
-            <div className="flex items-center gap-2 text-sm text-blue-600 py-3"><Loader2 className="w-4 h-4 animate-spin" /> Génération des accroches…</div>
-          ) : hooks.length > 0 ? (
-            <div className="space-y-2 mb-3">
-              {hooks.map((h, i) => (
-                <button
-                  key={i}
-                  onClick={() => setSelectedHook(h)}
-                  className={cn(
-                    "w-full text-left px-3 py-2.5 rounded-lg border transition-all cursor-pointer text-sm",
-                    selectedHook === h
-                      ? "border-blue-500 bg-blue-50 text-blue-800"
-                      : "border-gray-200 bg-gray-50 text-gray-700 hover:border-blue-300"
-                  )}
-                >
-                  {h}
-                </button>
-              ))}
-            </div>
-          ) : null}
-
-          {/* Refine hook */}
-          {selectedHook && (
-            <div className="flex flex-col gap-2 mt-2">
-              <textarea
-                value={hookRefineInput}
-                onChange={(e) => setHookRefineInput(e.target.value)}
-                placeholder="Colle ta nouvelle accroche ici, ou décris comment modifier l'accroche sélectionnée..."
-                rows={5}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-300 outline-none resize-y leading-relaxed"
-              />
-              <div className="flex items-center gap-3 self-end">
-                {hookRefineLoading && (
-                  <span className="text-[10px] text-amber-500 tabular-nums">{getHookRefinePhase(hookRefineElapsed)} — {hookRefineElapsed}s</span>
-                )}
-                <button
-                  onClick={() => handleRefineHook(selectedHook)}
-                  disabled={!hookRefineInput || hookRefineLoading}
-                  className="flex items-center justify-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 cursor-pointer"
-                >
-                  {hookRefineLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                  Appliquer
-                </button>
+              <div className="h-1 bg-violet-100 rounded-full overflow-hidden">
+                <div className="h-full bg-violet-500 rounded-full animate-pulse" style={{ width: `${Math.min(90, generateElapsed * 4)}%` }} />
               </div>
             </div>
           )}
         </div>
       )}
 
-      {/* ─── Step 5: Post ────────────────────────────── */}
+      {/* ════════════════════════════════════════════════ */}
+      {/* ── Step 4: Post final ─────────────────────────── */}
+      {/* ════════════════════════════════════════════════ */}
+
       {generatedPost && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-5">
-          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-            <h2 className="text-sm font-semibold text-gray-800">Étape 5 — Ton post LinkedIn</h2>
+        <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-gray-700">Étape 4 — Post final</h2>
             <div className="flex items-center gap-2">
-              <button onClick={handleCopy} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 cursor-pointer">
-                {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              {!editMode && (
+                <button
+                  onClick={() => { setEditMode(true); setEditedPost(generatedPost); }}
+                  className="flex items-center gap-1 text-xs text-gray-500 hover:text-violet-600 font-medium cursor-pointer"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  Modifier
+                </button>
+              )}
+              <button
+                onClick={handleCopy}
+                className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-600 font-medium cursor-pointer"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}
                 {copied ? "Copié !" : "Copier"}
-              </button>
-              <button onClick={handleGenerate} disabled={generateLoading} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 cursor-pointer">
-                <RefreshCw className={cn("w-3.5 h-3.5", generateLoading && "animate-spin")} />
-                Regénérer
               </button>
             </div>
           </div>
 
-          {selectedHook && (
-            <div className="mb-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg">
-              <p className="text-[10px] text-blue-500 font-medium mb-1">ACCROCHE SÉLECTIONNÉE</p>
-              <p className="text-sm text-blue-800">{selectedHook}</p>
+          {/* Post display or edit */}
+          {editMode ? (
+            <div className="space-y-3">
+              <textarea
+                value={editedPost}
+                onChange={(e) => setEditedPost(e.target.value)}
+                rows={12}
+                className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-violet-300 outline-none resize-y font-mono leading-relaxed"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setEditMode(false); setEditedPost(""); }}
+                  className="flex-1 px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors cursor-pointer"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={() => setShowSavePopup(true)}
+                  disabled={editedPost === generatedPost}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors cursor-pointer"
+                >
+                  <Save className="w-4 h-4" />
+                  Enregistrer
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-gray-50 rounded-lg p-4 text-sm text-gray-700 whitespace-pre-line leading-relaxed max-h-96 overflow-y-auto">
+              {generatedPost}
             </div>
           )}
 
-          <textarea
-            value={generatedPost}
-            onChange={(e) => setGeneratedPost(e.target.value)}
-            rows={14}
-            className="w-full px-3 py-3 text-sm text-gray-800 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-300 outline-none resize-y leading-relaxed"
-          />
+          {/* AI refine */}
+          {!editMode && (
+            <div className="mt-4 pt-3 border-t border-gray-100">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={refineInstructions}
+                  onChange={(e) => setRefineInstructions(e.target.value)}
+                  placeholder="Reprompter : raccourcis, change le ton, ajoute un chiffre..."
+                  className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-300 outline-none"
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleRefine(); } }}
+                />
+                <button
+                  onClick={handleRefine}
+                  disabled={!refineInstructions.trim() || refineLoading}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer"
+                >
+                  {refineLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  Reprompter
+                </button>
+              </div>
 
-          <p className="text-[10px] text-gray-400 mt-1">
-            {generatedPost.split(/\s+/).filter(Boolean).length} mots — Tu peux modifier le texte directement
-          </p>
+              {refineLoading && (
+                <div className="mt-2 flex items-center gap-2 text-xs text-blue-600">
+                  <span className="font-medium">Réécriture…</span>
+                  <span className="ml-auto tabular-nums text-blue-400">{refineElapsed}s</span>
+                </div>
+              )}
+            </div>
+          )}
 
-          {/* Refine */}
-          <div className="mt-4 border-t border-gray-100 pt-4">
-            <label className="block text-xs font-medium text-gray-600 mb-2">Demander une modification à l&apos;IA</label>
-            <div className="flex flex-col sm:flex-row gap-2">
+          {/* Image search */}
+          <div className="mt-4 pt-3 border-t border-gray-100">
+            <div className="flex gap-2 mb-2">
               <input
                 type="text"
-                value={refineInstructions}
-                onChange={(e) => setRefineInstructions(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleRefine(); } }}
-                placeholder="Ex: Rends-le plus punchy, ajoute une anecdote perso..."
-                className="flex-1 px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-300 outline-none"
+                value={imageQuery}
+                onChange={(e) => setImageQuery(e.target.value)}
+                placeholder={imagePrompt || "Rechercher une image…"}
+                className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-300 outline-none"
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleImageSearch(); } }}
               />
               <button
-                onClick={handleRefine}
-                disabled={!refineInstructions || refineLoading}
-                className="flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 cursor-pointer"
+                onClick={() => handleImageSearch()}
+                disabled={imageLoading}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors cursor-pointer"
               >
-                {refineLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                Modifier
+                {imageLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                <ImageIcon className="w-3.5 h-3.5" />
               </button>
             </div>
-            {refineLoading && (
-              <div className="mt-2 flex items-center gap-2 text-xs text-amber-600">
-                <span className="font-medium">{getGeneratePhase(refineElapsed)}</span>
-                <span className="ml-auto tabular-nums text-amber-400">{refineElapsed}s</span>
+
+            {imageResults.length > 0 && (
+              <div className="grid grid-cols-3 gap-2">
+                {imageResults.map((img, i) => (
+                  <a key={i} href={img.url} target="_blank" rel="noopener noreferrer" className="group relative rounded-lg overflow-hidden">
+                    <img src={img.thumb} alt={img.alt} className="w-full h-24 object-cover" />
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all flex items-center justify-center">
+                      <Download className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                    <p className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 truncate">{img.photographer}</p>
+                  </a>
+                ))}
               </div>
             )}
           </div>
 
-          {/* Validate / Schedule */}
-          <div className="mt-4 border-t border-gray-100 pt-4">
+          {/* Schedule / Validate */}
+          <div className="mt-4 pt-3 border-t border-gray-100">
             {!showSchedule ? (
               <button
                 onClick={() => setShowSchedule(true)}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 cursor-pointer shadow-sm"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-green-600 rounded-xl hover:bg-green-700 transition-colors cursor-pointer shadow-sm"
               >
-                <CheckCircle2 className="w-4 h-4" />
-                Valider et planifier
+                <Calendar className="w-4 h-4" />
+                Planifier & Valider
               </button>
             ) : (
               <div className="space-y-3">
-                <p className="text-sm font-medium text-gray-700">Planifier la publication</p>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <div className="flex items-center gap-2 flex-1">
-                    <Calendar className="w-4 h-4 text-gray-400" />
-                    <input
-                      type="date"
-                      value={scheduleDate}
-                      onChange={(e) => setScheduleDate(e.target.value)}
-                      className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-emerald-300"
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-gray-400" />
-                    <input
-                      type="time"
-                      value={scheduleTime}
-                      onChange={(e) => setScheduleTime(e.target.value)}
-                      className="px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-emerald-300"
-                    />
-                  </div>
-                </div>
                 <div className="flex gap-2">
-                  <button
-                    onClick={handleSchedulePost}
-                    disabled={scheduleLoading}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50 cursor-pointer"
-                  >
-                    {scheduleLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                    Confirmer
-                  </button>
-                  <button onClick={() => setShowSchedule(false)} className="px-4 py-2.5 text-sm text-gray-500 bg-gray-100 rounded-lg hover:bg-gray-200 cursor-pointer">
-                    Annuler
-                  </button>
+                  <div className="flex-1">
+                    <label className="text-xs text-gray-500 mb-1 block">Date</label>
+                    <input type="date" value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-xs text-gray-500 mb-1 block">Heure</label>
+                    <div className="flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5 text-gray-400" />
+                      <input type="time" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg" />
+                    </div>
+                  </div>
                 </div>
+                <button
+                  onClick={handleSchedule}
+                  disabled={scheduleLoading}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-green-600 rounded-xl hover:bg-green-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
+                >
+                  {scheduleLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  {scheduleLoading ? "Enregistrement…" : "Confirmer & Ajouter au calendrier"}
+                </button>
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* ─── Image search ────────────────────────────── */}
-      <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-5">
-        <div className="flex items-center gap-2 mb-1">
-          <ImageIcon className="w-4 h-4 text-gray-600" />
-          <h2 className="text-sm font-semibold text-gray-800">Image d&apos;illustration</h2>
-        </div>
-        <p className="text-xs text-gray-400 mb-4">Recherche une image libre de droits (Pexels)</p>
+      {/* ── Save edit popup (learning) ───────────────────── */}
+      {showSavePopup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-700">Enregistrer les modifications</h3>
+              <button onClick={() => { setShowSavePopup(false); setSaveReason(""); }} className="text-gray-400 hover:text-gray-600 cursor-pointer"><X className="w-4 h-4" /></button>
+            </div>
 
-        <div className="flex flex-col sm:flex-row gap-2 mb-4">
-          <input
-            type="text"
-            value={imageQuery}
-            onChange={(e) => setImageQuery(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleImageSearch(); } }}
-            placeholder="Ex: retail store luxury, team meeting..."
-            className="flex-1 px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-300 outline-none"
-          />
-          <button
-            onClick={handleImageSearch}
-            disabled={!imageQuery.trim() || imageLoading}
-            className="flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-medium text-white bg-gray-800 rounded-lg hover:bg-gray-900 disabled:opacity-50 cursor-pointer"
-          >
-            {imageLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-            Rechercher
-          </button>
-        </div>
+            <p className="text-xs text-gray-500 mb-3">
+              Explique pourquoi tu as modifié ce post. L&apos;IA utilisera cette info pour mieux écrire tes prochains posts.
+            </p>
 
-        {imageResults.length > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
-            {imageResults.map((img, i) => (
-              <div key={i} className="group relative rounded-lg overflow-hidden border border-gray-200">
-                <img src={img.thumb} alt={img.alt || "Image"} className="w-full aspect-video object-cover" />
-                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
-                  <a href={img.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">
-                    <Download className="w-3 h-3" />HD
-                  </a>
-                </div>
-                <div className="px-2 py-1.5 bg-gray-50">
-                  <p className="text-[10px] text-gray-400 truncate">
-                    📸 {img.photographer} — <a href={img.link} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">Pexels</a>
-                  </p>
-                </div>
-              </div>
-            ))}
+            <textarea
+              value={saveReason}
+              onChange={(e) => setSaveReason(e.target.value)}
+              placeholder="Ex: Le ton était trop formel, je préfère des phrases plus courtes et punchy. J'ai retiré la partie sur X car pas pertinent..."
+              rows={3}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-300 outline-none resize-y mb-4"
+              autoFocus
+            />
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  // Save without reason
+                  setGeneratedPost(editedPost);
+                  setEditMode(false);
+                  setEditedPost("");
+                  setShowSavePopup(false);
+                  setSaveReason("");
+                }}
+                className="flex-1 px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors cursor-pointer"
+              >
+                Enregistrer sans motif
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                disabled={!saveReason.trim() || saveLoading}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors cursor-pointer"
+              >
+                {saveLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {saveLoading ? "Enregistrement…" : "Enregistrer & apprendre"}
+              </button>
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

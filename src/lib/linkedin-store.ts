@@ -2,9 +2,10 @@
  * LinkedIn Store — persistence for calendar posts, sourcing sites & uploaded files.
  *
  * Keys:
- *   linkedin-posts    → LinkedInPost[]
- *   linkedin-sources  → LinkedInSource[]
- *   linkedin-files    → LinkedInFile[]
+ *   linkedin-posts     → LinkedInPost[]
+ *   linkedin-sources   → LinkedInSource[]
+ *   linkedin-files     → LinkedInFile[]
+ *   linkedin-learnings → LinkedInLearning[]
  */
 
 import { readBlob, writeBlob, withLock } from "@/lib/blob-store";
@@ -156,5 +157,45 @@ export async function deleteFile(id: string): Promise<void> {
   await withLock(FILES_KEY, async () => {
     const files = await readBlob<LinkedInFile>(FILES_KEY);
     await writeBlob(FILES_KEY, files.filter((f) => f.id !== id));
+  });
+}
+
+// ─── Learnings (AI memory from user corrections) ────────
+
+export interface LinkedInLearning {
+  id: string;
+  type: "idea-edit" | "post-edit" | "style-feedback";  // what was corrected
+  before: string;       // original text (idea or post excerpt)
+  after: string;        // modified text
+  reason: string;       // user explanation of why they changed it
+  createdAt: string;    // ISO
+}
+
+const LEARNINGS_KEY = "linkedin-learnings.json";
+
+export async function getLearnings(): Promise<LinkedInLearning[]> {
+  return readBlob<LinkedInLearning>(LEARNINGS_KEY);
+}
+
+export async function createLearning(learning: Omit<LinkedInLearning, "id" | "createdAt">): Promise<LinkedInLearning> {
+  const entry: LinkedInLearning = {
+    ...learning,
+    id: `ll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    createdAt: new Date().toISOString(),
+  };
+  await withLock(LEARNINGS_KEY, async () => {
+    const learnings = await readBlob<LinkedInLearning>(LEARNINGS_KEY);
+    learnings.push(entry);
+    // Keep max 50 learnings (most recent)
+    const trimmed = learnings.length > 50 ? learnings.slice(-50) : learnings;
+    await writeBlob(LEARNINGS_KEY, trimmed);
+  });
+  return entry;
+}
+
+export async function deleteLearning(id: string): Promise<void> {
+  await withLock(LEARNINGS_KEY, async () => {
+    const learnings = await readBlob<LinkedInLearning>(LEARNINGS_KEY);
+    await writeBlob(LEARNINGS_KEY, learnings.filter((l) => l.id !== id));
   });
 }
