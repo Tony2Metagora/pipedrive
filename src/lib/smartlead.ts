@@ -126,17 +126,47 @@ export interface SequenceStep {
 }
 
 export async function getSequences(campaignId: number): Promise<SequenceStep[]> {
-  return (await sl(`/campaigns/${campaignId}/sequences`)) as SequenceStep[];
+  const raw = (await sl(`/campaigns/${campaignId}/sequences`)) as Record<string, unknown>[];
+  if (!Array.isArray(raw)) return [];
+  return raw.map((s) => {
+    // Normalize seq_delay_details (may be string JSON or object or missing)
+    let delay = { delay_in_days: 0 };
+    if (s.seq_delay_details) {
+      if (typeof s.seq_delay_details === "string") {
+        try { delay = JSON.parse(s.seq_delay_details); } catch { /* keep default */ }
+      } else if (typeof s.seq_delay_details === "object") {
+        delay = s.seq_delay_details as { delay_in_days: number };
+      }
+    }
+    // Extract subject/email_body from variants if not at top level
+    let subject = (s.subject as string) || "";
+    let emailBody = (s.email_body as string) || "";
+    const variants = s.variants as { subject?: string; email_body?: string; variant_label?: string }[] | undefined;
+    if ((!subject || !emailBody) && Array.isArray(variants) && variants.length > 0) {
+      subject = subject || variants[0].subject || "";
+      emailBody = emailBody || variants[0].email_body || "";
+    }
+    return {
+      seq_number: (s.seq_number as number) || 0,
+      seq_delay_details: delay,
+      subject,
+      email_body: emailBody,
+      variant_label: (s.variant_label as string) || (variants?.[0]?.variant_label as string) || undefined,
+    };
+  });
 }
 
 export async function saveSequences(campaignId: number, sequences: { subject: string; email_body: string; seq_number: number; seq_delay_details: { delay_in_days: number } }[]): Promise<unknown> {
   // Smartlead API expects a raw array with variants[] format
+  // seq_delay_details must be a JSON string, id:null for new sequences
   const formatted = sequences.map((s) => ({
+    id: null,
     seq_number: s.seq_number,
-    seq_delay_details: s.seq_delay_details,
+    seq_delay_details: JSON.stringify(s.seq_delay_details),
     variant_distribution_type: "MANUALLY_EQUAL",
     variants: [
       {
+        id: null,
         subject: s.subject,
         email_body: s.email_body,
         variant_label: "A",

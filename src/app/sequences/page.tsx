@@ -1034,7 +1034,9 @@ export default function SequencesPage() {
               {aiEmails.length > 0 && (
                 <div className="mt-4 space-y-0 pt-3 border-t border-gray-200">
                   <div className="flex items-center justify-between mb-3">
-                    <p className="text-xs font-semibold text-violet-700">Séquence générée — cliquez pour modifier</p>
+                    <p className="text-xs font-semibold text-violet-700">
+                      Séquence générée ({aiEmails.length} email{aiEmails.length > 1 ? "s" : ""}) — cliquez pour modifier
+                    </p>
                     <button onClick={saveAiEmails} disabled={actionLoading}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50 cursor-pointer">
                       {actionLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
