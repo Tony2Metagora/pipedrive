@@ -28,6 +28,11 @@ import {
   Building2,
   Bot,
   MessageSquareText,
+  ClipboardList,
+  Save,
+  ThumbsUp,
+  ThumbsDown,
+  Star,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import NewProspectModal from "@/components/NewProspectModal";
@@ -90,6 +95,31 @@ interface ProspectList {
   company: string;
   created_at: string;
   count: number;
+}
+
+interface ScoringLeadExample {
+  prospect_id: string;
+  name: string;
+  poste: string;
+  entreprise: string;
+  rating: number;
+  reason: string;
+}
+
+interface ScoringCard {
+  id: string;
+  company: string;
+  product: string;
+  value_proposition: string;
+  ideal_client_types: string[];
+  company_size_ideal: string;
+  company_size_min: string;
+  company_size_max: string;
+  good_leads: ScoringLeadExample[];
+  bad_leads: ScoringLeadExample[];
+  created_at: string;
+  updated_at: string;
+  validated: boolean;
 }
 
 type StatusKey = "en cours" | "perdu" | "archivé";
@@ -209,6 +239,23 @@ export default function ProspectsPage() {
   const [parsedTotalRows, setParsedTotalRows] = useState(0);
   const [colMapping, setColMapping] = useState<ColMapping[]>([]);
   const [showListPanel, setShowListPanel] = useState(true);
+  // Scoring cards
+  const [showScoringCards, setShowScoringCards] = useState(false);
+  const [scoringCards, setScoringCards] = useState<ScoringCard[]>([]);
+  const [loadingScoringCards, setLoadingScoringCards] = useState(false);
+  const [editingScoringCard, setEditingScoringCard] = useState<ScoringCard | null>(null);
+  const [scoringCardForm, setScoringCardForm] = useState({
+    product: "",
+    value_proposition: "",
+    ideal_client_types: ["", "", ""],
+    company_size_ideal: "",
+    company_size_min: "",
+    company_size_max: "",
+  });
+  const [scoringGoodLeads, setScoringGoodLeads] = useState<ScoringLeadExample[]>([]);
+  const [scoringBadLeads, setScoringBadLeads] = useState<ScoringLeadExample[]>([]);
+  const [scoringCardSaving, setScoringCardSaving] = useState(false);
+  const [scoringLeadPickerType, setScoringLeadPickerType] = useState<"good" | "bad" | null>(null);
   const [visibleCols, setVisibleCols] = useState<Set<string>>(
     new Set(PROSPECT_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key))
   );
@@ -295,6 +342,7 @@ export default function ProspectsPage() {
   useEffect(() => {
     fetchProspects();
     fetchLists();
+    fetchScoringCards();
   }, [fetchProspects, fetchLists]);
 
   const resetUploadModal = () => {
@@ -531,14 +579,14 @@ export default function ProspectsPage() {
   };
 
   /** Shared SSE handler for streaming API routes (API Gouv, AI Score) */
-  const runStreamingAction = async (url: string, label: string, doneMsg: (data: Record<string, unknown>) => string) => {
+  const runStreamingAction = async (url: string, label: string, doneMsg: (data: Record<string, unknown>) => string, extraBody?: Record<string, unknown>) => {
     if (selected.size === 0) return;
     setProcessing({ label, message: "Démarrage...", current: 0, total: 1 });
     try {
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: Array.from(selected) }),
+        body: JSON.stringify({ ids: Array.from(selected), ...extraBody }),
       });
       if (!res.ok || !res.body) {
         const err = await res.text();
@@ -583,10 +631,14 @@ export default function ProspectsPage() {
     setProcessing(null);
   };
 
-  const aiScoreProspects = () =>
-    runStreamingAction("/api/prospects/ai-score", "Score IA", (d) =>
-      `${d.scored}/${d.total} prospects analysés par l'IA`
-    );
+  const aiScoreProspects = () => {
+    // Detect company from selected list to pass as brand for dynamic scoring card
+    const selectedList = selectedListId ? lists.find((l) => l.id === selectedListId) : null;
+    const brand = selectedList?.company || "Metagora";
+    return runStreamingAction("/api/prospects/ai-score", "Score IA", (d) =>
+      `${d.scored}/${d.total} prospects analysés par l'IA (${brand})`
+    , { brand });
+  };
 
   const enrichGouvProspects = () =>
     runStreamingAction("/api/prospects/enrich-gouv", "API Gouv", (d) =>
@@ -633,7 +685,10 @@ export default function ProspectsPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          brand: "metagora",
+          brand: (() => {
+            const pList = lists.find((l) => l.id === scoreEditTarget.list_id);
+            return pList?.company?.toLowerCase() || "metagora";
+          })(),
           prospect_id: scoreEditTarget.id,
           poste: scoreEditTarget.poste || "",
           entreprise: scoreEditTarget.entreprise || "",
@@ -674,6 +729,158 @@ export default function ProspectsPage() {
     }
     setScoreEditSaving(false);
     setScoreEditTarget(null);
+  };
+
+  // ─── Scoring Cards ───────────────────────────────────
+  const fetchScoringCards = async () => {
+    setLoadingScoringCards(true);
+    try {
+      const res = await fetch("/api/scoring-cards");
+      const json = await res.json();
+      if (json.cards) setScoringCards(json.cards);
+    } catch (err) {
+      console.error("Fetch scoring cards error:", err);
+    }
+    setLoadingScoringCards(false);
+  };
+
+  const openScoringCard = (company: string) => {
+    const existing = scoringCards.find((c) => c.company.toLowerCase() === company.toLowerCase());
+    if (existing) {
+      setEditingScoringCard(existing);
+      setScoringCardForm({
+        product: existing.product,
+        value_proposition: existing.value_proposition,
+        ideal_client_types: existing.ideal_client_types.length >= 3
+          ? existing.ideal_client_types.slice(0, 3)
+          : [...existing.ideal_client_types, ...Array(3 - existing.ideal_client_types.length).fill("")],
+        company_size_ideal: existing.company_size_ideal,
+        company_size_min: existing.company_size_min,
+        company_size_max: existing.company_size_max,
+      });
+      setScoringGoodLeads(existing.good_leads || []);
+      setScoringBadLeads(existing.bad_leads || []);
+    } else {
+      // Auto-fill Metagora if applicable
+      const isMetagora = company.toLowerCase().includes("metagora");
+      setEditingScoringCard({
+        id: "", company,
+        product: isMetagora ? "Simsell — simulateur de vente IA pour vendeurs retail/luxe" : "",
+        value_proposition: isMetagora ? "Formation commerciale immersive par IA : +30% de performance commerciale, 100% de taux de complétion, déploiement en 1 jour" : "",
+        ideal_client_types: isMetagora ? ["Grands groupes luxe & cosmétique (Hermès, LVMH, Guerlain)", "Enseignes retail & mode (> 200 employés)", "Maisons vin & spiritueux / hospitality"] : ["", "", ""],
+        company_size_ideal: isMetagora ? "ETI / GE (500-10 000 employés)" : "",
+        company_size_min: isMetagora ? "50 employés" : "",
+        company_size_max: isMetagora ? "100 000+ employés" : "",
+        good_leads: [], bad_leads: [],
+        created_at: "", updated_at: "", validated: false,
+      });
+      setScoringCardForm({
+        product: isMetagora ? "Simsell — simulateur de vente IA pour vendeurs retail/luxe" : "",
+        value_proposition: isMetagora ? "Formation commerciale immersive par IA : +30% de performance commerciale, 100% de taux de complétion, déploiement en 1 jour" : "",
+        ideal_client_types: isMetagora ? ["Grands groupes luxe & cosmétique (Hermès, LVMH, Guerlain)", "Enseignes retail & mode (> 200 employés)", "Maisons vin & spiritueux / hospitality"] : ["", "", ""],
+        company_size_ideal: isMetagora ? "ETI / GE (500-10 000 employés)" : "",
+        company_size_min: isMetagora ? "50 employés" : "",
+        company_size_max: isMetagora ? "100 000+ employés" : "",
+      });
+      // Auto-pick good/bad leads from prospects with ai_score
+      const companyProspects = prospects.filter((p) => {
+        const pList = lists.find((l) => l.id === p.list_id);
+        return pList && pList.company.toLowerCase() === company.toLowerCase();
+      });
+      const scored = companyProspects.filter((p) => p.ai_score && parseInt(p.ai_score) > 0);
+      const good = scored
+        .filter((p) => parseInt(p.ai_score || "0") >= 4)
+        .sort((a, b) => parseInt(b.ai_score || "0") - parseInt(a.ai_score || "0"))
+        .slice(0, 10)
+        .map((p) => ({
+          prospect_id: p.id,
+          name: `${p.prenom} ${p.nom}`.trim(),
+          poste: p.poste || "",
+          entreprise: p.entreprise || "",
+          rating: parseInt(p.ai_score || "0"),
+          reason: p.ai_comment || "",
+        }));
+      const bad = scored
+        .filter((p) => parseInt(p.ai_score || "0") <= 2)
+        .sort((a, b) => parseInt(a.ai_score || "0") - parseInt(b.ai_score || "0"))
+        .slice(0, 10)
+        .map((p) => ({
+          prospect_id: p.id,
+          name: `${p.prenom} ${p.nom}`.trim(),
+          poste: p.poste || "",
+          entreprise: p.entreprise || "",
+          rating: parseInt(p.ai_score || "0"),
+          reason: p.ai_comment || "",
+        }));
+      setScoringGoodLeads(good);
+      setScoringBadLeads(bad);
+    }
+  };
+
+  const saveScoringCard = async () => {
+    if (!editingScoringCard) return;
+    setScoringCardSaving(true);
+    try {
+      const res = await fetch("/api/scoring-cards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          company: editingScoringCard.company,
+          product: scoringCardForm.product,
+          value_proposition: scoringCardForm.value_proposition,
+          ideal_client_types: scoringCardForm.ideal_client_types.filter(Boolean),
+          company_size_ideal: scoringCardForm.company_size_ideal,
+          company_size_min: scoringCardForm.company_size_min,
+          company_size_max: scoringCardForm.company_size_max,
+          good_leads: scoringGoodLeads,
+          bad_leads: scoringBadLeads,
+        }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setActionMsg("Fiche scoring sauvegardée");
+        setTimeout(() => setActionMsg(null), 3000);
+        await fetchScoringCards();
+        setEditingScoringCard(null);
+      } else {
+        setActionMsg(`Erreur : ${json.error}`);
+        setTimeout(() => setActionMsg(null), 5000);
+      }
+    } catch (err) {
+      console.error("Save scoring card error:", err);
+      setActionMsg("Erreur lors de la sauvegarde");
+      setTimeout(() => setActionMsg(null), 5000);
+    }
+    setScoringCardSaving(false);
+  };
+
+  const addScoringLead = (prospect: Prospect, type: "good" | "bad") => {
+    const entry: ScoringLeadExample = {
+      prospect_id: prospect.id,
+      name: `${prospect.prenom} ${prospect.nom}`.trim(),
+      poste: prospect.poste || "",
+      entreprise: prospect.entreprise || "",
+      rating: type === "good" ? 5 : 1,
+      reason: "",
+    };
+    if (type === "good") {
+      if (scoringGoodLeads.length >= 10) return;
+      if (scoringGoodLeads.some((l) => l.prospect_id === prospect.id)) return;
+      setScoringGoodLeads((prev) => [...prev, entry]);
+    } else {
+      if (scoringBadLeads.length >= 10) return;
+      if (scoringBadLeads.some((l) => l.prospect_id === prospect.id)) return;
+      setScoringBadLeads((prev) => [...prev, entry]);
+    }
+    setScoringLeadPickerType(null);
+  };
+
+  const removeScoringLead = (prospectId: string, type: "good" | "bad") => {
+    if (type === "good") {
+      setScoringGoodLeads((prev) => prev.filter((l) => l.prospect_id !== prospectId));
+    } else {
+      setScoringBadLeads((prev) => prev.filter((l) => l.prospect_id !== prospectId));
+    }
   };
 
   const openLinkDeal = async () => {
@@ -970,6 +1177,14 @@ export default function ProspectsPage() {
               </button>
             </>
           )}
+          <button
+            onClick={() => { setShowScoringCards(true); fetchScoringCards(); }}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 cursor-pointer"
+            title="Fiches de scoring IA par entreprise"
+          >
+            <ClipboardList className="w-3.5 h-3.5" />
+            Fiches entreprises
+          </button>
           <button
             onClick={dedupProspects}
             disabled={prospects.length === 0}
@@ -1875,6 +2090,348 @@ export default function ProspectsPage() {
         </div>
         );
       })()}
+
+      {/* Modal — Fiches entreprises (list) */}
+      {showScoringCards && !editingScoringCard && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowScoringCards(false)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <ClipboardList className="w-4 h-4 text-violet-600" />
+                Fiches scoring IA
+              </h3>
+              <button onClick={() => setShowScoringCards(false)} className="p-0.5 text-gray-400 hover:text-gray-600 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-[11px] text-gray-500">Cliquez sur une entreprise pour voir/modifier sa fiche de scoring IA.</p>
+            {loadingScoringCards ? (
+              <div className="flex items-center justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-violet-500" /></div>
+            ) : (
+              <div className="space-y-1.5">
+                {knownCompanies.length === 0 ? (
+                  <p className="text-xs text-gray-400 text-center py-4">Aucune entreprise trouvée. Importez d&apos;abord un fichier CSV.</p>
+                ) : (
+                  knownCompanies.map((company) => {
+                    const card = scoringCards.find((c) => c.company.toLowerCase() === company.toLowerCase());
+                    return (
+                      <button
+                        key={company}
+                        onClick={() => openScoringCard(company)}
+                        className="w-full text-left px-3 py-2.5 rounded-lg border border-gray-200 hover:border-violet-300 hover:bg-violet-50 transition-colors cursor-pointer flex items-center gap-3"
+                      >
+                        <Building2 className="w-4 h-4 text-violet-500 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-gray-900">{company}</p>
+                          {card ? (
+                            <p className="text-[10px] text-gray-500 truncate">
+                              {card.validated ? <span className="text-green-600 font-medium">Validée</span> : <span className="text-orange-500">En cours</span>}
+                              {" — "}{card.good_leads.length} bons / {card.bad_leads.length} mauvais leads
+                            </p>
+                          ) : (
+                            <p className="text-[10px] text-gray-400">Pas encore configurée</p>
+                          )}
+                        </div>
+                        <Star className={cn("w-3.5 h-3.5 flex-shrink-0", card?.validated ? "text-green-500" : "text-gray-300")} />
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal — Fiche scoring IA (edit) */}
+      {editingScoringCard && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setEditingScoringCard(null)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between rounded-t-xl z-10">
+              <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <ClipboardList className="w-4 h-4 text-violet-600" />
+                Fiche scoring — {editingScoringCard.company}
+              </h3>
+              <button onClick={() => setEditingScoringCard(null)} className="p-0.5 text-gray-400 hover:text-gray-600 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="px-6 py-4 space-y-5">
+              {/* Product */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Quel produit vendez-vous ?</label>
+                <input
+                  type="text"
+                  value={scoringCardForm.product}
+                  onChange={(e) => setScoringCardForm((f) => ({ ...f, product: e.target.value }))}
+                  placeholder="Ex: Simsell — simulateur de vente IA"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 focus:border-violet-400 outline-none"
+                />
+              </div>
+
+              {/* Value proposition */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Quelle est la valeur ajoutée pour le client ?</label>
+                <textarea
+                  value={scoringCardForm.value_proposition}
+                  onChange={(e) => setScoringCardForm((f) => ({ ...f, value_proposition: e.target.value }))}
+                  rows={2}
+                  placeholder="Ex: +30% de performance commerciale, déploiement en 1 jour..."
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 focus:border-violet-400 outline-none resize-none"
+                />
+              </div>
+
+              {/* 3 best client types */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Quels sont vos 3 meilleurs types de clients ?</label>
+                <div className="space-y-1.5">
+                  {scoringCardForm.ideal_client_types.map((t, i) => (
+                    <input
+                      key={i}
+                      type="text"
+                      value={t}
+                      onChange={(e) => {
+                        const arr = [...scoringCardForm.ideal_client_types];
+                        arr[i] = e.target.value;
+                        setScoringCardForm((f) => ({ ...f, ideal_client_types: arr }));
+                      }}
+                      placeholder={`Type de client ${i + 1}`}
+                      className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 focus:border-violet-400 outline-none"
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Company size */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Taille d&apos;entreprise</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-[10px] text-gray-500 mb-0.5">Idéale</label>
+                    <input
+                      type="text"
+                      value={scoringCardForm.company_size_ideal}
+                      onChange={(e) => setScoringCardForm((f) => ({ ...f, company_size_ideal: e.target.value }))}
+                      placeholder="Ex: 500-10k"
+                      className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 focus:border-violet-400 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-gray-500 mb-0.5">Minimale</label>
+                    <input
+                      type="text"
+                      value={scoringCardForm.company_size_min}
+                      onChange={(e) => setScoringCardForm((f) => ({ ...f, company_size_min: e.target.value }))}
+                      placeholder="Ex: 50"
+                      className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 focus:border-violet-400 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-gray-500 mb-0.5">Maximale</label>
+                    <input
+                      type="text"
+                      value={scoringCardForm.company_size_max}
+                      onChange={(e) => setScoringCardForm((f) => ({ ...f, company_size_max: e.target.value }))}
+                      placeholder="Ex: 100k+"
+                      className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 focus:border-violet-400 outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Good leads */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-semibold text-gray-700 flex items-center gap-1.5">
+                    <ThumbsUp className="w-3.5 h-3.5 text-green-600" />
+                    Bons leads ({scoringGoodLeads.length}/10)
+                  </label>
+                  {scoringGoodLeads.length < 10 && (
+                    <button
+                      onClick={() => setScoringLeadPickerType(scoringLeadPickerType === "good" ? null : "good")}
+                      className="text-[10px] text-violet-600 hover:underline cursor-pointer font-medium"
+                    >
+                      + Ajouter
+                    </button>
+                  )}
+                </div>
+                {scoringGoodLeads.length === 0 ? (
+                  <p className="text-[10px] text-gray-400 italic">Aucun bon lead sélectionné</p>
+                ) : (
+                  <div className="space-y-1">
+                    {scoringGoodLeads.map((lead) => (
+                      <div key={lead.prospect_id} className="flex items-center gap-2 px-2 py-1.5 bg-green-50 border border-green-200 rounded-lg text-xs">
+                        <ThumbsUp className="w-3 h-3 text-green-600 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <span className="font-medium text-gray-800">{lead.name}</span>
+                          <span className="text-gray-500 ml-1">— {lead.poste || "?"} @ {lead.entreprise || "?"}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <select
+                            value={lead.rating}
+                            onChange={(e) => setScoringGoodLeads((prev) => prev.map((l) => l.prospect_id === lead.prospect_id ? { ...l, rating: Number(e.target.value) } : l))}
+                            className="text-[10px] border border-green-300 rounded px-1 py-0.5 bg-white outline-none cursor-pointer"
+                          >
+                            {[5, 4, 3].map((v) => <option key={v} value={v}>{v}/5</option>)}
+                          </select>
+                          <button onClick={() => removeScoringLead(lead.prospect_id, "good")} className="text-gray-400 hover:text-red-500 cursor-pointer"><X className="w-3 h-3" /></button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* Inline reason for each good lead */}
+                {scoringGoodLeads.length > 0 && (
+                  <div className="mt-1.5 space-y-1">
+                    {scoringGoodLeads.filter((l) => !l.reason).length > 0 && (
+                      <p className="text-[9px] text-orange-500 italic">Justifiez pourquoi chaque lead est bon :</p>
+                    )}
+                    {scoringGoodLeads.map((lead) => (
+                      <input
+                        key={lead.prospect_id}
+                        type="text"
+                        value={lead.reason}
+                        onChange={(e) => setScoringGoodLeads((prev) => prev.map((l) => l.prospect_id === lead.prospect_id ? { ...l, reason: e.target.value } : l))}
+                        placeholder={`Pourquoi ${lead.name} est un bon lead ?`}
+                        className="w-full px-2 py-1 text-[10px] border border-gray-200 rounded-md focus:ring-1 focus:ring-green-300 outline-none"
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Bad leads */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-semibold text-gray-700 flex items-center gap-1.5">
+                    <ThumbsDown className="w-3.5 h-3.5 text-red-500" />
+                    Mauvais leads ({scoringBadLeads.length}/10)
+                  </label>
+                  {scoringBadLeads.length < 10 && (
+                    <button
+                      onClick={() => setScoringLeadPickerType(scoringLeadPickerType === "bad" ? null : "bad")}
+                      className="text-[10px] text-violet-600 hover:underline cursor-pointer font-medium"
+                    >
+                      + Ajouter
+                    </button>
+                  )}
+                </div>
+                {scoringBadLeads.length === 0 ? (
+                  <p className="text-[10px] text-gray-400 italic">Aucun mauvais lead sélectionné</p>
+                ) : (
+                  <div className="space-y-1">
+                    {scoringBadLeads.map((lead) => (
+                      <div key={lead.prospect_id} className="flex items-center gap-2 px-2 py-1.5 bg-red-50 border border-red-200 rounded-lg text-xs">
+                        <ThumbsDown className="w-3 h-3 text-red-500 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <span className="font-medium text-gray-800">{lead.name}</span>
+                          <span className="text-gray-500 ml-1">— {lead.poste || "?"} @ {lead.entreprise || "?"}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <select
+                            value={lead.rating}
+                            onChange={(e) => setScoringBadLeads((prev) => prev.map((l) => l.prospect_id === lead.prospect_id ? { ...l, rating: Number(e.target.value) } : l))}
+                            className="text-[10px] border border-red-300 rounded px-1 py-0.5 bg-white outline-none cursor-pointer"
+                          >
+                            {[1, 2, 3].map((v) => <option key={v} value={v}>{v}/5</option>)}
+                          </select>
+                          <button onClick={() => removeScoringLead(lead.prospect_id, "bad")} className="text-gray-400 hover:text-red-500 cursor-pointer"><X className="w-3 h-3" /></button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {scoringBadLeads.length > 0 && (
+                  <div className="mt-1.5 space-y-1">
+                    {scoringBadLeads.filter((l) => !l.reason).length > 0 && (
+                      <p className="text-[9px] text-orange-500 italic">Justifiez pourquoi chaque lead est mauvais :</p>
+                    )}
+                    {scoringBadLeads.map((lead) => (
+                      <input
+                        key={lead.prospect_id}
+                        type="text"
+                        value={lead.reason}
+                        onChange={(e) => setScoringBadLeads((prev) => prev.map((l) => l.prospect_id === lead.prospect_id ? { ...l, reason: e.target.value } : l))}
+                        placeholder={`Pourquoi ${lead.name} est un mauvais lead ?`}
+                        className="w-full px-2 py-1 text-[10px] border border-gray-200 rounded-md focus:ring-1 focus:ring-red-300 outline-none"
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Lead picker dropdown */}
+              {scoringLeadPickerType && (
+                <div className="border border-violet-200 rounded-lg p-3 bg-violet-50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold text-violet-800">
+                      Sélectionner un {scoringLeadPickerType === "good" ? "bon" : "mauvais"} lead
+                    </p>
+                    <button onClick={() => setScoringLeadPickerType(null)} className="text-gray-400 hover:text-gray-600 cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+                  </div>
+                  <div className="max-h-40 overflow-y-auto space-y-0.5">
+                    {(() => {
+                      const companyProspects = prospects.filter((p) => {
+                        const pList = lists.find((l) => l.id === p.list_id);
+                        return pList && pList.company.toLowerCase() === editingScoringCard.company.toLowerCase();
+                      });
+                      const usedIds = new Set([...scoringGoodLeads.map((l) => l.prospect_id), ...scoringBadLeads.map((l) => l.prospect_id)]);
+                      const available = companyProspects.filter((p) => !usedIds.has(p.id));
+                      if (available.length === 0) return <p className="text-[10px] text-gray-400 text-center py-2">Aucun prospect disponible pour cette entreprise</p>;
+                      return available.slice(0, 50).map((p) => (
+                        <button
+                          key={p.id}
+                          onClick={() => addScoringLead(p, scoringLeadPickerType)}
+                          className="w-full text-left px-2 py-1.5 rounded-md hover:bg-white text-xs transition-colors cursor-pointer flex items-center gap-2"
+                        >
+                          <Users className="w-3 h-3 text-violet-500 flex-shrink-0" />
+                          <span className="font-medium text-gray-800">{p.prenom} {p.nom}</span>
+                          <span className="text-gray-500 truncate">— {p.poste || "?"} @ {p.entreprise || "?"}</span>
+                          {p.ai_score && <span className="ml-auto text-[10px] font-bold text-gray-500">{p.ai_score}/5</span>}
+                        </button>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {/* Validation status */}
+              <div className={cn(
+                "rounded-lg p-3 text-xs flex items-center gap-2",
+                scoringGoodLeads.length >= 10 && scoringBadLeads.length >= 10
+                  ? "bg-green-50 border border-green-200 text-green-700"
+                  : "bg-orange-50 border border-orange-200 text-orange-700"
+              )}>
+                {scoringGoodLeads.length >= 10 && scoringBadLeads.length >= 10 ? (
+                  <><Check className="w-4 h-4" /> Fiche validée — 10+ bons et 10+ mauvais leads renseignés</>
+                ) : (
+                  <><Star className="w-4 h-4" /> Encore {Math.max(0, 10 - scoringGoodLeads.length)} bon(s) et {Math.max(0, 10 - scoringBadLeads.length)} mauvais lead(s) requis pour valider</>
+                )}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-3 flex justify-between items-center rounded-b-xl">
+              <button
+                onClick={() => setEditingScoringCard(null)}
+                className="px-4 py-2 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={saveScoringCard}
+                disabled={scoringCardSaving || !scoringCardForm.product.trim()}
+                className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 cursor-pointer"
+              >
+                {scoringCardSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                Sauvegarder
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

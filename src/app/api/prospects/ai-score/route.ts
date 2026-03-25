@@ -10,6 +10,7 @@ import { readBlob, writeBlob, withLock } from "@/lib/blob-store";
 import { requireAuth } from "@/lib/api-guard";
 import { askAzureFast } from "@/lib/azure-ai";
 import type { ScoringCorrection } from "@/app/api/prospects/scoring-memory/route";
+import type { ScoringCard } from "@/app/api/scoring-cards/route";
 
 interface ProspectRow {
   id: string;
@@ -32,17 +33,51 @@ interface ProspectRow {
   [key: string]: unknown;
 }
 
-const BASE_SYSTEM_PROMPT = `Tu es un expert en qualification de prospects B2B pour Metagora.
+const METAGORA_FALLBACK_PROMPT = `Tu es un expert en qualification de prospects B2B pour Metagora.
 
 METAGORA : startup IA spécialisée dans la formation retail & luxe par simulation IA.
 - Produit phare : Simsell — simulateur de vente IA pour vendeurs retail/luxe
 - Cibles idéales : grands groupes retail, luxe, cosmétique, mode, vin & spiritueux, grande distribution
 - Décideurs ciblés : DRH, Directeur Formation, L&D Manager, Directeur Retail, DG
-- Taille idéale : ETI et GE (>200 employés), mais PME retail/luxe aussi pertinentes
+- Taille idéale : ETI et GE (>200 employés), mais PME retail/luxe aussi pertinentes`;
+
+/** Build dynamic system prompt from scoring card or fallback to hardcoded Metagora */
+function buildBasePrompt(card: ScoringCard | null, companyName: string): string {
+  let companyContext: string;
+
+  if (card && card.product) {
+    // Dynamic prompt from scoring card
+    const clientTypes = card.ideal_client_types.filter(Boolean).map((t) => `  - ${t}`).join("\n");
+    const goodExamples = card.good_leads.slice(0, 10).map((l) =>
+      `  - BON (${l.rating}/5) : "${l.poste}" chez "${l.entreprise}"${l.reason ? ` → ${l.reason}` : ""}`
+    ).join("\n");
+    const badExamples = card.bad_leads.slice(0, 10).map((l) =>
+      `  - MAUVAIS (${l.rating}/5) : "${l.poste}" chez "${l.entreprise}"${l.reason ? ` → ${l.reason}` : ""}`
+    ).join("\n");
+
+    companyContext = `Tu es un expert en qualification de prospects B2B pour ${companyName}.
+
+${companyName.toUpperCase()} :
+- Produit : ${card.product}
+- Valeur ajoutée : ${card.value_proposition}
+- Types de clients idéaux :
+${clientTypes}
+- Taille d'entreprise : idéale ${card.company_size_ideal}, min ${card.company_size_min}, max ${card.company_size_max}
+${goodExamples ? `
+--- EXEMPLES DE BONS LEADS (à privilégier) ---
+${goodExamples}` : ""}
+${badExamples ? `
+--- EXEMPLES DE MAUVAIS LEADS (à éviter) ---
+${badExamples}` : ""}`;
+  } else {
+    companyContext = METAGORA_FALLBACK_PROMPT;
+  }
+
+  return `${companyContext}
 
 Pour chaque prospect, tu dois évaluer :
-1. **ai_score** (1-5) : pertinence du prospect pour Metagora
-   - 5 = Prospect parfait (secteur retail/luxe, décideur formation/RH, grande entreprise)
+1. **ai_score** (1-5) : pertinence du prospect pour ${companyName}
+   - 5 = Prospect parfait (profil et secteur idéaux, décideur clé)
    - 4 = Très pertinent (bon secteur OU bon poste, entreprise significative)
    - 3 = Intéressant (potentiel indirect, secteur adjacent, poste pertinent)
    - 2 = Peu pertinent (secteur éloigné, poste non-décideur)
@@ -51,10 +86,12 @@ Pour chaque prospect, tu dois évaluer :
 3. **resume_entreprise** : résumé de l'entreprise en 1 phrase (secteur, taille, activité principale)
 
 Réponds UNIQUEMENT en JSON array, sans markdown, sans backticks.`;
+}
 
 /** Build system prompt with RAG scoring memory injected */
-function buildSystemPrompt(corrections: ScoringCorrection[]): string {
-  if (corrections.length === 0) return BASE_SYSTEM_PROMPT;
+function buildSystemPrompt(card: ScoringCard | null, companyName: string, corrections: ScoringCorrection[]): string {
+  const base = buildBasePrompt(card, companyName);
+  if (corrections.length === 0) return base;
 
   // Take last 50 corrections max to avoid token overflow
   const recent = corrections.slice(-50);
@@ -62,7 +99,7 @@ function buildSystemPrompt(corrections: ScoringCorrection[]): string {
     `- "${c.poste}" chez "${c.entreprise}" : score corrigé de ${c.old_score} → ${c.new_score}. Raison : ${c.reason}`
   ).join("\n");
 
-  return `${BASE_SYSTEM_PROMPT}
+  return `${base}
 
 --- APPRENTISSAGE (corrections humaines précédentes) ---
 Voici des corrections faites par l'humain sur des scorings précédents. Utilise ces exemples pour calibrer tes scores. Ces corrections sont PRIORITAIRES sur tes propres estimations quand un profil similaire apparaît :
@@ -121,15 +158,22 @@ export async function POST(request: Request) {
         } catch { /* stream closed */ }
       };
 
-      // Load scoring memory for RAG
+      // Load scoring card + memory for RAG
       const brandKey = (brand || "metagora").toLowerCase();
+      const companyName = brand || "Metagora";
+      let scoringCard: ScoringCard | null = null;
+      try {
+        const cards = await readBlob<ScoringCard>("scoring-cards.json");
+        scoringCard = cards.find((c) => c.company.toLowerCase() === brandKey) || null;
+        if (scoringCard) console.log(`[AI Score] Using scoring card for "${companyName}" (${scoringCard.good_leads.length} good, ${scoringCard.bad_leads.length} bad leads)`);
+      } catch { /* no cards yet */ }
       let corrections: ScoringCorrection[] = [];
       try {
         const all = await readBlob<ScoringCorrection>("scoring-memory.json");
         corrections = all.filter((c) => c.brand === brandKey);
         console.log(`[AI Score] Loaded ${corrections.length} scoring corrections for "${brandKey}"`);
       } catch { /* no corrections yet */ }
-      const systemPrompt = buildSystemPrompt(corrections);
+      const systemPrompt = buildSystemPrompt(scoringCard, companyName, corrections);
 
       console.log(`[AI Score] Starting: ${toScore.length} prospects, ${totalBatches} batches, ×${PARALLEL} parallel`);
       send("progress", { current: 0, total: totalBatches, message: `Analyse IA — ${totalBatches} batches (×${PARALLEL} en parallèle)...` });
