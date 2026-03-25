@@ -11,7 +11,7 @@ const COLD_EMAIL_BEST_PRACTICES = `
 - Niveau de lecture 3ème (simple, pas de jargon)
 - Texte plain — pas d'images ni HTML lourd en cold email
 - Ton : poli, professionnel mais chaleureux, pas vendeur
-- Tutoiement (français B2B startup)
+- Vouvoiement (français B2B professionnel)
 
 ### Subject Line
 - 5-10 mots, minuscules, ton neutre
@@ -161,7 +161,7 @@ ${COLD_EMAIL_BEST_PRACTICES}
 ${emailDescriptions}
 - Utilise les variables Smartlead : {{first_name}}, {{last_name}}, {{company_name}} pour la personnalisation
 - Signe toujours "${senderName || "Tony"}" à la fin
-- Ton : ${tone || "professionnel mais chaleureux, tutoiement"}
+- Ton : ${tone || "professionnel mais chaleureux, vouvoiement"}
 - Langue : ${language || "français"}
 - 50-125 mots par email MAX
 - UN SEUL CTA par email

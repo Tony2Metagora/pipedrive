@@ -172,35 +172,46 @@ function parseCSVLeads(text: string) {
 
   // Check if first line is a header row
   const headerCells = splitLine(first).map((s) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
-  const hasHeader = headerCells.some((h) => ["email", "e-mail", "mail", "courriel"].includes(h));
+  const emailHeaders = ["email", "e-mail", "mail", "courriel"];
+  const nameHeaders = ["prenom", "first_name", "firstname", "first name", "fullname", "nom", "last_name", "lastname", "last name", "name", "company", "company_name", "companyname", "entreprise"];
+  const hasHeader = headerCells.some((h) => emailHeaders.includes(h) || nameHeaders.includes(h));
 
   if (hasHeader) {
-    // Map column names to indices
+    // Map column names to indices — supports French, English, and PhantomBuster/LinkedIn formats
     const colMap: Record<string, number> = {};
     headerCells.forEach((h, i) => {
-      if (["email", "e-mail", "mail", "courriel"].includes(h)) colMap.email = i;
-      else if (["prenom", "first_name", "firstname", "first name", "prénom"].includes(h)) colMap.first_name = i;
-      else if (["nom", "last_name", "lastname", "last name", "name"].includes(h)) colMap.last_name = i;
-      else if (["entreprise", "company", "company_name", "societe", "société", "organization"].includes(h)) colMap.company = i;
-      else if (["telephone", "phone", "tel", "phone_number", "téléphone"].includes(h)) colMap.phone = i;
+      if (emailHeaders.includes(h)) colMap.email = i;
+      else if (["prenom", "first_name", "firstname", "first name", "prenom"].includes(h)) colMap.first_name = i;
+      else if (["nom", "last_name", "lastname", "last name"].includes(h)) colMap.last_name = i;
+      else if (["fullname", "full_name", "name"].includes(h)) colMap.fullname = i;
+      else if (["entreprise", "company", "company_name", "companyname", "societe", "societe", "organization"].includes(h)) colMap.company = i;
+      else if (["telephone", "phone", "tel", "phone_number", "telephone"].includes(h)) colMap.phone = i;
       else if (["poste", "title", "job_title", "fonction", "job title", "position"].includes(h)) colMap.title = i;
-      else if (["linkedin", "linkedin_profile", "linkedin_url"].includes(h)) colMap.linkedin = i;
+      else if (["linkedin", "linkedin_profile", "linkedin_url", "linkedinprofileurl", "defaultprofileurl", "profileurl"].includes(h)) colMap.linkedin = i;
       else if (["ville", "city", "location"].includes(h)) colMap.location = i;
     });
 
     return lines.slice(1).map((line) => {
       const parts = splitLine(line);
+      // Derive first/last name from fullname if individual columns not found
+      let firstName = parts[colMap.first_name ?? -1] || "";
+      let lastName = parts[colMap.last_name ?? -1] || "";
+      if (!firstName && !lastName && colMap.fullname !== undefined) {
+        const full = (parts[colMap.fullname] || "").trim().split(/\s+/);
+        firstName = full[0] || "";
+        lastName = full.slice(1).join(" ") || "";
+      }
       return {
         email: parts[colMap.email ?? -1] || "",
-        first_name: parts[colMap.first_name ?? -1] || "",
-        last_name: parts[colMap.last_name ?? -1] || "",
+        first_name: firstName,
+        last_name: lastName,
         company_name: parts[colMap.company ?? -1] || "",
         phone_number: parts[colMap.phone ?? -1] || undefined,
         location: parts[colMap.location ?? -1] || undefined,
         linkedin_profile: parts[colMap.linkedin ?? -1] || undefined,
         custom_fields: colMap.title !== undefined ? { title: parts[colMap.title] || "" } : undefined,
       };
-    }).filter((l) => l.email.includes("@"));
+    }).filter((l) => l.email.includes("@") || (l.first_name && l.last_name));
   }
 
   // No header: assume email, first_name, last_name, company_name
@@ -272,7 +283,7 @@ export default function SequencesPage() {
   // AI email generation
   const [showAiGen, setShowAiGen] = useState(false);
   const [aiGenLoading, setAiGenLoading] = useState(false);
-  const [aiContext, setAiContext] = useState({ leadOrigin: "", leadProfile: "", campaignGoal: "", tone: "professionnel mais chaleureux, tutoiement" });
+  const [aiContext, setAiContext] = useState({ leadOrigin: "", leadProfile: "", campaignGoal: "", tone: "professionnel mais chaleureux, vouvoiement" });
   const [aiEmails, setAiEmails] = useState<{ seq_number: number; delay_days: number; subject: string; body: string }[]>([]);
   const [emailCount, setEmailCount] = useState(3);
   const [emailPrompts, setEmailPrompts] = useState<string[]>(["", "", ""]);
@@ -286,7 +297,9 @@ export default function SequencesPage() {
   const [previewEditSubject, setPreviewEditSubject] = useState("");
   const [previewEditBody, setPreviewEditBody] = useState("");
   const [savingDirectEdit, setSavingDirectEdit] = useState(false);
-  const [editMotif, setEditMotif] = useState("");
+  const [editMotifs, setEditMotifs] = useState<Record<number, string>>({});
+  const getEditMotif = (idx: number) => editMotifs[idx] || "";
+  const setEditMotif = (idx: number, val: string) => setEditMotifs((prev) => ({ ...prev, [idx]: val }));
   type EditMemory = { date: string; emailNum: number; motif: string; instruction: string; type: "rewrite" | "manual" };
   const [editMemories, setEditMemories] = useState<EditMemory[]>([]);
   const [showMemories, setShowMemories] = useState(false);
@@ -448,7 +461,8 @@ export default function SequencesPage() {
   const rewriteEmail = async (idx: number) => {
     const email = aiEmails[idx];
     if (!email) return;
-    if (!editMotif.trim()) { setError("Ajoutez un motif de modification pour que l'IA apprenne."); return; }
+    const motif = getEditMotif(idx);
+    if (!motif.trim()) { setError("Ajoutez un motif de modification pour que l'IA apprenne."); return; }
     setRewriteLoading(true);
     try {
       const res = await fetch("/api/sequences/rewrite-email", {
@@ -464,19 +478,21 @@ export default function SequencesPage() {
       });
       const d = await res.json();
       if (d.error) throw new Error(d.error);
-      addMemory({ date: new Date().toLocaleDateString("fr"), emailNum: email.seq_number, motif: editMotif, instruction: rewriteInstruction || "(amélioration auto)", type: "rewrite" });
+      addMemory({ date: new Date().toLocaleDateString("fr"), emailNum: email.seq_number, motif, instruction: rewriteInstruction || "(amélioration auto)", type: "rewrite" });
       setAiEmails((prev) => prev.map((e, i) => i === idx ? { ...e, subject: d.subject || e.subject, body: d.body || e.body } : e));
-      setRewriteInstruction(""); setEditMotif("");
+      setRewriteInstruction(""); setEditMotif(idx, "");
       flash("Email réécrit par l'IA ✓ Motif mémorisé");
     } catch (e) { setError(String(e)); }
     setRewriteLoading(false);
   };
 
   // AI rewrite a saved sequence email (already in Smartlead)
-  const rewriteSavedEmail = async (seqIdx: number) => {
+  const rewriteSavedEmail = async (seqIdx: number, overrideMotifKey?: number) => {
     const seq = sequences[seqIdx];
     if (!seq) return;
-    if (!editMotif.trim()) { setError("Ajoutez un motif de modification pour que l'IA apprenne."); return; }
+    const motifKey = overrideMotifKey ?? (seqIdx + 100);
+    const motif = getEditMotif(motifKey);
+    if (!motif.trim()) { setError("Ajoutez un motif de modification pour que l'IA apprenne."); return; }
     setRewriteLoading(true);
     try {
       const res = await fetch("/api/sequences/rewrite-email", {
@@ -492,7 +508,7 @@ export default function SequencesPage() {
       });
       const d = await res.json();
       if (d.error) throw new Error(d.error);
-      addMemory({ date: new Date().toLocaleDateString("fr"), emailNum: seq.seq_number, motif: editMotif, instruction: rewriteInstruction || "(amélioration auto)", type: "rewrite" });
+      addMemory({ date: new Date().toLocaleDateString("fr"), emailNum: seq.seq_number, motif, instruction: rewriteInstruction || "(amélioration auto)", type: "rewrite" });
       // Save the rewritten email back to Smartlead
       const updated = sequences.map((s, i) => ({
         subject: i === seqIdx ? (d.subject || s.subject) : s.subject,
@@ -501,7 +517,7 @@ export default function SequencesPage() {
         seq_delay_details: { delay_in_days: s.seq_delay_details?.delay_in_days || 0 },
       }));
       await doAction("save-sequences", { sequences: updated });
-      setRewriteInstruction(""); setEditMotif("");
+      setRewriteInstruction(""); setEditMotif(motifKey, "");
       setEditingSeqIdx(null); setPreviewEditIdx(null);
       flash("Email réécrit et sauvegardé ✓ Motif mémorisé");
       if (selectedId) openDetail(selectedId);
@@ -528,10 +544,12 @@ export default function SequencesPage() {
         seq_delay_details: { delay_in_days: s.seq_delay_details?.delay_in_days || 0 },
       }));
       await doAction("save-sequences", { sequences: updated });
-      if (editMotif.trim()) {
-        addMemory({ date: new Date().toLocaleDateString("fr"), emailNum: seq.seq_number, motif: editMotif, instruction: "(modification manuelle)", type: "manual" });
+      const motifKey = seqIdx + 200;
+      const motif = getEditMotif(motifKey);
+      if (motif.trim()) {
+        addMemory({ date: new Date().toLocaleDateString("fr"), emailNum: seq.seq_number, motif, instruction: "(modification manuelle)", type: "manual" });
       }
-      setPreviewEditIdx(null); setEditMotif("");
+      setPreviewEditIdx(null); setEditMotif(motifKey, "");
       flash("Email modifié et sauvegardé ✓");
       if (selectedId) openDetail(selectedId);
     } catch (e) { setError(String(e)); }
@@ -1107,14 +1125,24 @@ export default function SequencesPage() {
                                 className="w-full mt-0.5 px-2 py-1 text-xs border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400 resize-none" />
                             </div>
                             <div className="pt-1 border-t border-gray-200 space-y-1.5">
-                              <input value={editMotif} onChange={(ev) => setEditMotif(ev.target.value)}
-                                placeholder="Motif de modification * (ex: trop long, pas assez percutant, mauvais angle...)"
+                              <input value={getEditMotif(idx)} onChange={(ev) => setEditMotif(idx, ev.target.value)}
+                                placeholder="Motif de modification (ex: trop long, pas assez percutant, mauvais angle...)"
                                 className="w-full px-2 py-1 text-[10px] border border-orange-300 bg-orange-50 rounded-lg outline-none focus:ring-1 focus:ring-orange-400" />
                               <div className="flex items-center gap-2">
+                                <button onClick={() => {
+                                  const motif = getEditMotif(idx);
+                                  if (motif.trim()) addMemory({ date: new Date().toLocaleDateString("fr"), emailNum: e.seq_number, motif, instruction: "(modification manuelle)", type: "manual" });
+                                  setEditingSeqIdx(null); setEditMotif(idx, "");
+                                  flash("Modification enregistrée" + (motif.trim() ? " ✓ Motif mémorisé" : ""));
+                                }}
+                                  className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 cursor-pointer">
+                                  <Save className="w-3 h-3" /> Enregistrer
+                                </button>
+                                <div className="flex-1 h-px bg-gray-200" />
                                 <input value={rewriteInstruction} onChange={(ev) => setRewriteInstruction(ev.target.value)}
-                                  placeholder="Instruction IA : Plus court, plus direct, ajoute un chiffre..."
-                                  className="flex-1 px-2 py-1 text-[10px] border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400" />
-                                <button onClick={() => rewriteEmail(idx)} disabled={rewriteLoading || !editMotif.trim()}
+                                  placeholder="Instruction IA..."
+                                  className="w-32 px-2 py-1 text-[10px] border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400" />
+                                <button onClick={() => rewriteEmail(idx)} disabled={rewriteLoading || !getEditMotif(idx).trim()}
                                   className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer">
                                   {rewriteLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
                                   Réécrire IA
@@ -1180,14 +1208,14 @@ export default function SequencesPage() {
                         <div className="text-[11px] text-gray-700 max-h-20 overflow-y-auto" dangerouslySetInnerHTML={{ __html: seq.email_body || "" }} />
                         {editingSeqIdx === (idx + 100) && (
                           <div className="mt-2 pt-2 border-t border-gray-200 space-y-2">
-                            <input value={editMotif} onChange={(ev) => setEditMotif(ev.target.value)}
+                            <input value={getEditMotif(idx + 100)} onChange={(ev) => setEditMotif(idx + 100, ev.target.value)}
                               placeholder="Motif de modification * (ex: trop formel, manque de chiffres, CTA pas clair...)"
                               className="w-full px-2 py-1 text-[10px] border border-orange-300 bg-orange-50 rounded-lg outline-none focus:ring-1 focus:ring-orange-400" />
                             <div className="flex items-center gap-2">
                               <input value={rewriteInstruction} onChange={(ev) => setRewriteInstruction(ev.target.value)}
                                 placeholder="Instruction IA : Plus court, ajoute urgence, change l'angle..."
                                 className="flex-1 px-2 py-1 text-[10px] border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400" />
-                              <button onClick={() => rewriteSavedEmail(idx)} disabled={rewriteLoading || !editMotif.trim()}
+                              <button onClick={() => rewriteSavedEmail(idx)} disabled={rewriteLoading || !getEditMotif(idx + 100).trim()}
                                 className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer">
                                 {rewriteLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
                                 Réécrire IA
@@ -1435,7 +1463,7 @@ export default function SequencesPage() {
                               </div>
                               {/* Motif + Save + AI rewrite */}
                               <div className="mt-2 pt-2 border-t border-gray-200 space-y-2">
-                                <input value={editMotif} onChange={(ev) => setEditMotif(ev.target.value)}
+                                <input value={getEditMotif(sIdx + 200)} onChange={(ev) => setEditMotif(sIdx + 200, ev.target.value)}
                                   placeholder="Motif de modification (optionnel pour sauvegarde manuelle, requis pour IA)"
                                   className="w-full px-2 py-1.5 text-[10px] border border-orange-300 bg-orange-50 rounded-lg outline-none focus:ring-1 focus:ring-orange-400" />
                                 <div className="flex items-center gap-2">
@@ -1449,7 +1477,7 @@ export default function SequencesPage() {
                                   <input value={rewriteInstruction} onChange={(ev) => setRewriteInstruction(ev.target.value)}
                                     placeholder="Instruction IA..."
                                     className="w-40 px-2 py-1.5 text-[10px] border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400" />
-                                  <button onClick={() => rewriteSavedEmail(sIdx)} disabled={rewriteLoading || !editMotif.trim()}
+                                  <button onClick={() => rewriteSavedEmail(sIdx, sIdx + 200)} disabled={rewriteLoading || !getEditMotif(sIdx + 200).trim()}
                                     className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer">
                                     {rewriteLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
                                     Réécrire IA
@@ -1494,7 +1522,18 @@ export default function SequencesPage() {
 
             {/* Navigation + Launch */}
             <div className="flex justify-between items-center">
-              <button onClick={() => setWizardStep(3)} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">
+              <button onClick={() => {
+                // Reconstruct aiEmails from sequences so Step 3 shows the editable UI
+                if (sequences.length > 0 && aiEmails.length === 0) {
+                  setAiEmails(sequences.map((s) => ({
+                    seq_number: s.seq_number,
+                    delay_days: s.seq_delay_details?.delay_in_days || 0,
+                    subject: s.subject,
+                    body: s.email_body,
+                  })));
+                }
+                setWizardStep(3);
+              }} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">
                 <ChevronLeft className="w-4 h-4" /> Retour
               </button>
               <div className="flex items-center gap-3">
@@ -1834,14 +1873,24 @@ export default function SequencesPage() {
                                 <textarea value={e.body} onChange={(ev) => updateAiEmail(idx, "body", ev.target.value)} rows={5}
                                   className="w-full px-2 py-1 text-xs border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400 resize-none" />
                                 <div className="pt-1 border-t border-gray-200 space-y-1.5">
-                                  <input value={editMotif} onChange={(ev) => setEditMotif(ev.target.value)}
+                                  <input value={getEditMotif(idx)} onChange={(ev) => setEditMotif(idx, ev.target.value)}
                                     placeholder="Motif de modification * (ex: trop long, pas assez percutant...)"
                                     className="w-full px-2 py-1 text-[10px] border border-orange-300 bg-orange-50 rounded-lg outline-none focus:ring-1 focus:ring-orange-400" />
                                   <div className="flex items-center gap-2">
+                                    <button onClick={() => {
+                                      const motif = getEditMotif(idx);
+                                      if (motif.trim()) addMemory({ date: new Date().toLocaleDateString("fr"), emailNum: e.seq_number, motif, instruction: "(modification manuelle)", type: "manual" });
+                                      setEditingSeqIdx(null); setEditMotif(idx, "");
+                                      flash("Modification enregistrée" + (motif.trim() ? " ✓ Motif mémorisé" : ""));
+                                    }}
+                                      className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 cursor-pointer">
+                                      <Save className="w-3 h-3" /> Enregistrer
+                                    </button>
+                                    <div className="flex-1 h-px bg-gray-200" />
                                     <input value={rewriteInstruction} onChange={(ev) => setRewriteInstruction(ev.target.value)}
-                                      placeholder="Instruction IA : Plus court, plus direct..."
-                                      className="flex-1 px-2 py-1 text-[10px] border border-gray-300 rounded-lg outline-none" />
-                                    <button onClick={() => rewriteEmail(idx)} disabled={rewriteLoading || !editMotif.trim()}
+                                      placeholder="Instruction IA..."
+                                      className="w-32 px-2 py-1 text-[10px] border border-gray-300 rounded-lg outline-none" />
+                                    <button onClick={() => rewriteEmail(idx)} disabled={rewriteLoading || !getEditMotif(idx).trim()}
                                       className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer">
                                       {rewriteLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />} Réécrire IA
                                     </button>
@@ -1914,14 +1963,14 @@ export default function SequencesPage() {
                         <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-700 max-h-40 overflow-y-auto" dangerouslySetInnerHTML={{ __html: seq.email_body || "<em>Pas de contenu</em>" }} />
                         {editingSeqIdx === (idx + 200) && (
                           <div className="mt-3 pt-2 border-t border-gray-200 space-y-2">
-                            <input value={editMotif} onChange={(ev) => setEditMotif(ev.target.value)}
+                            <input value={getEditMotif(idx + 200)} onChange={(ev) => setEditMotif(idx + 200, ev.target.value)}
                               placeholder="Motif de modification * (ex: trop formel, manque de chiffres, CTA pas clair...)"
                               className="w-full px-2 py-1.5 text-xs border border-orange-300 bg-orange-50 rounded-lg outline-none focus:ring-1 focus:ring-orange-400" />
                             <div className="flex items-center gap-2">
                               <input value={rewriteInstruction} onChange={(ev) => setRewriteInstruction(ev.target.value)}
                                 placeholder="Instruction IA : Plus court, ajoute urgence, change l'angle..."
                                 className="flex-1 px-2 py-1.5 text-xs border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-violet-400" />
-                              <button onClick={() => rewriteSavedEmail(idx)} disabled={rewriteLoading || !editMotif.trim()}
+                              <button onClick={() => rewriteSavedEmail(idx, idx + 200)} disabled={rewriteLoading || !getEditMotif(idx + 200).trim()}
                                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer">
                                 {rewriteLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />} Réécrire IA
                               </button>
