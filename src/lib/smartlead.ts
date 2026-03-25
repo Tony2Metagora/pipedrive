@@ -172,10 +172,11 @@ export async function saveSequences(campaignId: number, sequences: { subject: st
       },
     ],
   }));
-  console.log("[saveSequences] campaignId:", campaignId, "payload:", JSON.stringify(formatted, null, 2));
+  const payload = { sequences: formatted };
+  console.log("[saveSequences] campaignId:", campaignId, "payload:", JSON.stringify(payload, null, 2));
   const result = await sl(`/campaigns/${campaignId}/sequences`, {
     method: "POST",
-    body: JSON.stringify(formatted),
+    body: JSON.stringify(payload),
   });
   console.log("[saveSequences] response:", JSON.stringify(result));
   return result;

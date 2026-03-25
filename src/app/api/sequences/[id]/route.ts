@@ -13,6 +13,7 @@ import {
   setCampaignStatus,
   updateCampaignSettings,
   setCampaignSchedule,
+  getCampaignSchedule,
   getLeadMessageHistory,
   type SmartleadLead,
   type LeadStatus,
@@ -117,6 +118,34 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       case "set-status": {
         const { status } = body as { status: "START" | "PAUSE" | "STOP" };
         if (!status) return NextResponse.json({ error: "status requis" }, { status: 400 });
+        // Auto-set a default schedule before starting if none exists
+        if (status === "START") {
+          try {
+            const existingSchedule = await getCampaignSchedule(campaignId) as Record<string, unknown> | null;
+            if (!existingSchedule || !existingSchedule.timezone) {
+              await setCampaignSchedule(campaignId, {
+                timezone: "Europe/Paris",
+                days_of_the_week: [1, 2, 3, 4, 5],
+                start_hour: "09:00",
+                end_hour: "18:00",
+                min_time_btw_emails: 8,
+                max_new_leads_per_day: 10,
+              });
+              console.log("[set-status] Auto-set default schedule for campaign", campaignId);
+            }
+          } catch (schedErr) {
+            console.warn("[set-status] Could not check/set schedule:", schedErr);
+            // Try to set schedule anyway
+            await setCampaignSchedule(campaignId, {
+              timezone: "Europe/Paris",
+              days_of_the_week: [1, 2, 3, 4, 5],
+              start_hour: "09:00",
+              end_hour: "18:00",
+              min_time_btw_emails: 8,
+              max_new_leads_per_day: 10,
+            });
+          }
+        }
         const result = await setCampaignStatus(campaignId, status);
         return NextResponse.json({ success: true, result });
       }
