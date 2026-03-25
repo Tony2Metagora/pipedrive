@@ -65,6 +65,23 @@ interface Prospect {
   deal_status: string | null;
   deal_value: number | null;
   computed_statut: string;
+  extra_fields?: string;
+}
+
+interface ColumnInfo {
+  index: number;
+  original: string;
+  suggestedLabel: string;
+  knownField: string | null;
+  autoSelected: boolean;
+  samples: string[];
+}
+
+interface ColMapping {
+  index: number;
+  selected: boolean;
+  label: string;
+  knownField: string | null;
 }
 
 interface ProspectList {
@@ -100,7 +117,7 @@ const PROSPECT_COLUMNS = [
   { key: "resume_entreprise", label: "Résumé Ent.", defaultVisible: true, defaultWidth: 160, minWidth: 80 },
   { key: "ai_score", label: "Score IA", defaultVisible: true, defaultWidth: 60, minWidth: 45 },
   { key: "ai_comment", label: "Analyse IA", defaultVisible: true, defaultWidth: 180, minWidth: 80 },
-] as const;
+] as { key: string; label: string; defaultVisible: boolean; defaultWidth: number; minWidth: number }[];
 
 function ScoreNumber({ value, onChange }: { value: number; onChange?: (v: number) => void }) {
   const colors = [
@@ -185,15 +202,68 @@ export default function ProspectsPage() {
   const [uploadListName, setUploadListName] = useState("");
   const [uploadListCompany, setUploadListCompany] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
+  // Column mapping wizard
+  const [uploadStep, setUploadStep] = useState<1 | 2>(1); // 1=column mapping, 2=list info
+  const [parsingHeaders, setParsingHeaders] = useState(false);
+  const [parsedColumns, setParsedColumns] = useState<ColumnInfo[]>([]);
+  const [parsedTotalRows, setParsedTotalRows] = useState(0);
+  const [colMapping, setColMapping] = useState<ColMapping[]>([]);
   const [showListPanel, setShowListPanel] = useState(true);
   const [visibleCols, setVisibleCols] = useState<Set<string>>(
     new Set(PROSPECT_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key))
   );
   const [showColPicker, setShowColPicker] = useState(false);
   const colVisible = (key: string) => visibleCols.has(key);
+
+  // Detect extra_fields columns from loaded prospects
+  const extraColumns = useMemo(() => {
+    const keys = new Set<string>();
+    for (const p of prospects) {
+      if (p.extra_fields) {
+        try {
+          const extra = JSON.parse(p.extra_fields) as Record<string, string>;
+          for (const k of Object.keys(extra)) keys.add(k);
+        } catch { /* ignore */ }
+      }
+    }
+    return Array.from(keys).map((k) => ({
+      key: `extra:${k}`,
+      label: k,
+      defaultVisible: true,
+      defaultWidth: 120,
+      minWidth: 50,
+    }));
+  }, [prospects]);
+
+  // Merged columns: base + extra
+  const allColumns = useMemo(() => [...PROSPECT_COLUMNS, ...extraColumns], [extraColumns]);
+
+  // Auto-show new extra columns when they appear
+  const prevExtraKeysRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const newKeys = extraColumns.map((c) => c.key).filter((k) => !prevExtraKeysRef.current.has(k));
+    if (newKeys.length > 0) {
+      setVisibleCols((prev) => {
+        const next = new Set(prev);
+        for (const k of newKeys) next.add(k);
+        return next;
+      });
+    }
+    prevExtraKeysRef.current = new Set(extraColumns.map((c) => c.key));
+  }, [extraColumns]);
+
   const { widths: colWidths, onMouseDown: onColResize } = useResizableColumns(
-    PROSPECT_COLUMNS.map((c) => ({ key: c.key, minWidth: c.minWidth, defaultWidth: c.defaultWidth }))
+    allColumns.map((c) => ({ key: c.key, minWidth: c.minWidth, defaultWidth: c.defaultWidth }))
   );
+
+  // Helper to get extra field value from a prospect
+  const getExtraField = useCallback((p: Prospect, key: string): string => {
+    if (!p.extra_fields) return "";
+    try {
+      const extra = JSON.parse(p.extra_fields) as Record<string, string>;
+      return extra[key] || "";
+    } catch { return ""; }
+  }, []);
 
   const fetchProspects = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -227,6 +297,17 @@ export default function ProspectsPage() {
     fetchLists();
   }, [fetchProspects, fetchLists]);
 
+  const resetUploadModal = () => {
+    setShowUploadModal(false);
+    setUploadFile(null);
+    setUploadListName("");
+    setUploadListCompany("");
+    setParsedColumns([]);
+    setParsedTotalRows(0);
+    setColMapping([]);
+    setUploadStep(1);
+  };
+
   const handleUploadWithList = async () => {
     if (!uploadFile || !uploadListName.trim() || !uploadListCompany.trim()) return;
     setUploading(true);
@@ -235,16 +316,19 @@ export default function ProspectsPage() {
       formData.append("file", uploadFile);
       formData.append("list_name", uploadListName.trim());
       formData.append("list_company", uploadListCompany.trim());
+      // Send column mapping
+      const selectedMapping = colMapping.filter((m) => m.selected);
+      if (selectedMapping.length > 0) {
+        formData.append("column_mapping", JSON.stringify(colMapping));
+      }
       const res = await fetch("/api/prospects/upload", { method: "POST", body: formData });
       const json = await res.json();
       if (json.success) {
         const dupMsg = json.skippedDuplicates ? ` (${json.skippedDuplicates} doublons ignorés)` : "";
-        setActionMsg(`${json.count} contacts importés dans "${uploadListName.trim()}"${dupMsg}`);
+        const extraMsg = json.extraColumns?.length ? ` + ${json.extraColumns.length} colonnes supplémentaires` : "";
+        setActionMsg(`${json.count} contacts importés dans "${uploadListName.trim()}"${dupMsg}${extraMsg}`);
         setTimeout(() => setActionMsg(null), 5000);
-        setShowUploadModal(false);
-        setUploadFile(null);
-        setUploadListName("");
-        setUploadListCompany("");
+        resetUploadModal();
         syncProspects();
         fetchLists();
         if (json.list_id) setSelectedListId(json.list_id);
@@ -722,7 +806,7 @@ export default function ProspectsPage() {
       }
       if (search) {
         const q = search.toLowerCase();
-        return (
+        const baseMatch = (
           (p.nom || "").toLowerCase().includes(q) ||
           (p.prenom || "").toLowerCase().includes(q) ||
           (p.email || "").toLowerCase().includes(q) ||
@@ -731,6 +815,15 @@ export default function ProspectsPage() {
           (p.telephone || "").includes(q) ||
           (p.deal_title || "").toLowerCase().includes(q)
         );
+        if (baseMatch) return true;
+        // Also search in extra_fields
+        if (p.extra_fields) {
+          try {
+            const extra = JSON.parse(p.extra_fields) as Record<string, string>;
+            return Object.values(extra).some((v) => v.toLowerCase().includes(q));
+          } catch { /* ignore */ }
+        }
+        return false;
       }
       return true;
     });
@@ -899,9 +992,37 @@ export default function ProspectsPage() {
             ref={fileInputRef}
             type="file"
             accept=".csv,.xlsx,.xls"
-            onChange={(e) => {
+            onChange={async (e) => {
               const f = e.target.files?.[0];
-              if (f) { setUploadFile(f); setShowUploadModal(true); }
+              if (!f) return;
+              setUploadFile(f);
+              setParsingHeaders(true);
+              setShowUploadModal(true);
+              setUploadStep(1);
+              try {
+                const fd = new FormData();
+                fd.append("file", f);
+                const res = await fetch("/api/prospects/parse-headers", { method: "POST", body: fd });
+                const json = await res.json();
+                if (json.success && json.columns) {
+                  setParsedColumns(json.columns);
+                  setParsedTotalRows(json.totalRows || 0);
+                  setColMapping(json.columns.map((c: ColumnInfo) => ({
+                    index: c.index,
+                    selected: c.autoSelected,
+                    label: c.suggestedLabel,
+                    knownField: c.knownField,
+                  })));
+                } else {
+                  alert("Erreur parsing: " + (json.error || "inconnue"));
+                  setShowUploadModal(false);
+                }
+              } catch (err) {
+                console.error("Parse headers error:", err);
+                alert("Erreur lors de l'analyse du fichier");
+                setShowUploadModal(false);
+              }
+              setParsingHeaders(false);
               if (fileInputRef.current) fileInputRef.current.value = "";
             }}
             className="hidden"
@@ -1012,7 +1133,7 @@ export default function ProspectsPage() {
             </button>
             {showColPicker && (
               <div className="absolute right-0 top-full mt-1 w-52 bg-white rounded-lg border border-gray-200 shadow-xl z-50 p-2 space-y-0.5 max-h-80 overflow-y-auto">
-                {PROSPECT_COLUMNS.map((col) => (
+                {allColumns.map((col) => (
                   <label key={col.key} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-xs">
                     <input
                       type="checkbox"
@@ -1134,7 +1255,7 @@ export default function ProspectsPage() {
                       className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                     />
                   </th>
-                  {PROSPECT_COLUMNS.filter((c) => colVisible(c.key)).map((col) => (
+                  {allColumns.filter((c) => colVisible(c.key)).map((col) => (
                     <th
                       key={col.key}
                       className={cn(
@@ -1344,6 +1465,16 @@ export default function ProspectsPage() {
                       {colVisible("ai_comment") && <td className="px-1 py-1.5 truncate overflow-hidden cursor-pointer hover:bg-violet-50/50 transition-colors" style={{ width: colWidths["ai_comment"], maxWidth: colWidths["ai_comment"] }} onClick={() => openScoreEdit(p)} title="Cliquer pour modifier">
                         <span className="text-gray-500 text-[9px]">{p.ai_comment || <span className="text-gray-300">—</span>}</span>
                       </td>}
+                      {/* Dynamic extra columns */}
+                      {extraColumns.filter((ec) => colVisible(ec.key)).map((ec) => {
+                        const extraKey = ec.key.replace(/^extra:/, "");
+                        const val = getExtraField(p, extraKey);
+                        return (
+                          <td key={ec.key} className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths[ec.key], maxWidth: colWidths[ec.key] }}>
+                            <span className="text-gray-600 text-[9px]" title={val}>{val || <span className="text-gray-300">—</span>}</span>
+                          </td>
+                        );
+                      })}
                       <td className="pr-3 pl-1 py-1.5 text-center">
                         {isEditing ? (
                           <div className="flex items-center gap-0.5 justify-center">
@@ -1415,94 +1546,204 @@ export default function ProspectsPage() {
         />
       )}
 
-      {/* Modal import CSV avec liste */}
+      {/* Modal import CSV — Column Mapping Wizard */}
       {showUploadModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                <Upload className="w-5 h-5 text-indigo-600" />
-                Importer un fichier
-              </h3>
-              <button onClick={() => { setShowUploadModal(false); setUploadFile(null); setUploadListName(""); setUploadListCompany(""); }} className="text-gray-400 hover:text-gray-600 cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {uploadFile && (
-              <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg border border-gray-200">
-                <FolderOpen className="w-4 h-4 text-gray-400" />
-                <span className="text-sm text-gray-700 truncate">{uploadFile.name}</span>
-              </div>
-            )}
-
-            <div className="space-y-3">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Nom de la liste *</label>
-                <input
-                  type="text"
-                  value={uploadListName}
-                  onChange={(e) => setUploadListName(e.target.value)}
-                  placeholder="Ex: Contacts Salon 2026"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
-                  autoFocus
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Entreprise associée *</label>
-                <div className="relative">
-                  <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <input
-                    type="text"
-                    value={uploadListCompany}
-                    onChange={(e) => setUploadListCompany(e.target.value)}
-                    placeholder="Ex: Metagora"
-                    list="known-companies"
-                    className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
-                  />
-                  <datalist id="known-companies">
-                    {knownCompanies.map((c) => (
-                      <option key={c} value={c} />
-                    ))}
-                  </datalist>
-                </div>
-                {knownCompanies.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-1.5">
-                    {knownCompanies.map((c) => (
-                      <button
-                        key={c}
-                        onClick={() => setUploadListCompany(c)}
-                        className={cn(
-                          "px-2 py-0.5 text-[10px] font-medium rounded-full border cursor-pointer transition-colors",
-                          uploadListCompany === c
-                            ? "bg-indigo-100 text-indigo-700 border-indigo-300"
-                            : "bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100"
-                        )}
-                      >
-                        {c}
-                      </button>
-                    ))}
-                  </div>
+                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <Upload className="w-5 h-5 text-indigo-600" />
+                  Importer un fichier
+                </h3>
+                {uploadFile && (
+                  <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1.5">
+                    <FolderOpen className="w-3.5 h-3.5" />
+                    {uploadFile.name} — {parsedTotalRows} lignes détectées
+                  </p>
                 )}
               </div>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                  <span className={cn("w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold", uploadStep === 1 ? "bg-indigo-600 text-white" : "bg-indigo-100 text-indigo-600")}>1</span>
+                  <span className={uploadStep === 1 ? "text-indigo-700 font-medium" : "text-gray-400"}>Colonnes</span>
+                  <ChevronDown className="w-3 h-3 -rotate-90" />
+                  <span className={cn("w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold", uploadStep === 2 ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-500")}>2</span>
+                  <span className={uploadStep === 2 ? "text-indigo-700 font-medium" : "text-gray-400"}>Liste</span>
+                </div>
+                <button onClick={resetUploadModal} className="text-gray-400 hover:text-gray-600 cursor-pointer">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2">
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              {parsingHeaders ? (
+                <div className="flex items-center justify-center py-16">
+                  <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
+                  <span className="ml-3 text-sm text-gray-500">Analyse du fichier...</span>
+                </div>
+              ) : uploadStep === 1 ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-gray-600">
+                      <strong>{parsedColumns.length}</strong> colonnes détectées — cochez celles à importer et renommez si besoin.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setColMapping((prev) => prev.map((m) => ({ ...m, selected: true })))}
+                        className="text-[10px] text-indigo-600 hover:text-indigo-800 font-medium cursor-pointer"
+                      >Tout cocher</button>
+                      <button
+                        onClick={() => setColMapping((prev) => prev.map((m) => ({ ...m, selected: false })))}
+                        className="text-[10px] text-gray-500 hover:text-gray-700 font-medium cursor-pointer"
+                      >Tout décocher</button>
+                    </div>
+                  </div>
+                  <div className="border border-gray-200 rounded-lg overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="w-8 px-2 py-2 text-center"></th>
+                          <th className="px-2 py-2 text-left text-gray-600 font-semibold">Colonne fichier</th>
+                          <th className="px-2 py-2 text-left text-gray-600 font-semibold">Titre affiché</th>
+                          <th className="px-2 py-2 text-left text-gray-600 font-semibold">Champ connu</th>
+                          <th className="px-2 py-2 text-left text-gray-600 font-semibold">Exemple</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {parsedColumns.map((col) => {
+                          const mapping = colMapping.find((m) => m.index === col.index);
+                          if (!mapping) return null;
+                          return (
+                            <tr key={col.index} className={cn("transition-colors", mapping.selected ? "bg-indigo-50/40" : "opacity-60")}>
+                              <td className="px-2 py-1.5 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={mapping.selected}
+                                  onChange={() => setColMapping((prev) => prev.map((m) => m.index === col.index ? { ...m, selected: !m.selected } : m))}
+                                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                />
+                              </td>
+                              <td className="px-2 py-1.5">
+                                <span className="font-mono text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{col.original}</span>
+                              </td>
+                              <td className="px-2 py-1.5">
+                                <input
+                                  type="text"
+                                  value={mapping.label}
+                                  onChange={(e) => setColMapping((prev) => prev.map((m) => m.index === col.index ? { ...m, label: e.target.value } : m))}
+                                  disabled={!mapping.selected}
+                                  className="w-full px-1.5 py-0.5 text-[11px] border border-gray-200 rounded focus:ring-1 focus:ring-indigo-400 outline-none disabled:bg-gray-50 disabled:text-gray-400"
+                                />
+                              </td>
+                              <td className="px-2 py-1.5">
+                                {col.knownField ? (
+                                  <span className="text-[10px] font-medium text-green-700 bg-green-50 px-1.5 py-0.5 rounded">{col.knownField}</span>
+                                ) : (
+                                  <span className="text-[10px] text-gray-400">extra</span>
+                                )}
+                              </td>
+                              <td className="px-2 py-1.5 max-w-[200px]">
+                                <span className="text-[10px] text-gray-500 truncate block">{col.samples[0] || "—"}</span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-[10px] text-gray-400">
+                    Les colonnes avec un &quot;champ connu&quot; seront mappées aux champs standard (Prénom, Nom, Email...).
+                    Les autres seront importées en colonnes supplémentaires.
+                    <strong className="text-indigo-600"> Score IA</strong> et <strong className="text-indigo-600">Analyse IA</strong> seront toujours ajoutés.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4 max-w-md mx-auto py-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Nom de la liste *</label>
+                    <input
+                      type="text"
+                      value={uploadListName}
+                      onChange={(e) => setUploadListName(e.target.value)}
+                      placeholder="Ex: Gestion urbaine - IDF - 440"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+                      autoFocus
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Entreprise associée *</label>
+                    <div className="relative">
+                      <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <input
+                        type="text"
+                        value={uploadListCompany}
+                        onChange={(e) => setUploadListCompany(e.target.value)}
+                        placeholder="Ex: Metagora"
+                        list="known-companies"
+                        className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+                      />
+                      <datalist id="known-companies">
+                        {knownCompanies.map((c) => (
+                          <option key={c} value={c} />
+                        ))}
+                      </datalist>
+                    </div>
+                    {knownCompanies.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {knownCompanies.map((c) => (
+                          <button
+                            key={c}
+                            onClick={() => setUploadListCompany(c)}
+                            className={cn(
+                              "px-2 py-0.5 text-[10px] font-medium rounded-full border cursor-pointer transition-colors",
+                              uploadListCompany === c
+                                ? "bg-indigo-100 text-indigo-700 border-indigo-300"
+                                : "bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100"
+                            )}
+                          >
+                            {c}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 text-xs text-indigo-700">
+                    <strong>{colMapping.filter((m) => m.selected).length}</strong> colonnes sélectionnées sur {parsedColumns.length} — <strong>{parsedTotalRows}</strong> lignes à importer
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex justify-between items-center px-6 py-4 border-t border-gray-200 bg-gray-50">
               <button
-                onClick={() => { setShowUploadModal(false); setUploadFile(null); setUploadListName(""); setUploadListCompany(""); }}
+                onClick={uploadStep === 1 ? resetUploadModal : () => setUploadStep(1)}
                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer"
               >
-                Annuler
+                {uploadStep === 1 ? "Annuler" : "Retour"}
               </button>
-              <button
-                onClick={handleUploadWithList}
-                disabled={uploading || !uploadListName.trim() || !uploadListCompany.trim()}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
-              >
-                {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                {uploading ? "Import en cours..." : "Importer"}
-              </button>
+              {uploadStep === 1 ? (
+                <button
+                  onClick={() => setUploadStep(2)}
+                  disabled={colMapping.filter((m) => m.selected).length === 0}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+                >
+                  Suivant <ChevronDown className="w-4 h-4 -rotate-90" />
+                </button>
+              ) : (
+                <button
+                  onClick={handleUploadWithList}
+                  disabled={uploading || !uploadListName.trim() || !uploadListCompany.trim()}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+                >
+                  {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                  {uploading ? "Import en cours..." : `Importer ${parsedTotalRows} contacts`}
+                </button>
+              )}
             </div>
           </div>
         </div>
