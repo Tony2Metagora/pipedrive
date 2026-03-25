@@ -158,11 +158,10 @@ export async function getSequences(campaignId: number): Promise<SequenceStep[]> 
 
 export async function saveSequences(campaignId: number, sequences: { subject: string; email_body: string; seq_number: number; seq_delay_details: { delay_in_days: number } }[]): Promise<unknown> {
   // Smartlead API expects a raw array with variants[] format
-  // seq_delay_details must be a JSON string, id:null for new sequences
   const formatted = sequences.map((s) => ({
     id: null,
     seq_number: s.seq_number,
-    seq_delay_details: JSON.stringify(s.seq_delay_details),
+    seq_delay_details: { delay_in_days: Number(s.seq_delay_details?.delay_in_days) || 0 },
     variant_distribution_type: "MANUALLY_EQUAL",
     variants: [
       {
@@ -173,10 +172,13 @@ export async function saveSequences(campaignId: number, sequences: { subject: st
       },
     ],
   }));
-  return sl(`/campaigns/${campaignId}/sequences`, {
+  console.log("[saveSequences] campaignId:", campaignId, "payload:", JSON.stringify(formatted, null, 2));
+  const result = await sl(`/campaigns/${campaignId}/sequences`, {
     method: "POST",
     body: JSON.stringify(formatted),
   });
+  console.log("[saveSequences] response:", JSON.stringify(result));
+  return result;
 }
 
 // ─── Leads ──────────────────────────────────────────────

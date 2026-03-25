@@ -126,8 +126,28 @@ function formatDateFR(d: Date): string {
   return `${DAYS_FR[d.getDay()]} ${d.getDate().toString().padStart(2, "0")}/${(d.getMonth() + 1).toString().padStart(2, "0")}`;
 }
 
+function splitCSVLines(text: string): string[] {
+  // Split CSV text into rows, respecting quoted fields with embedded newlines
+  const rows: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') { inQuotes = !inQuotes; current += ch; continue; }
+    if ((ch === '\n' || ch === '\r') && !inQuotes) {
+      if (ch === '\r' && text[i + 1] === '\n') i++; // skip \r\n
+      if (current.trim()) rows.push(current);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) rows.push(current);
+  return rows;
+}
+
 function parseCSVLeads(text: string) {
-  const lines = text.trim().split("\n").filter(Boolean);
+  const lines = splitCSVLines(text);
   if (!lines.length) return [];
 
   // Detect separator: use whichever of ;,\t appears most in first line
@@ -404,7 +424,12 @@ export default function SequencesPage() {
       });
       const d = await res.json();
       if (d.error) throw new Error(d.error);
-      setAiEmails(d.emails || []);
+      // Force default 3-day delays between emails
+      const emails = (d.emails || []).map((e: { seq_number: number; delay_days?: number; subject: string; body: string }, i: number) => ({
+        ...e,
+        delay_days: i === 0 ? 0 : 3,
+      }));
+      setAiEmails(emails);
     } catch (e) { setError(String(e)); }
     setAiGenLoading(false);
   };
@@ -747,7 +772,7 @@ export default function SequencesPage() {
   const wizardReady = {
     email: campaignAccounts.length > 0,
     leads: totalLeads > 0,
-    sequences: sequences.length > 0,
+    sequences: sequences.length > 0 || aiEmails.length > 0,
   };
 
   // Helper: replace Smartlead variables with lead data for preview
@@ -1037,11 +1062,6 @@ export default function SequencesPage() {
                     <p className="text-xs font-semibold text-violet-700">
                       Séquence générée ({aiEmails.length} email{aiEmails.length > 1 ? "s" : ""}) — cliquez pour modifier
                     </p>
-                    <button onClick={saveAiEmails} disabled={actionLoading}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50 cursor-pointer">
-                      {actionLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-                      Sauvegarder dans Smartlead
-                    </button>
                   </div>
                   {aiEmails.map((e, idx) => (
                     <div key={e.seq_number}>
@@ -1052,9 +1072,10 @@ export default function SequencesPage() {
                           <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1">
                             <Timer className="w-3 h-3 text-amber-500" />
                             <span className="text-[10px] text-amber-700">Attendre</span>
-                            <input type="number" min={1} max={30} value={e.delay_days}
+                            <input type="number" min={0} max={30} value={e.delay_days}
                               onChange={(ev) => updateAiDelay(idx, Number(ev.target.value))}
-                              className="w-10 text-center text-[10px] font-bold text-amber-800 border border-amber-300 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-amber-400" />
+                              style={{ MozAppearance: 'textfield', WebkitAppearance: 'none', appearance: 'textfield' } as React.CSSProperties}
+                              className="w-10 text-center text-[10px] font-bold text-amber-800 border border-amber-300 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-amber-400 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" />
                             <span className="text-[10px] text-amber-700">jour(s)</span>
                           </div>
                           <div className="flex-1 h-px bg-gray-200" />
@@ -1135,9 +1156,10 @@ export default function SequencesPage() {
                           <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1">
                             <Timer className="w-3 h-3 text-amber-500" />
                             <span className="text-[10px] text-amber-700">Attendre</span>
-                            <input type="number" min={1} max={30} value={getLocalDelay(idx)}
+                            <input type="number" min={0} max={30} value={getLocalDelay(idx)}
                               onChange={(ev) => setLocalDelayVal(idx, Number(ev.target.value))}
-                              className="w-10 text-center text-[10px] font-bold text-amber-800 border border-amber-300 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-amber-400" />
+                              style={{ MozAppearance: 'textfield', WebkitAppearance: 'none', appearance: 'textfield' } as React.CSSProperties}
+                              className="w-10 text-center text-[10px] font-bold text-amber-800 border border-amber-300 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-amber-400 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" />
                             <span className="text-[10px] text-amber-700">jour(s)</span>
                           </div>
                           <div className="flex-1 h-px bg-gray-200" />
@@ -1184,9 +1206,33 @@ export default function SequencesPage() {
               <button onClick={() => setWizardStep(2)} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">
                 <ChevronLeft className="w-4 h-4" /> Retour
               </button>
-              <button onClick={() => { setWizardStep(4); setPreviewLeadIdx(0); }} disabled={!wizardReady.sequences}
+              <button onClick={async () => {
+                // Save AI emails to Smartlead if present, then go to preview
+                if (aiEmails.length > 0 && selectedId) {
+                  setActionLoading(true);
+                  try {
+                    const formatted = aiEmails.map((e) => ({
+                      subject: e.subject,
+                      email_body: e.body,
+                      seq_number: e.seq_number,
+                      seq_delay_details: { delay_in_days: e.delay_days },
+                    }));
+                    await doAction("save-sequences", { sequences: formatted });
+                    // Set sequences directly from local data — no refetch needed
+                    setSequences(formatted.map((f) => ({
+                      seq_number: f.seq_number,
+                      seq_delay_details: f.seq_delay_details,
+                      subject: f.subject,
+                      email_body: f.email_body,
+                    })));
+                    setAiEmails([]);
+                  } catch (e) { setError(String(e)); setActionLoading(false); return; }
+                  setActionLoading(false);
+                }
+                setWizardStep(4); setPreviewLeadIdx(0);
+              }} disabled={!wizardReady.sequences || actionLoading}
                 className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-40 cursor-pointer">
-                Preview & Lancer <ChevronRight className="w-4 h-4" />
+                {actionLoading ? <><Loader2 className="w-4 h-4 animate-spin" /> Sauvegarde...</> : <>Preview & Lancer <ChevronRight className="w-4 h-4" /></>}
               </button>
             </div>
           </div>
@@ -1762,9 +1808,10 @@ export default function SequencesPage() {
                               <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1">
                                 <Timer className="w-3 h-3 text-amber-500" />
                                 <span className="text-[10px] text-amber-700">Attendre</span>
-                                <input type="number" min={1} max={30} value={e.delay_days}
+                                <input type="number" min={0} max={30} value={e.delay_days}
                                   onChange={(ev) => updateAiDelay(idx, Number(ev.target.value))}
-                                  className="w-10 text-center text-[10px] font-bold text-amber-800 border border-amber-300 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-amber-400" />
+                                  style={{ MozAppearance: 'textfield', WebkitAppearance: 'none', appearance: 'textfield' } as React.CSSProperties}
+                                  className="w-10 text-center text-[10px] font-bold text-amber-800 border border-amber-300 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-amber-400 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" />
                                 <span className="text-[10px] text-amber-700">jour(s)</span>
                               </div>
                               <div className="flex-1 h-px bg-violet-200" />
@@ -1844,9 +1891,10 @@ export default function SequencesPage() {
                           <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1">
                             <Timer className="w-3 h-3 text-amber-500" />
                             <span className="text-[10px] text-amber-700">Attendre</span>
-                            <input type="number" min={1} max={30} value={getLocalDelay(idx)}
+                            <input type="number" min={0} max={30} value={getLocalDelay(idx)}
                               onChange={(ev) => setLocalDelayVal(idx, Number(ev.target.value))}
-                              className="w-10 text-center text-[10px] font-bold text-amber-800 border border-amber-300 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-amber-400" />
+                              style={{ MozAppearance: 'textfield', WebkitAppearance: 'none', appearance: 'textfield' } as React.CSSProperties}
+                              className="w-10 text-center text-[10px] font-bold text-amber-800 border border-amber-300 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-amber-400 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" />
                             <span className="text-[10px] text-amber-700">jour(s)</span>
                           </div>
                           <div className="flex-1 h-px bg-gray-200" />
