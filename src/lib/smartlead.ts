@@ -157,26 +157,24 @@ export async function getSequences(campaignId: number): Promise<SequenceStep[]> 
 }
 
 export async function saveSequences(campaignId: number, sequences: { subject: string; email_body: string; seq_number: number; seq_delay_details: { delay_in_days: number } }[]): Promise<unknown> {
-  // Smartlead API expects a raw array with variants[] format
+  // Smartlead API expects the body to be a RAW ARRAY (not wrapped in { sequences: [...] })
+  // Doc: POST /campaigns/{id}/sequences body = [ { seq_number, seq_delay_details, variant_distribution_type, variants } ]
   const formatted = sequences.map((s) => ({
-    id: null,
     seq_number: s.seq_number,
     seq_delay_details: { delay_in_days: Number(s.seq_delay_details?.delay_in_days) || 0 },
     variant_distribution_type: "MANUALLY_EQUAL",
     variants: [
       {
-        id: null,
         subject: s.subject,
         email_body: s.email_body,
         variant_label: "A",
       },
     ],
   }));
-  const payload = { sequences: formatted };
-  console.log("[saveSequences] campaignId:", campaignId, "payload:", JSON.stringify(payload, null, 2));
+  console.log("[saveSequences] campaignId:", campaignId, "count:", formatted.length);
   const result = await sl(`/campaigns/${campaignId}/sequences`, {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify(formatted),
   });
   console.log("[saveSequences] response:", JSON.stringify(result));
   return result;

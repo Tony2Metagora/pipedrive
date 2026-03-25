@@ -130,7 +130,7 @@ export async function POST(request: Request) {
         ).join("\n\n")}`
       : "";
 
-    // Build per-email instructions
+    // Default descriptions per position
     const defaultEmailDescriptions: Record<number, string> = {
       1: "Introduction — first line personnalisée, proposition de valeur, CTA doux",
       2: "Relance douce — même thread, plus court, angle différent ou question",
@@ -138,77 +138,97 @@ export async function POST(request: Request) {
       4: "Relance plus directe — urgence légère ou nouvelle valeur",
       5: "Breakup — dernière tentative de contact, ton amical, bonne continuation",
     };
-    const emailDescriptions = Array.from({ length: emailCount }, (_, i) => {
+    const defaultDelays = [0, 3, 7, 14, 21, 28, 35];
+
+    // ─── Generate each email INDIVIDUALLY (1 AI call per email) ───
+    // This guarantees each user prompt is strictly respected
+    const generatedEmails: { seq_number: number; delay_days: number; subject: string; body: string }[] = [];
+
+    for (let i = 0; i < emailCount; i++) {
       const userPromptForEmail = emailPrompts?.[i]?.trim();
       const defaultDesc = defaultEmailDescriptions[i + 1] || `Email de relance #${i + 1}`;
-      return `- Email ${i + 1} : ${userPromptForEmail ? userPromptForEmail : defaultDesc}`;
-    }).join("\n");
+      const emailInstruction = userPromptForEmail || defaultDesc;
+      const delayDays = defaultDelays[i] || (i * 5);
 
-    const defaultDelays = [0, 3, 7, 14, 21, 28, 35];
-    const emailJsonExample = Array.from({ length: emailCount }, (_, i) => (
-      `    { "seq_number": ${i + 1}, "delay_days": ${defaultDelays[i] || (i * 5)}, "subject": "...", "body": "..." }`
-    )).join(",\n");
+      // Build context of previously generated emails for coherence
+      const previousEmailsContext = generatedEmails.length > 0
+        ? `\n## Emails précédents déjà générés (pour cohérence, ne pas répéter)\n${generatedEmails.map((e) =>
+            `- Email ${e.seq_number} (J+${e.delay_days}): Sujet="${e.subject}" | Corps: ${e.body.slice(0, 200)}...`
+          ).join("\n")}`
+        : "";
 
-    const systemPrompt = `Tu es un expert en cold emailing B2B pour Metagora. Tu génères des séquences de ${emailCount} emails de prospection.
+      const systemPrompt = `Tu es un expert en cold emailing B2B pour Metagora. Tu génères UN SEUL email de prospection (email ${i + 1}/${emailCount} de la séquence).
 
 ${METAGORA_CONTEXT}
 
 ${COLD_EMAIL_BEST_PRACTICES}
 
-## Règles de génération
-- Génère exactement ${emailCount} emails
-- Chaque email : sujet + corps
-${emailDescriptions}
-- Utilise les variables Smartlead : {{first_name}}, {{last_name}}, {{company_name}} pour la personnalisation
-- Signe toujours "${senderName || "Tony"}" à la fin
+## Règles STRICTES pour cet email
+- Génère EXACTEMENT 1 email : le numéro ${i + 1} de la séquence
+- **INSTRUCTION SPÉCIFIQUE pour cet email : ${emailInstruction}**
+- Tu DOIS respecter cette instruction à la lettre. C'est ta directive principale.
+- Utilise les variables Smartlead : {{first_name}}, {{last_name}}, {{company_name}}
+- Signe "${senderName || "Tony"}" à la fin
 - Ton : ${tone || "professionnel mais chaleureux, vouvoiement"}
 - Langue : ${language || "français"}
-- 50-125 mots par email MAX
-- UN SEUL CTA par email
-- Sujet : 5-10 mots, minuscules, pas de ponctuation excessive
+- 50-125 mots MAX
+- UN SEUL CTA
+- Sujet : 5-10 mots, minuscules
 ${memoryContext || ""}
+${previousEmailsContext}
+${refContext}
+
 - Format de réponse STRICT (JSON) :
 
 \`\`\`json
-{
-  "emails": [
-${emailJsonExample}
-  ]
-}
+{ "seq_number": ${i + 1}, "delay_days": ${delayDays}, "subject": "...", "body": "..." }
 \`\`\`
 
 Réponds UNIQUEMENT avec le JSON, sans commentaire.`;
 
-    const userPrompt = `Génère une séquence de ${emailCount} cold emails pour cette campagne :
+      const userPrompt = `Génère l'email ${i + 1}/${emailCount} pour cette campagne :
 
 **Nom campagne :** ${campaignName || "Nouvelle campagne"}
 **Origine des leads :** ${leadOrigin || "Non précisé"}
 **Profil des leads :** ${leadProfile || "Non précisé"}
 **But de la campagne :** ${campaignGoal}
-${refContext}
 
-Génère les ${emailCount} emails maintenant.`;
+**INSTRUCTION pour cet email :** ${emailInstruction}
 
-    const response = await askAzureFast([
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ], 3000);
+Génère cet email maintenant.`;
 
-    // Parse JSON from response (handle markdown code blocks)
-    let parsed;
-    try {
-      const jsonMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, response];
-      parsed = JSON.parse(jsonMatch[1]!.trim());
-    } catch {
-      // Try direct parse
+      const response = await askAzureFast([
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ], 1500);
+
+      // Parse JSON from response
+      let emailObj;
       try {
-        parsed = JSON.parse(response);
+        const jsonMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, response];
+        emailObj = JSON.parse(jsonMatch[1]!.trim());
       } catch {
-        return NextResponse.json({ error: "L'IA n'a pas retourné un JSON valide. Réessayez.", raw: response }, { status: 500 });
+        try {
+          emailObj = JSON.parse(response);
+        } catch {
+          console.error(`[generate-emails] Failed to parse email ${i + 1}:`, response);
+          return NextResponse.json({
+            error: `L'IA n'a pas retourné un JSON valide pour l'email ${i + 1}. Réessayez.`,
+            raw: response,
+            partialEmails: generatedEmails,
+          }, { status: 500 });
+        }
       }
+
+      generatedEmails.push({
+        seq_number: emailObj.seq_number || (i + 1),
+        delay_days: emailObj.delay_days ?? delayDays,
+        subject: emailObj.subject || "",
+        body: emailObj.body || "",
+      });
     }
 
-    return NextResponse.json({ success: true, ...parsed });
+    return NextResponse.json({ success: true, emails: generatedEmails });
   } catch (error) {
     console.error("Generate emails error:", error);
     return NextResponse.json({ error: String(error) }, { status: 500 });
