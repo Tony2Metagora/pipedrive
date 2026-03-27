@@ -40,7 +40,7 @@ interface FollowupItem {
 interface LeadStepDraft {
   step: number;
   enabled: boolean;
-  delayMinutes: number;
+  delayDays: number;
   subject: string;
   body: string;
 }
@@ -58,7 +58,7 @@ function buildDefaultStep(step: number): LeadStepDraft {
     return {
       step,
       enabled: true,
-      delayMinutes: 0,
+      delayDays: 0,
       subject: "Suivi de notre echange",
       body: "Bonjour {{prenom}},\n\nJe me permets de revenir vers vous.\n\nTony",
     };
@@ -66,7 +66,7 @@ function buildDefaultStep(step: number): LeadStepDraft {
   return {
     step,
     enabled: true,
-    delayMinutes: 1440,
+    delayDays: 1,
     subject: `Relance ${step} - {{prenom}}`,
     body: "Bonjour {{prenom}},\n\nJe me permets de vous relancer.\n\nTony",
   };
@@ -315,7 +315,7 @@ export default function SequencesAffairesPanel() {
         const step1: LeadStepDraft = {
           step: 1,
           enabled: true,
-          delayMinutes: 0,
+          delayDays: 0,
           subject: first?.subject || `Suivi - ${lead.company || lead.name || lead.email}`,
           body: first?.body || "Bonjour {{prenom}},\n\nJe me permets de revenir vers vous.\n\nTony",
         };
@@ -557,6 +557,16 @@ export default function SequencesAffairesPanel() {
           >
             {busy ? "Generation V1..." : `Generer V1 (${selectedLeadRows.length}) puis Etape 2`}
           </button>
+          <div className="flex items-center justify-between text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50">
+            <span className="text-gray-600">Nombre de mails a generer (etape 1)</span>
+            <select
+              value={seriesCount}
+              onChange={(e) => applySeriesCount(Number(e.target.value))}
+              className="px-2 py-1 text-xs border border-gray-300 rounded bg-white"
+            >
+              {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -589,14 +599,7 @@ export default function SequencesAffairesPanel() {
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-600">Nombre de mails dans la serie:</span>
-              <select
-                value={seriesCount}
-                onChange={(e) => applySeriesCount(Number(e.target.value))}
-                className="px-2 py-1 text-sm border border-gray-300 rounded"
-              >
-                {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
+              <span className="text-sm text-gray-600">Nombre de mails choisi en etape 1: {seriesCount}</span>
               <span className="text-xs text-gray-500">{leadSequences.length} leads</span>
             </div>
 
@@ -610,12 +613,12 @@ export default function SequencesAffairesPanel() {
                         <div className="flex items-center justify-between text-xs">
                           <span className="font-medium">Mail {step.step}</span>
                           <div className="flex items-center gap-1">
-                            <span>Delai (min):</span>
+                            <span>Delai (jours):</span>
                             <input
                               type="number"
                               min={0}
-                              value={step.delayMinutes}
-                              onChange={(e) => updateLeadStep(lead.email, step.step, { delayMinutes: Math.max(0, Number(e.target.value) || 0) })}
+                              value={step.delayDays}
+                              onChange={(e) => updateLeadStep(lead.email, step.step, { delayDays: Math.max(0, Number(e.target.value) || 0) })}
                               className="w-20 px-1 py-0.5 border border-gray-300 rounded"
                             />
                           </div>

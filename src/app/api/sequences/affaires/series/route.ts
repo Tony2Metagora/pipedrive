@@ -14,7 +14,8 @@ interface SeriesLeadInput {
 interface SeriesTemplateInput {
   step: number;
   enabled: boolean;
-  delayMinutes: number;
+  delayMinutes?: number;
+  delayDays?: number;
   subject: string;
   body: string;
 }
@@ -22,7 +23,8 @@ interface SeriesTemplateInput {
 interface LeadStepInput {
   step: number;
   enabled: boolean;
-  delayMinutes: number;
+  delayMinutes?: number;
+  delayDays?: number;
   subject: string;
   body: string;
 }
@@ -40,6 +42,13 @@ function sanitizeTemplateText(raw: string, lead: SeriesLeadInput): string {
     .replace(/\{\{\s*prenom\s*\}\}/gi, lead.name || "")
     .replace(/\{\{\s*email\s*\}\}/gi, lead.email || "")
     .replace(/\{\{\s*entreprise\s*\}\}/gi, lead.company || "");
+}
+
+function toDelayMinutes(input: { delayMinutes?: number; delayDays?: number }): number {
+  if (typeof input.delayDays === "number") {
+    return Math.max(0, Number(input.delayDays) || 0) * 24 * 60;
+  }
+  return Math.max(0, Number(input.delayMinutes) || 0);
 }
 
 export async function POST(request: Request) {
@@ -82,7 +91,8 @@ export async function POST(request: Request) {
           const steps = lead.steps.filter((s) => s.enabled).sort((a, b) => a.step - b.step);
           const totalSteps = steps.length;
           return steps.map((step) => {
-            cumulativeDelay += Math.max(0, Number(step.delayMinutes) || 0);
+            const stepDelayMinutes = toDelayMinutes(step);
+            cumulativeDelay += stepDelayMinutes;
             const subject = sanitizeTemplateText(step.subject, lead);
             const body = sanitizeTemplateText(step.body, lead);
             return {
@@ -93,7 +103,7 @@ export async function POST(request: Request) {
               company: lead.company || "",
               sequenceStep: step.step,
               totalSteps,
-              delayAfterPreviousMinutes: Math.max(0, Number(step.delayMinutes) || 0),
+              delayAfterPreviousMinutes: stepDelayMinutes,
               subject: subject || `Suivi ${step.step} - ${lead.company || lead.name || lead.email}`,
               body: body || "Bonjour,\n\nJe me permets de revenir vers vous.\n\nTony",
               status: "draft" as const,
@@ -111,7 +121,8 @@ export async function POST(request: Request) {
           let cumulativeDelay = 0;
           const totalSteps = templates.length;
           return templates.map((tpl) => {
-            cumulativeDelay += Math.max(0, Number(tpl.delayMinutes) || 0);
+            const tplDelayMinutes = toDelayMinutes(tpl);
+            cumulativeDelay += tplDelayMinutes;
             const isStep1 = tpl.step === 1;
             const subject = isStep1 && lead.step1Subject
               ? lead.step1Subject
@@ -127,7 +138,7 @@ export async function POST(request: Request) {
               company: lead.company || "",
               sequenceStep: tpl.step,
               totalSteps,
-              delayAfterPreviousMinutes: Math.max(0, Number(tpl.delayMinutes) || 0),
+              delayAfterPreviousMinutes: tplDelayMinutes,
               subject: subject || `Suivi ${tpl.step} - ${lead.company || lead.name || lead.email}`,
               body: body || "Bonjour,\n\nJe me permets de revenir vers vous.\n\nTony",
               status: "draft" as const,
