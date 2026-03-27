@@ -1,5 +1,5 @@
 "use client";
-
+// Affaires Follow-up v1
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Mail, Plus, Loader2, Send, Pause, Square, Users,
