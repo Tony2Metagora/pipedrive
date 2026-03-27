@@ -26,6 +26,7 @@ interface LeadStepInput {
   delayMinutes?: number;
   delayDays?: number;
   subject: string;
+  cc?: string;
   body: string;
 }
 
@@ -105,6 +106,7 @@ export async function POST(request: Request) {
               totalSteps,
               delayAfterPreviousMinutes: stepDelayMinutes,
               subject: subject || `Suivi ${step.step} - ${lead.company || lead.name || lead.email}`,
+              cc: (step.cc || "").trim(),
               body: body || "Bonjour,\n\nJe me permets de revenir vers vous.\n\nTony",
               status: "draft" as const,
               order: order++,
@@ -140,6 +142,7 @@ export async function POST(request: Request) {
               totalSteps,
               delayAfterPreviousMinutes: tplDelayMinutes,
               subject: subject || `Suivi ${tpl.step} - ${lead.company || lead.name || lead.email}`,
+              cc: "",
               body: body || "Bonjour,\n\nJe me permets de revenir vers vous.\n\nTony",
               status: "draft" as const,
               order: order++,

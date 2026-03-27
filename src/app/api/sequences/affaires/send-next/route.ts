@@ -110,6 +110,7 @@ export async function POST(request: Request) {
     try {
       const sent = await sendGmailMessage(auth, {
         to: item.leadEmail,
+        cc: item.cc,
         subject: item.subject,
         text: item.body,
       });

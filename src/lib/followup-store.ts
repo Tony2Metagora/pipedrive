@@ -65,6 +65,7 @@ export interface FollowupItem {
   totalSteps?: number;
   delayAfterPreviousMinutes?: number;
   subject: string;
+  cc?: string;
   body: string;
   status: FollowupItemStatus;
   order: number;

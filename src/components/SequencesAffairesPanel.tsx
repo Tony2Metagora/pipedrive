@@ -33,6 +33,7 @@ interface FollowupItem {
   status: "draft" | "a_envoyer" | "en_cours" | "envoye" | "erreur" | "repondu";
   sequenceStep?: number;
   totalSteps?: number;
+  delayAfterPreviousMinutes?: number;
   lastEmailAt?: string;
   lastError?: string;
 }
@@ -42,6 +43,7 @@ interface LeadStepDraft {
   enabled: boolean;
   delayDays: number;
   subject: string;
+  cc: string;
   body: string;
 }
 
@@ -60,6 +62,7 @@ function buildDefaultStep(step: number): LeadStepDraft {
       enabled: true,
       delayDays: 0,
       subject: "Suivi de notre echange",
+      cc: "",
       body: "Bonjour {{prenom}},\n\nJe me permets de revenir vers vous.\n\nTony",
     };
   }
@@ -68,6 +71,7 @@ function buildDefaultStep(step: number): LeadStepDraft {
     enabled: true,
     delayDays: 1,
     subject: `Relance ${step} - {{prenom}}`,
+    cc: "",
     body: "Bonjour {{prenom}},\n\nJe me permets de vous relancer.\n\nTony",
   };
 }
@@ -272,7 +276,7 @@ export default function SequencesAffairesPanel() {
     for (let step = 1; step <= count; step += 1) {
       const found = steps.find((s) => s.step === step);
       if (found) {
-        next.push({ ...found, enabled: true });
+        next.push({ ...found, cc: found.cc || "", enabled: true });
       } else {
         next.push(buildDefaultStep(step));
       }
@@ -365,6 +369,50 @@ export default function SequencesAffairesPanel() {
         };
       })
     );
+  }
+
+  function openDraftForEditing() {
+    if (!selectedCampaignId) return;
+    const draftItems = items.filter((it) => it.status === "draft");
+    if (draftItems.length === 0) {
+      setError("Aucun brouillon a modifier.");
+      return;
+    }
+    const byLead = new Map<string, LeadSequenceDraft>();
+    let maxSteps = 1;
+    for (const it of draftItems) {
+      const key = it.leadEmail.toLowerCase();
+      const step = it.sequenceStep || 1;
+      maxSteps = Math.max(maxSteps, step);
+      const stepDraft: LeadStepDraft = {
+        step,
+        enabled: true,
+        delayDays: Math.round((it.delayAfterPreviousMinutes || 0) / (24 * 60)),
+        subject: it.subject || "",
+        cc: it.cc || "",
+        body: it.body || "",
+      };
+      const existing = byLead.get(key);
+      if (existing) {
+        existing.steps.push(stepDraft);
+      } else {
+        byLead.set(key, {
+          email: it.leadEmail,
+          name: it.leadName || "",
+          company: "",
+          dealId: null,
+          steps: [stepDraft],
+        });
+      }
+    }
+    const sequences = Array.from(byLead.values()).map((lead) => ({
+      ...lead,
+      steps: adaptLeadSequenceSteps(lead.steps.sort((a, b) => a.step - b.step), maxSteps),
+    }));
+    setSeriesCount(maxSteps);
+    setLeadSequences(sequences);
+    setCurrentLeadIndex(0);
+    setShowStep2(true);
   }
 
   async function sendSeriesNow() {
@@ -582,6 +630,24 @@ export default function SequencesAffairesPanel() {
 
       <div className="bg-white rounded-lg border border-gray-200 p-3">
         <h3 className="text-sm font-semibold text-gray-900 mb-2">Campagne / Statuts</h3>
+        <div className="mb-2 flex gap-2">
+          <button
+            onClick={openDraftForEditing}
+            disabled={busy || !selectedCampaignId}
+            className="px-2 py-1 text-xs rounded border border-violet-300 bg-violet-50 text-violet-700 cursor-pointer disabled:opacity-40"
+          >
+            Modifier brouillon
+          </button>
+          {selectedCampaignId && campaigns.find((c) => c.id === selectedCampaignId)?.status === "draft" && (
+            <button
+              onClick={() => deleteDraftCampaign(selectedCampaignId)}
+              disabled={busy}
+              className="px-2 py-1 text-xs rounded border border-red-300 bg-red-50 text-red-700 cursor-pointer disabled:opacity-40"
+            >
+              Supprimer brouillon
+            </button>
+          )}
+        </div>
         <div className="max-h-[260px] overflow-y-auto space-y-2">
           {items.map((it) => (
             <div key={it.id} className="border border-gray-200 rounded-lg p-2 text-xs">
@@ -641,11 +707,11 @@ export default function SequencesAffairesPanel() {
                       <p className="text-sm font-semibold text-gray-900">
                         {lead.name || lead.email} <span className="text-xs text-gray-500">({lead.email})</span>
                       </p>
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                      <div className="space-y-3">
                         {lead.steps.map((step) => (
-                          <div key={`${lead.email}-${step.step}`} className="rounded-lg border border-gray-200 p-2 space-y-2 bg-gray-50">
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="font-medium">Mail {step.step}</span>
+                          <div key={`${lead.email}-${step.step}`} className="rounded-lg border border-gray-200 p-3 space-y-2 bg-white">
+                            <div className="flex items-center justify-between text-xs text-gray-500">
+                              <span className="font-medium text-gray-700">Mail {step.step}</span>
                               <div className="flex items-center gap-1">
                                 <span>Delai (jours):</span>
                                 <input
@@ -657,16 +723,32 @@ export default function SequencesAffairesPanel() {
                                 />
                               </div>
                             </div>
-                            <input
-                              value={step.subject}
-                              onChange={(e) => updateLeadStep(lead.email, step.step, { subject: e.target.value })}
-                              className="w-full px-2 py-1 text-xs border border-gray-300 rounded bg-white"
-                            />
+                            <div className="grid grid-cols-[70px_1fr] gap-2 items-center text-xs">
+                              <span className="text-gray-500">To</span>
+                              <input
+                                value={lead.email}
+                                readOnly
+                                className="w-full px-2 py-1 border border-gray-200 rounded bg-gray-50 text-gray-600"
+                              />
+                              <span className="text-gray-500">Cc</span>
+                              <input
+                                value={step.cc}
+                                onChange={(e) => updateLeadStep(lead.email, step.step, { cc: e.target.value })}
+                                className="w-full px-2 py-1 border border-gray-300 rounded bg-white"
+                                placeholder="contact@entreprise.com"
+                              />
+                              <span className="text-gray-500">Objet</span>
+                              <input
+                                value={step.subject}
+                                onChange={(e) => updateLeadStep(lead.email, step.step, { subject: e.target.value })}
+                                className="w-full px-2 py-1 border border-gray-300 rounded bg-white"
+                              />
+                            </div>
                             <textarea
                               value={step.body}
                               onChange={(e) => updateLeadStep(lead.email, step.step, { body: e.target.value })}
-                              rows={5}
-                              className="w-full px-2 py-1 text-xs border border-gray-300 rounded bg-white"
+                              rows={10}
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded bg-white"
                             />
                           </div>
                         ))}

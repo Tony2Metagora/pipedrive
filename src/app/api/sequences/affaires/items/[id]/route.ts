@@ -13,6 +13,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
     const body = (await request.json()) as {
       subject?: string;
+      cc?: string;
       body?: string;
       status?: "draft" | "a_envoyer" | "en_cours" | "envoye" | "erreur";
       scheduledAt?: string;
@@ -20,6 +21,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     const patch: Record<string, unknown> = {};
     if (typeof body.subject === "string") patch.subject = body.subject;
+    if (typeof body.cc === "string") patch.cc = body.cc;
     if (typeof body.body === "string") patch.body = body.body;
     if (typeof body.status === "string") patch.status = body.status;
     if (typeof body.scheduledAt === "string") patch.scheduledAt = body.scheduledAt;
