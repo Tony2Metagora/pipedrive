@@ -49,6 +49,8 @@ export default function SequencesAffairesPanel() {
   const [leads, setLeads] = useState<LeadRow[]>([]);
   const [selectedEmails, setSelectedEmails] = useState<Record<string, boolean>>({});
   const [newCampaignName, setNewCampaignName] = useState("");
+  const [bulkPipeline, setBulkPipeline] = useState<string>("all");
+  const [bulkStages, setBulkStages] = useState<string[]>([]);
 
   function clearFeedback() {
     setError(null);
@@ -109,6 +111,67 @@ export default function SequencesAffairesPanel() {
     () => leads.filter((l) => selectedEmails[l.email]),
     [leads, selectedEmails]
   );
+
+  const pipelineOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const lead of leads) {
+      if (!lead.pipelineId || !lead.pipelineName) continue;
+      map.set(String(lead.pipelineId), lead.pipelineName);
+    }
+    return Array.from(map.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [leads]);
+
+  const stageOptionsForPipeline = useMemo(() => {
+    if (bulkPipeline === "all") return [];
+    const map = new Map<string, string>();
+    for (const lead of leads) {
+      if (String(lead.pipelineId || "") !== bulkPipeline) continue;
+      if (!lead.stageId || !lead.stageName) continue;
+      map.set(String(lead.stageId), lead.stageName);
+    }
+    return Array.from(map.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [leads, bulkPipeline]);
+
+  const leadsMatchingBulkFilter = useMemo(() => {
+    return leads.filter((lead) => {
+      if (bulkPipeline !== "all" && String(lead.pipelineId || "") !== bulkPipeline) return false;
+      if (bulkStages.length > 0 && !bulkStages.includes(String(lead.stageId || ""))) return false;
+      return true;
+    });
+  }, [leads, bulkPipeline, bulkStages]);
+
+  const matchingSelectedCount = useMemo(
+    () => leadsMatchingBulkFilter.filter((l) => selectedEmails[l.email]).length,
+    [leadsMatchingBulkFilter, selectedEmails]
+  );
+
+  function toggleBulkStage(stageId: string) {
+    setBulkStages((prev) =>
+      prev.includes(stageId) ? prev.filter((id) => id !== stageId) : [...prev, stageId]
+    );
+  }
+
+  function selectAllMatchingLeads() {
+    if (leadsMatchingBulkFilter.length === 0) return;
+    setSelectedEmails((prev) => {
+      const next = { ...prev };
+      for (const lead of leadsMatchingBulkFilter) next[lead.email] = true;
+      return next;
+    });
+  }
+
+  function unselectAllMatchingLeads() {
+    if (leadsMatchingBulkFilter.length === 0) return;
+    setSelectedEmails((prev) => {
+      const next = { ...prev };
+      for (const lead of leadsMatchingBulkFilter) delete next[lead.email];
+      return next;
+    });
+  }
 
   async function createCampaign() {
     if (!newCampaignName.trim()) return;
@@ -302,6 +365,56 @@ export default function SequencesAffairesPanel() {
         <div className="bg-white rounded-lg border border-gray-200 p-3 space-y-2">
           <h3 className="text-sm font-semibold text-gray-900">Selection leads</h3>
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher lead/deal..." className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg outline-none focus:border-violet-400" />
+          <div className="rounded-lg border border-violet-100 bg-violet-50/50 p-2 space-y-2">
+            <p className="text-[11px] font-medium text-violet-800">Selection en masse</p>
+            <select
+              value={bulkPipeline}
+              onChange={(e) => {
+                setBulkPipeline(e.target.value);
+                setBulkStages([]);
+              }}
+              className="w-full px-2 py-1.5 text-xs border border-violet-200 rounded-lg outline-none bg-white"
+            >
+              <option value="all">Tous les pipelines</option>
+              {pipelineOptions.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+            {bulkPipeline !== "all" && stageOptionsForPipeline.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-[10px] text-violet-700 font-medium">Etapes (multi-selection)</p>
+                <div className="max-h-20 overflow-y-auto space-y-1">
+                  {stageOptionsForPipeline.map((s) => (
+                    <label key={s.id} className="flex items-center gap-2 text-[10px] text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={bulkStages.includes(s.id)}
+                        onChange={() => toggleBulkStage(s.id)}
+                        className="accent-violet-600"
+                      />
+                      <span>{s.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="flex gap-1.5">
+              <button
+                onClick={selectAllMatchingLeads}
+                type="button"
+                className="flex-1 px-2 py-1.5 text-[11px] font-medium rounded-lg border border-violet-300 bg-white text-violet-700 hover:bg-violet-100 cursor-pointer"
+              >
+                Tout selectionner ({leadsMatchingBulkFilter.length})
+              </button>
+              <button
+                onClick={unselectAllMatchingLeads}
+                type="button"
+                className="flex-1 px-2 py-1.5 text-[11px] font-medium rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 cursor-pointer"
+              >
+                Deselectionner ({matchingSelectedCount})
+              </button>
+            </div>
+          </div>
           <div className="max-h-[280px] overflow-y-auto space-y-1">
             {leads.map((l) => (
               <label key={l.email} className={cn("flex items-start gap-2 p-2 rounded border text-xs cursor-pointer transition-colors", selectedEmails[l.email] ? "border-violet-300 bg-violet-50" : "border-gray-100 hover:bg-gray-50")}>
