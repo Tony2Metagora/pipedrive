@@ -31,10 +31,30 @@ interface FollowupItem {
   company?: string;
   subject: string;
   body: string;
-  status: "draft" | "a_envoyer" | "en_cours" | "envoye" | "erreur";
+  status: "draft" | "a_envoyer" | "en_cours" | "envoye" | "erreur" | "repondu";
   scheduledAt: string;
   lastEmailAt?: string;
   lastError?: string;
+  sequenceStep?: number;
+  totalSteps?: number;
+  delayAfterPreviousMinutes?: number;
+}
+
+interface GeneratedLeadDraft {
+  email: string;
+  name: string;
+  company: string;
+  dealId: number | null;
+  step1Subject: string;
+  step1Body: string;
+}
+
+interface SequenceTemplate {
+  step: number;
+  enabled: boolean;
+  delayMinutes: number;
+  subject: string;
+  body: string;
 }
 
 export default function SequencesAffairesPanel() {
@@ -49,6 +69,9 @@ export default function SequencesAffairesPanel() {
   const [leads, setLeads] = useState<LeadRow[]>([]);
   const [selectedEmails, setSelectedEmails] = useState<Record<string, boolean>>({});
   const [newCampaignName, setNewCampaignName] = useState("");
+  const [showSeriesBuilder, setShowSeriesBuilder] = useState(false);
+  const [seriesTemplates, setSeriesTemplates] = useState<SequenceTemplate[]>([]);
+  const [generatedLeadDrafts, setGeneratedLeadDrafts] = useState<GeneratedLeadDraft[]>([]);
   const [bulkPipeline, setBulkPipeline] = useState<string>("all");
   const [bulkStages, setBulkStages] = useState<string[]>([]);
 
@@ -227,6 +250,30 @@ export default function SequencesAffairesPanel() {
       const generated = json.data?.items || [];
       const errors = json.data?.errors || [];
       setItems(generated);
+      const draftByEmail = new Map<string, { subject: string; body: string }>(
+        generated.map((it: FollowupItem) => [it.leadEmail.toLowerCase(), { subject: it.subject, body: it.body }])
+      );
+      const leadDrafts: GeneratedLeadDraft[] = selectedLeadRows.map((lead) => {
+        const draft = draftByEmail.get(lead.email.toLowerCase());
+        return {
+          email: lead.email,
+          name: lead.name || "",
+          company: lead.company || "",
+          dealId: lead.dealId ?? null,
+          step1Subject: draft?.subject || `Suivi - ${lead.company || lead.name || lead.email}`,
+          step1Body: draft?.body || "Bonjour,\n\nJe me permets de revenir vers vous.\n\nTony",
+        };
+      });
+      setGeneratedLeadDrafts(leadDrafts);
+      const first = leadDrafts[0];
+      setSeriesTemplates([
+        { step: 1, enabled: true, delayMinutes: 0, subject: first?.step1Subject || "Suivi de notre echange", body: first?.step1Body || "Bonjour,\n\nJe me permets de revenir vers vous.\n\nTony" },
+        { step: 2, enabled: true, delayMinutes: 1440, subject: "Relance {{prenom}}", body: "Bonjour {{prenom}},\n\nJe me permets de vous relancer concernant notre echange.\n\nTony" },
+        { step: 3, enabled: false, delayMinutes: 2880, subject: "Suite a ma relance", body: "Bonjour {{prenom}},\n\nJe reviens vers vous une derniere fois.\n\nTony" },
+        { step: 4, enabled: false, delayMinutes: 4320, subject: "Dernier message", body: "Bonjour {{prenom}},\n\nJe reste disponible si besoin.\n\nTony" },
+        { step: 5, enabled: false, delayMinutes: 5760, subject: "Cloture de suivi", body: "Bonjour {{prenom}},\n\nSans retour de votre part, je cloture ce suivi.\n\nTony" },
+      ]);
+      setShowSeriesBuilder(true);
       if (errors.length > 0 && generated.length > 0) {
         setMsg(`${generated.length} drafts generes. ${errors.length} erreur(s): ${errors.map((e: { email: string }) => e.email).join(", ")}`);
       } else if (errors.length > 0 && generated.length === 0) {
@@ -236,6 +283,44 @@ export default function SequencesAffairesPanel() {
       }
     } catch (e) {
       setError(`Erreur generation: ${String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function validateSeries() {
+    if (!selectedCampaignId) {
+      setError("Selectionnez une campagne avant de valider la serie.");
+      return;
+    }
+    if (!generatedLeadDrafts.length) {
+      setError("Aucun lead genere pour construire la serie.");
+      return;
+    }
+    const enabledCount = seriesTemplates.filter((t) => t.enabled).length;
+    if (enabledCount === 0) {
+      setError("Activez au moins un mail dans la serie.");
+      return;
+    }
+    clearFeedback();
+    try {
+      setBusy(true);
+      const res = await fetch("/api/sequences/affaires/series", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          campaignId: selectedCampaignId,
+          leads: generatedLeadDrafts,
+          templates: seriesTemplates,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Validation serie impossible");
+      setItems(json.data?.items || []);
+      setShowSeriesBuilder(false);
+      setMsg(`Serie validee: ${enabledCount} mail(s) pour ${generatedLeadDrafts.length} lead(s).`);
+    } catch (e) {
+      setError(String(e));
     } finally {
       setBusy(false);
     }
@@ -470,11 +555,12 @@ export default function SequencesAffairesPanel() {
               <div key={it.id} className="border border-gray-200 rounded-lg p-2 space-y-1">
                 <div className="flex items-center justify-between">
                   <p className="text-[11px] font-medium text-gray-800">{it.leadName || it.leadEmail}</p>
-                  <span className={cn("text-[9px] font-medium px-1.5 py-0.5 rounded-full", it.status === "envoye" ? "bg-green-100 text-green-700" : it.status === "erreur" ? "bg-red-100 text-red-700" : it.status === "en_cours" ? "bg-blue-100 text-blue-700" : it.status === "a_envoyer" ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-600")}>
-                    {it.status === "draft" ? "Brouillon" : it.status === "a_envoyer" ? "A envoyer" : it.status === "en_cours" ? "En cours" : it.status === "envoye" ? "Envoye" : "Erreur"}
+                  <span className={cn("text-[9px] font-medium px-1.5 py-0.5 rounded-full", it.status === "envoye" ? "bg-green-100 text-green-700" : it.status === "erreur" ? "bg-red-100 text-red-700" : it.status === "repondu" ? "bg-indigo-100 text-indigo-700" : it.status === "en_cours" ? "bg-blue-100 text-blue-700" : it.status === "a_envoyer" ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-600")}>
+                    {it.status === "draft" ? "Brouillon" : it.status === "a_envoyer" ? "A envoyer" : it.status === "en_cours" ? "En cours" : it.status === "envoye" ? "Envoye" : it.status === "repondu" ? "Repondu (stop)" : "Erreur"}
                   </span>
                 </div>
                 <p className="text-[10px] text-gray-500">{it.leadEmail}</p>
+                <p className="text-[10px] text-violet-500">Mail {it.sequenceStep || 1}/{it.totalSteps || 1}</p>
                 {it.lastEmailAt && <p className="text-[10px] text-gray-400">Dernier envoi: {new Date(it.lastEmailAt).toLocaleString("fr-FR")}</p>}
                 <input
                   value={it.subject}
@@ -499,6 +585,95 @@ export default function SequencesAffairesPanel() {
           </div>
         </div>
       </div>
+      {showSeriesBuilder && (
+        <div className="fixed inset-0 z-50 bg-white overflow-y-auto">
+          <div className="max-w-6xl mx-auto p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-gray-200 pb-3">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900">Etape 2 - Construire la serie de mails</h2>
+                <p className="text-sm text-gray-500">
+                  {generatedLeadDrafts.length} lead(s) selectionne(s). La sequence s'arrete automatiquement si le lead repond.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowSeriesBuilder(false)}
+                className="px-3 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer"
+              >
+                Fermer
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {seriesTemplates.map((tpl, idx) => (
+                <div key={tpl.step} className="rounded-lg border border-gray-200 p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2 text-sm font-medium text-gray-800">
+                      <input
+                        type="checkbox"
+                        checked={tpl.enabled}
+                        onChange={(e) =>
+                          setSeriesTemplates((prev) => prev.map((t, i) => (i === idx ? { ...t, enabled: e.target.checked } : t)))
+                        }
+                        className="accent-violet-600"
+                      />
+                      Mail {tpl.step}
+                    </label>
+                    <div className="flex items-center gap-1 text-xs text-gray-500">
+                      <span>Delai (min):</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={tpl.delayMinutes}
+                        onChange={(e) =>
+                          setSeriesTemplates((prev) =>
+                            prev.map((t, i) => (i === idx ? { ...t, delayMinutes: Math.max(0, Number(e.target.value) || 0) } : t))
+                          )
+                        }
+                        className="w-20 px-2 py-1 border border-gray-300 rounded"
+                      />
+                    </div>
+                  </div>
+                  <input
+                    value={tpl.subject}
+                    onChange={(e) =>
+                      setSeriesTemplates((prev) => prev.map((t, i) => (i === idx ? { ...t, subject: e.target.value } : t)))
+                    }
+                    className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded"
+                    placeholder={`Sujet mail ${tpl.step}`}
+                  />
+                  <textarea
+                    value={tpl.body}
+                    onChange={(e) =>
+                      setSeriesTemplates((prev) => prev.map((t, i) => (i === idx ? { ...t, body: e.target.value } : t)))
+                    }
+                    rows={6}
+                    className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded"
+                    placeholder={`Contenu mail ${tpl.step}`}
+                  />
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-500">
+              Variables dispo: {"{{prenom}}"}, {"{{entreprise}}"}, {"{{email}}"}
+            </p>
+            <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-3">
+              <button
+                onClick={() => setShowSeriesBuilder(false)}
+                className="px-3 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={validateSeries}
+                disabled={busy}
+                className="px-4 py-2 text-sm rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 cursor-pointer"
+              >
+                {busy ? "Validation..." : "Valider la serie"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

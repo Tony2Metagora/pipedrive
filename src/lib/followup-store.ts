@@ -31,7 +31,8 @@ export type FollowupItemStatus =
   | "a_envoyer"
   | "en_cours"
   | "envoye"
-  | "erreur";
+  | "erreur"
+  | "repondu";
 
 export interface SenderAuth {
   accessToken: string;
@@ -60,6 +61,9 @@ export interface FollowupItem {
   leadEmail: string;
   leadName?: string;
   company?: string;
+  sequenceStep?: number;
+  totalSteps?: number;
+  delayAfterPreviousMinutes?: number;
   subject: string;
   body: string;
   status: FollowupItemStatus;
@@ -196,6 +200,44 @@ export async function markCampaignItemsReady(
   });
 }
 
+export async function markCampaignFirstStepReady(
+  campaignId: number,
+  baseDate?: Date
+): Promise<{ total: number; updated: number }> {
+  return withLock(ITEMS_KEY, async () => {
+    const items = await readArray<FollowupItem>(ITEMS_KEY);
+    let updated = 0;
+    let offset = 0;
+    const base = baseDate ?? new Date();
+    const next = items.map((item) => {
+      if (item.campaignId !== campaignId) return item;
+      if (item.status === "envoye" || item.status === "repondu") return item;
+      const step = item.sequenceStep ?? 1;
+      if (step !== 1) {
+        if (item.status === "a_envoyer" || item.status === "en_cours") {
+          return {
+            ...item,
+            status: "draft" as const,
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        return item;
+      }
+      const scheduledAt = new Date(base.getTime() + offset * 10 * 60 * 1000).toISOString();
+      offset += 1;
+      updated += 1;
+      return {
+        ...item,
+        status: "a_envoyer" as const,
+        scheduledAt,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+    await writeArray(ITEMS_KEY, next);
+    return { total: next.filter((i) => i.campaignId === campaignId).length, updated };
+  });
+}
+
 export async function pickNextReadyItem(campaignId: number): Promise<FollowupItem | null> {
   return withLock(ITEMS_KEY, async () => {
     const items = await readArray<FollowupItem>(ITEMS_KEY);
@@ -222,6 +264,7 @@ export async function getCampaignStats(campaignId: number): Promise<{
   en_cours: number;
   envoye: number;
   erreur: number;
+  repondu: number;
 }> {
   const items = await listFollowupItemsByCampaign(campaignId);
   return {
@@ -230,6 +273,28 @@ export async function getCampaignStats(campaignId: number): Promise<{
     en_cours: items.filter((i) => i.status === "en_cours").length,
     envoye: items.filter((i) => i.status === "envoye").length,
     erreur: items.filter((i) => i.status === "erreur").length,
+    repondu: items.filter((i) => i.status === "repondu").length,
   };
+}
+
+export async function markLeadItemsAsReplied(campaignId: number, leadEmail: string): Promise<number> {
+  return withLock(ITEMS_KEY, async () => {
+    const items = await readArray<FollowupItem>(ITEMS_KEY);
+    let changed = 0;
+    const next = items.map((item) => {
+      if (item.campaignId !== campaignId) return item;
+      if (item.leadEmail.toLowerCase() !== leadEmail.toLowerCase()) return item;
+      if (item.status === "envoye" || item.status === "repondu") return item;
+      changed += 1;
+      return {
+        ...item,
+        status: "repondu" as const,
+        lastError: "Reponse detectee: sequence stoppee",
+        updatedAt: new Date().toISOString(),
+      };
+    });
+    if (changed > 0) await writeArray(ITEMS_KEY, next);
+    return changed;
+  });
 }
 

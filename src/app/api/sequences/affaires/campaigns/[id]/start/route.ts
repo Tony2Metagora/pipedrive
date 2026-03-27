@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { requireAuth } from "@/lib/api-guard";
 import {
   getCampaignStats,
-  markCampaignItemsReady,
+  markCampaignFirstStepReady,
   updateFollowupCampaign,
 } from "@/lib/followup-store";
 
@@ -29,7 +29,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
       );
     }
 
-    await markCampaignItemsReady(campaignId);
+    await markCampaignFirstStepReady(campaignId);
     const updated = await updateFollowupCampaign(campaignId, {
       status: "running",
       startedAt: new Date().toISOString(),

@@ -4,6 +4,8 @@ import { sendGmailMessage } from "@/lib/gmail-sender";
 import {
   getCampaignStats,
   getFollowupCampaign,
+  listFollowupItemsByCampaign,
+  markLeadItemsAsReplied,
   pickNextReadyItem,
   updateFollowupCampaign,
   updateFollowupItem,
@@ -14,6 +16,33 @@ function isCronAuthorized(request: Request): boolean {
   if (!secret) return false;
   const header = request.headers.get("x-cron-secret");
   return header === secret;
+}
+
+async function hasLeadRepliedSince(
+  accessToken: string,
+  threadId: string | undefined,
+  leadEmail: string,
+  sinceIso?: string
+): Promise<boolean> {
+  if (!threadId) return false;
+  const res = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/threads/${threadId}?format=metadata&metadataHeaders=From&metadataHeaders=Date`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!res.ok) return false;
+  const json = (await res.json().catch(() => ({}))) as {
+    messages?: Array<{ payload?: { headers?: Array<{ name: string; value: string }> } }>;
+  };
+  const sinceTs = sinceIso ? new Date(sinceIso).getTime() : 0;
+  const lead = leadEmail.toLowerCase();
+  for (const msg of json.messages || []) {
+    const headers = msg.payload?.headers || [];
+    const from = headers.find((h) => h.name.toLowerCase() === "from")?.value?.toLowerCase() || "";
+    const dateRaw = headers.find((h) => h.name.toLowerCase() === "date")?.value;
+    const dateTs = dateRaw ? new Date(dateRaw).getTime() : 0;
+    if (from.includes(lead) && dateTs > sinceTs) return true;
+  }
+  return false;
 }
 
 export async function POST(request: Request) {
@@ -51,6 +80,33 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Token sender manquant" }, { status: 400 });
     }
 
+    const allItems = await listFollowupItemsByCampaign(campaignId);
+    const leadItems = allItems
+      .filter((i) => i.leadEmail.toLowerCase() === item.leadEmail.toLowerCase())
+      .sort((a, b) => (a.sequenceStep ?? 1) - (b.sequenceStep ?? 1));
+    const prevSent = leadItems
+      .filter((i) => i.status === "envoye" && (i.sequenceStep ?? 1) < (item.sequenceStep ?? 1))
+      .sort((a, b) => new Date(b.sentAt || 0).getTime() - new Date(a.sentAt || 0).getTime())[0];
+    if (prevSent?.gmailThreadId) {
+      const replied = await hasLeadRepliedSince(
+        auth.accessToken,
+        prevSent.gmailThreadId,
+        item.leadEmail,
+        prevSent.sentAt
+      );
+      if (replied) {
+        await markLeadItemsAsReplied(campaignId, item.leadEmail);
+        await updateFollowupCampaign(campaignId, { lastRunAt: new Date().toISOString() });
+        return NextResponse.json({
+          data: {
+            sent: false,
+            reason: "Lead a repondu, sequence stoppee",
+            leadEmail: item.leadEmail,
+          },
+        });
+      }
+    }
+
     try {
       const sent = await sendGmailMessage(auth, {
         to: item.leadEmail,
@@ -66,6 +122,20 @@ export async function POST(request: Request) {
         gmailThreadId: sent.threadId,
         lastError: undefined,
       });
+
+      const sentAt = new Date();
+      const currentStep = item.sequenceStep ?? 1;
+      const nextStepItem = leadItems.find(
+        (i) => (i.sequenceStep ?? 1) === currentStep + 1 && i.status === "draft"
+      );
+      if (nextStepItem) {
+        const delayMin = Math.max(0, nextStepItem.delayAfterPreviousMinutes ?? campaign.cadenceMinutes ?? 10);
+        await updateFollowupItem(nextStepItem.id, {
+          status: "a_envoyer",
+          scheduledAt: new Date(sentAt.getTime() + delayMin * 60 * 1000).toISOString(),
+          lastError: undefined,
+        });
+      }
       await updateFollowupCampaign(campaignId, {
         senderAuth: sent.token,
         lastRunAt: new Date().toISOString(),
