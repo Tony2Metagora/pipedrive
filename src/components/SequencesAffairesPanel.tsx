@@ -95,6 +95,10 @@ export default function SequencesAffairesPanel() {
   const [seriesCount, setSeriesCount] = useState<number>(3);
   const [leadSequences, setLeadSequences] = useState<LeadSequenceDraft[]>([]);
   const [currentLeadIndex, setCurrentLeadIndex] = useState(0);
+  const [isGeneratingV1, setIsGeneratingV1] = useState(false);
+  const [generationDone, setGenerationDone] = useState(0);
+  const [generationTotal, setGenerationTotal] = useState(0);
+  const [generationContext, setGenerationContext] = useState("");
 
   function clearFeedback() {
     setError(null);
@@ -288,29 +292,49 @@ export default function SequencesAffairesPanel() {
     clearFeedback();
     try {
       setBusy(true);
-      const res = await fetch("/api/sequences/affaires/generate-series", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          campaignId: selectedCampaignId,
-          sequenceCount: seriesCount,
-          leads: selectedLeadRows.map((l) => ({
-            email: l.email,
-            name: l.name,
-            company: l.company,
-            dealId: l.dealId,
-          })),
-        }),
-      });
-      const json = (await res.json()) as {
-        error?: string;
-        data?: { leadSequences?: LeadSequenceDraft[] };
-      };
-      if (!res.ok) throw new Error(json.error || "Generation V1 impossible");
-      const nextLeadSequences = (json.data?.leadSequences || []).map((lead) => ({
-        ...lead,
-        steps: adaptLeadSequenceSteps(lead.steps || [], seriesCount),
-      }));
+      setIsGeneratingV1(true);
+      setGenerationDone(0);
+      setGenerationTotal(selectedLeadRows.length * seriesCount);
+
+      const nextLeadSequences: LeadSequenceDraft[] = [];
+      for (let i = 0; i < selectedLeadRows.length; i += 1) {
+        const lead = selectedLeadRows[i]!;
+        setGenerationContext(`${lead.name || lead.email} (${i + 1}/${selectedLeadRows.length})`);
+        const res = await fetch("/api/sequences/affaires/generate-series", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            campaignId: selectedCampaignId,
+            sequenceCount: seriesCount,
+            leads: [{
+              email: lead.email,
+              name: lead.name,
+              company: lead.company,
+              dealId: lead.dealId,
+            }],
+          }),
+        });
+        const json = (await res.json()) as {
+          error?: string;
+          data?: { leadSequences?: LeadSequenceDraft[] };
+        };
+        if (!res.ok) {
+          throw new Error(`Erreur generation pour ${lead.email}: ${json.error || "inconnue"}`);
+        }
+        const generatedLead = json.data?.leadSequences?.[0];
+        if (!generatedLead) {
+          throw new Error(`Aucun contenu IA retourne pour ${lead.email}`);
+        }
+        const normalized = {
+          ...generatedLead,
+          steps: adaptLeadSequenceSteps(generatedLead.steps || [], seriesCount),
+        };
+        nextLeadSequences.push(normalized);
+        // Progression demandee: 1/6, 2/6, ...
+        for (let stepIdx = 0; stepIdx < normalized.steps.length; stepIdx += 1) {
+          setGenerationDone((prev) => prev + 1);
+        }
+      }
 
       setLeadSequences(nextLeadSequences);
       setCurrentLeadIndex(0);
@@ -319,6 +343,8 @@ export default function SequencesAffairesPanel() {
     } catch (e) {
       setError(String(e));
     } finally {
+      setIsGeneratingV1(false);
+      setGenerationContext("");
       setBusy(false);
     }
   }
@@ -660,6 +686,30 @@ export default function SequencesAffairesPanel() {
               >
                 {busy ? "Envoi..." : "Envoyer la serie"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {isGeneratingV1 && (
+        <div className="fixed inset-0 z-[60] bg-black/35 flex items-center justify-center">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-xl p-5 w-full max-w-md">
+            <div className="flex items-center gap-3">
+              <Loader2 className="w-5 h-5 animate-spin text-violet-600" />
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Generation V1 IA en cours</p>
+                <p className="text-xs text-gray-500">{generationContext || "Preparation..."}</p>
+              </div>
+            </div>
+            <div className="mt-4">
+              <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-violet-600 transition-all"
+                  style={{ width: `${generationTotal > 0 ? Math.min(100, (generationDone / generationTotal) * 100) : 0}%` }}
+                />
+              </div>
+              <p className="mt-2 text-xs text-gray-600 text-right">
+                {generationDone}/{generationTotal}
+              </p>
             </div>
           </div>
         </div>
