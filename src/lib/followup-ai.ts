@@ -170,3 +170,97 @@ Tony`;
   };
 }
 
+export async function generateFollowupSequenceDrafts(input: {
+  leadName?: string;
+  leadEmail: string;
+  company?: string;
+  threadContext: string;
+  dealContext: string;
+  sequenceCount: number;
+}): Promise<Array<{ step: number; subject: string; body: string; delayDays: number }>> {
+  const count = Math.max(1, Math.min(5, input.sequenceCount));
+
+  const system = `Tu es l'assistant commercial de Tony chez Metagora.
+Tu dois generer une sequence de follow-up email en francais.
+Contraintes:
+- Produis exactement ${count} emails.
+- Ton naturel, concis, commercial, actionnable.
+- Chaque email doit etre differencie (pas de repetition).
+- Delais progressifs entre emails (en jours).
+- Renvoie uniquement du JSON strict sans markdown.
+Schema attendu:
+{"emails":[{"step":1,"delayDays":0,"subject":"...","body":"..."},{"step":2,"delayDays":1,"subject":"...","body":"..."}]}`;
+
+  const user = [
+    `Lead: ${input.leadName || "N/A"} <${input.leadEmail}>`,
+    `Entreprise: ${input.company || "N/A"}`,
+    "",
+    "Contexte emails Gmail (thread):",
+    input.threadContext,
+    "",
+    "Contexte affaire CRM:",
+    input.dealContext,
+    "",
+    `Instruction: genere ${count} mails de follow-up avec delais en jours.`,
+  ].join("\n");
+
+  const raw = await askAzureFast(
+    [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    1600
+  );
+
+  const fallbackFirst = await generateFollowupDraft({
+    leadName: input.leadName,
+    leadEmail: input.leadEmail,
+    company: input.company,
+    threadContext: input.threadContext,
+    dealContext: input.dealContext,
+  });
+
+  try {
+    const jsonBlock = raw.match(/\{[\s\S]*\}/)?.[0] || raw;
+    const parsed = JSON.parse(jsonBlock) as {
+      emails?: Array<{ step?: number; delayDays?: number; subject?: string; body?: string }>;
+    };
+    const emails = parsed.emails || [];
+    if (!emails.length) throw new Error("No emails");
+
+    const normalized = Array.from({ length: count }).map((_, idx) => {
+      const step = idx + 1;
+      const found = emails.find((e) => Number(e.step) === step) || emails[idx] || {};
+      if (step === 1) {
+        return {
+          step,
+          delayDays: 0,
+          subject: (found.subject || fallbackFirst.subject || "").trim(),
+          body: (found.body || fallbackFirst.body || "").trim(),
+        };
+      }
+      return {
+        step,
+        delayDays: Math.max(0, Number(found.delayDays) || step - 1),
+        subject: (found.subject || `Relance ${step} - ${input.leadName || input.leadEmail}`).trim(),
+        body: (found.body || "Bonjour {{prenom}},\n\nJe me permets de vous relancer.\n\nTony").trim(),
+      };
+    });
+
+    return normalized;
+  } catch {
+    return Array.from({ length: count }).map((_, idx) => {
+      const step = idx + 1;
+      if (step === 1) {
+        return { step, delayDays: 0, subject: fallbackFirst.subject, body: fallbackFirst.body };
+      }
+      return {
+        step,
+        delayDays: step - 1,
+        subject: `Relance ${step} - ${input.leadName || input.leadEmail}`,
+        body: "Bonjour {{prenom}},\n\nJe me permets de vous relancer.\n\nTony",
+      };
+    });
+  }
+}
+

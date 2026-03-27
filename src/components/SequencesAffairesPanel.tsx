@@ -94,6 +94,7 @@ export default function SequencesAffairesPanel() {
   const [showStep2, setShowStep2] = useState(false);
   const [seriesCount, setSeriesCount] = useState<number>(3);
   const [leadSequences, setLeadSequences] = useState<LeadSequenceDraft[]>([]);
+  const [currentLeadIndex, setCurrentLeadIndex] = useState(0);
 
   function clearFeedback() {
     setError(null);
@@ -287,11 +288,12 @@ export default function SequencesAffairesPanel() {
     clearFeedback();
     try {
       setBusy(true);
-      const res = await fetch("/api/sequences/affaires/generate", {
+      const res = await fetch("/api/sequences/affaires/generate-series", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           campaignId: selectedCampaignId,
+          sequenceCount: seriesCount,
           leads: selectedLeadRows.map((l) => ({
             email: l.email,
             name: l.name,
@@ -302,36 +304,18 @@ export default function SequencesAffairesPanel() {
       });
       const json = (await res.json()) as {
         error?: string;
-        data?: { items?: FollowupItem[]; errors?: Array<{ email: string }> };
+        data?: { leadSequences?: LeadSequenceDraft[] };
       };
       if (!res.ok) throw new Error(json.error || "Generation V1 impossible");
-
-      const generated = json.data?.items || [];
-      const byEmail = new Map<string, FollowupItem>();
-      for (const it of generated) byEmail.set(it.leadEmail.toLowerCase(), it);
-
-      const nextLeadSequences: LeadSequenceDraft[] = selectedLeadRows.map((lead) => {
-        const first = byEmail.get(lead.email.toLowerCase());
-        const step1: LeadStepDraft = {
-          step: 1,
-          enabled: true,
-          delayDays: 0,
-          subject: first?.subject || `Suivi - ${lead.company || lead.name || lead.email}`,
-          body: first?.body || "Bonjour {{prenom}},\n\nJe me permets de revenir vers vous.\n\nTony",
-        };
-        const steps = adaptLeadSequenceSteps([step1], seriesCount);
-        return {
-          email: lead.email,
-          name: lead.name || "",
-          company: lead.company || "",
-          dealId: lead.dealId ?? null,
-          steps,
-        };
-      });
+      const nextLeadSequences = (json.data?.leadSequences || []).map((lead) => ({
+        ...lead,
+        steps: adaptLeadSequenceSteps(lead.steps || [], seriesCount),
+      }));
 
       setLeadSequences(nextLeadSequences);
+      setCurrentLeadIndex(0);
       setShowStep2(true);
-      setMsg(`Etape 2 prete: ${nextLeadSequences.length} V1 generees.`);
+      setMsg(`Etape 2 prete: ${nextLeadSequences.length} contact(s), ${seriesCount} mails IA par contact.`);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -603,43 +587,69 @@ export default function SequencesAffairesPanel() {
               <span className="text-xs text-gray-500">{leadSequences.length} leads</span>
             </div>
 
-            <div className="space-y-4">
-              {leadSequences.map((lead) => (
-                <div key={lead.email} className="rounded-lg border border-gray-200 p-3 space-y-2">
-                  <p className="text-sm font-semibold text-gray-900">{lead.name || lead.email} <span className="text-xs text-gray-500">({lead.email})</span></p>
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                    {lead.steps.map((step) => (
-                      <div key={`${lead.email}-${step.step}`} className="rounded-lg border border-gray-200 p-2 space-y-2 bg-gray-50">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="font-medium">Mail {step.step}</span>
-                          <div className="flex items-center gap-1">
-                            <span>Delai (jours):</span>
+            {leadSequences.length > 0 && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <button
+                    onClick={() => setCurrentLeadIndex((i) => Math.max(0, i - 1))}
+                    disabled={currentLeadIndex === 0}
+                    className="px-3 py-1.5 text-xs rounded border border-gray-300 disabled:opacity-40 cursor-pointer"
+                  >
+                    Precedent
+                  </button>
+                  <span className="text-xs text-gray-500">
+                    Contact {currentLeadIndex + 1} / {leadSequences.length}
+                  </span>
+                  <button
+                    onClick={() => setCurrentLeadIndex((i) => Math.min(leadSequences.length - 1, i + 1))}
+                    disabled={currentLeadIndex >= leadSequences.length - 1}
+                    className="px-3 py-1.5 text-xs rounded border border-gray-300 disabled:opacity-40 cursor-pointer"
+                  >
+                    Suivant
+                  </button>
+                </div>
+                {(() => {
+                  const lead = leadSequences[currentLeadIndex]!;
+                  return (
+                    <div key={lead.email} className="rounded-lg border border-gray-200 p-3 space-y-2">
+                      <p className="text-sm font-semibold text-gray-900">
+                        {lead.name || lead.email} <span className="text-xs text-gray-500">({lead.email})</span>
+                      </p>
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                        {lead.steps.map((step) => (
+                          <div key={`${lead.email}-${step.step}`} className="rounded-lg border border-gray-200 p-2 space-y-2 bg-gray-50">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-medium">Mail {step.step}</span>
+                              <div className="flex items-center gap-1">
+                                <span>Delai (jours):</span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={step.delayDays}
+                                  onChange={(e) => updateLeadStep(lead.email, step.step, { delayDays: Math.max(0, Number(e.target.value) || 0) })}
+                                  className="w-20 px-1 py-0.5 border border-gray-300 rounded"
+                                />
+                              </div>
+                            </div>
                             <input
-                              type="number"
-                              min={0}
-                              value={step.delayDays}
-                              onChange={(e) => updateLeadStep(lead.email, step.step, { delayDays: Math.max(0, Number(e.target.value) || 0) })}
-                              className="w-20 px-1 py-0.5 border border-gray-300 rounded"
+                              value={step.subject}
+                              onChange={(e) => updateLeadStep(lead.email, step.step, { subject: e.target.value })}
+                              className="w-full px-2 py-1 text-xs border border-gray-300 rounded bg-white"
+                            />
+                            <textarea
+                              value={step.body}
+                              onChange={(e) => updateLeadStep(lead.email, step.step, { body: e.target.value })}
+                              rows={5}
+                              className="w-full px-2 py-1 text-xs border border-gray-300 rounded bg-white"
                             />
                           </div>
-                        </div>
-                        <input
-                          value={step.subject}
-                          onChange={(e) => updateLeadStep(lead.email, step.step, { subject: e.target.value })}
-                          className="w-full px-2 py-1 text-xs border border-gray-300 rounded bg-white"
-                        />
-                        <textarea
-                          value={step.body}
-                          onChange={(e) => updateLeadStep(lead.email, step.step, { body: e.target.value })}
-                          rows={5}
-                          className="w-full px-2 py-1 text-xs border border-gray-300 rounded bg-white"
-                        />
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
 
             <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-3">
               <button onClick={() => setShowStep2(false)} className="px-3 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer">Annuler</button>
