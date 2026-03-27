@@ -11,6 +11,7 @@ export async function GET(request: Request) {
     const search = (searchParams.get("search") || "").toLowerCase().trim();
 
     const [persons, deals] = await Promise.all([getPersons(), getDeals()]);
+    const activeDeals = deals.filter((d) => d.status === "open");
 
     type DealRef = {
       dealId: number;
@@ -27,7 +28,7 @@ export async function GET(request: Request) {
     const dealByPerson = new Map<number, DealRef>();
     const dealStatusRank: Record<string, number> = { open: 3, won: 2, lost: 1 };
 
-    for (const d of deals) {
+    for (const d of activeDeals) {
       const personIds = new Set<number>();
       if (d.person_id) personIds.add(d.person_id);
       for (const pid of d.participants || []) {
