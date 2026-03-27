@@ -1,1 +1,27 @@
+name: Followup Scheduler (Every 10 Minutes)
 
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  dispatch-followup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger followup dispatcher endpoint
+        env:
+          FOLLOWUP_CRON_URL: ${{ secrets.FOLLOWUP_CRON_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$FOLLOWUP_CRON_URL" ]; then
+            echo "Missing FOLLOWUP_CRON_URL secret"
+            exit 1
+          fi
+          if [ -z "$CRON_SECRET" ]; then
+            echo "Missing CRON_SECRET secret"
+            exit 1
+          fi
+          curl -sS -X GET \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$FOLLOWUP_CRON_URL"
