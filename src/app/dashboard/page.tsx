@@ -92,6 +92,7 @@ export default function DashboardPage() {
 function DashboardContent() {
   const searchParams = useSearchParams();
   const highlightDealId = searchParams.get("deal") ? Number(searchParams.get("deal")) : null;
+  const [dealView, setDealView] = useState<"en_cours" | "archives">("en_cours");
   const [statusFilter, setStatusFilter] = useState<"all" | "urgent" | "sans_info">("all");
   const [activities, setActivities] = useState<Activity[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
@@ -131,7 +132,8 @@ function DashboardContent() {
   const fetchDeals = useCallback(async (silent = false) => {
     if (!silent) setLoadingDeals(true);
     try {
-      const res = await fetch("/api/deals?status=open");
+      const targetStatus = dealView === "archives" ? "lost" : "open";
+      const res = await fetch(`/api/deals?status=${targetStatus}`);
       const json = await res.json();
       const data: Deal[] = json.data || [];
       // If a hidden deal no longer appears in API results, it was persisted — clear it
@@ -144,7 +146,7 @@ function DashboardContent() {
     } finally {
       if (!silent) setLoadingDeals(false);
     }
-  }, []);
+  }, [dealView]);
 
   // Background sync: refresh data silently
   const syncBackground = useCallback(() => {
@@ -203,6 +205,21 @@ function DashboardContent() {
       console.error("Erreur marquage gagné:", err);
     }
     setTimeout(syncBackground, 5000);
+  }, [syncBackground]);
+
+  const reopenDeal = useCallback(async (dealId: number) => {
+    hiddenDealIds.current.add(dealId);
+    setDeals((prev) => prev.filter((d) => d.id !== dealId));
+    try {
+      await fetch(`/api/deals/${dealId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "open", lost_reason: "" }),
+      });
+    } catch (err) {
+      console.error("Erreur remise en cours:", err);
+    }
+    setTimeout(syncBackground, 2000);
   }, [syncBackground]);
 
   // Optimistic deal field update: update deals state directly
@@ -463,10 +480,10 @@ function DashboardContent() {
           <Filter className="w-4 h-4 text-gray-400 flex-shrink-0" />
           {/* Status filters */}
           <button
-            onClick={() => setStatusFilter("all")}
+            onClick={() => { setDealView("en_cours"); setStatusFilter("all"); }}
             className={cn(
               "px-2.5 py-1 text-xs font-medium rounded-full border transition-colors cursor-pointer",
-              statusFilter === "all"
+              dealView === "en_cours" && statusFilter === "all"
                 ? "bg-indigo-600 text-white border-indigo-600"
                 : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
             )}
@@ -474,9 +491,21 @@ function DashboardContent() {
             Tous ({allFilteredDeals.length})
           </button>
           <button
-            onClick={() => setStatusFilter(statusFilter === "urgent" ? "all" : "urgent")}
+            onClick={() => { setDealView("archives"); setStatusFilter("all"); }}
             className={cn(
               "px-2.5 py-1 text-xs font-medium rounded-full border transition-colors cursor-pointer",
+              dealView === "archives"
+                ? "bg-gray-700 text-white border-gray-700"
+                : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+            )}
+          >
+            Archivés
+          </button>
+          <button
+            onClick={() => setStatusFilter(statusFilter === "urgent" ? "all" : "urgent")}
+            disabled={dealView === "archives"}
+            className={cn(
+              "px-2.5 py-1 text-xs font-medium rounded-full border transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed",
               statusFilter === "urgent"
                 ? "bg-red-600 text-white border-red-600"
                 : "bg-white text-red-600 border-red-200 hover:bg-red-50"
@@ -489,8 +518,9 @@ function DashboardContent() {
           </button>
           <button
             onClick={() => setStatusFilter(statusFilter === "sans_info" ? "all" : "sans_info")}
+            disabled={dealView === "archives"}
             className={cn(
-              "px-2.5 py-1 text-xs font-medium rounded-full border transition-colors cursor-pointer",
+              "px-2.5 py-1 text-xs font-medium rounded-full border transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed",
               statusFilter === "sans_info"
                 ? "bg-amber-600 text-white border-amber-600"
                 : "bg-white text-amber-600 border-amber-200 hover:bg-amber-50"
@@ -543,7 +573,7 @@ function DashboardContent() {
             </>
           )}
           <span className="text-xs text-gray-400 ml-1">
-            {sortedDeals.length} affaire{sortedDeals.length !== 1 ? "s" : ""}
+            {sortedDeals.length} affaire{sortedDeals.length !== 1 ? "s" : ""} {dealView === "archives" ? "archivée(s)" : ""}
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -623,22 +653,24 @@ function DashboardContent() {
           {/* Toolbar : sélection + enrichissement batch */}
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              <button
-                onClick={() => selectAllDeals(sortedDeals)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 bg-white hover:bg-gray-50 transition-colors cursor-pointer"
-              >
-                <Users className="w-3.5 h-3.5" />
-                {selectedDeals.size === sortedDeals.filter((d: Deal) => d.person_id).length && selectedDeals.size > 0
-                  ? "Tout désélectionner"
-                  : "Tout sélectionner"}
-              </button>
+              {dealView !== "archives" && (
+                <button
+                  onClick={() => selectAllDeals(sortedDeals)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 bg-white hover:bg-gray-50 transition-colors cursor-pointer"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  {selectedDeals.size === sortedDeals.filter((d: Deal) => d.person_id).length && selectedDeals.size > 0
+                    ? "Tout désélectionner"
+                    : "Tout sélectionner"}
+                </button>
+              )}
               {selectedDeals.size > 0 && (
                 <span className="text-xs font-medium text-indigo-600">
                   {selectedDeals.size} sélectionnée{selectedDeals.size > 1 ? "s" : ""}
                 </span>
               )}
             </div>
-            {selectedDeals.size > 0 && (
+            {dealView !== "archives" && selectedDeals.size > 0 && (
               <button
                 onClick={batchEnrich}
                 disabled={batchEnriching}
@@ -709,11 +741,13 @@ function DashboardContent() {
               onMarkDone={markDone}
               onArchive={openArchiveModal}
               onWon={markWon}
+              onReopen={reopenDeal}
               onActivityUpdated={handleActivityUpdated}
               onDeleteActivity={deleteActivityById}
               selected={selectedDeals.has(deal.id)}
               onToggleSelect={toggleDealSelection}
               onDealUpdated={handleDealFieldUpdated}
+              dealView={dealView}
               initialExpanded={highlightDealId === deal.id}
             />
           ))}
@@ -1159,11 +1193,13 @@ function DealRow({
   onMarkDone,
   onArchive,
   onWon,
+  onReopen,
   onActivityUpdated,
   onDeleteActivity,
   selected,
   onToggleSelect,
   onDealUpdated,
+  dealView,
   initialExpanded,
 }: {
   deal: Deal;
@@ -1172,11 +1208,13 @@ function DealRow({
   onMarkDone?: (id: number) => void;
   onArchive: (activityId: number | null, dealId: number | null, contactName: string) => void;
   onWon: (dealId: number) => void;
+  onReopen: (dealId: number) => void;
   onActivityUpdated: (id: number, data: Partial<Activity>) => void;
   onDeleteActivity?: (id: number) => void;
   selected: boolean;
   onToggleSelect: (dealId: number) => void;
   onDealUpdated?: (dealId: number, fields: Partial<Deal>) => void;
+  dealView: "en_cours" | "archives";
   initialExpanded?: boolean;
 }) {
   const [expanded, setExpanded] = useState(initialExpanded || false);
@@ -1600,27 +1638,39 @@ function DealRow({
 
         {/* Actions */}
         <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-          <button
-            onClick={() => { setShowAddTask(!showAddTask); setExpanded(true); }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-green-200 text-green-700 bg-green-50 hover:bg-green-100 hover:border-green-300 transition-colors cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Tâche
-          </button>
-          <button
-            onClick={() => onWon(deal.id)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-yellow-300 text-yellow-700 bg-yellow-50 hover:bg-yellow-100 hover:border-yellow-400 transition-colors cursor-pointer"
-          >
-            <Trophy className="w-3.5 h-3.5" />
-            Gagné
-          </button>
-          <button
-            onClick={() => onArchive(null, deal.id, deal.title)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-orange-200 text-orange-700 bg-orange-50 hover:bg-orange-100 hover:border-orange-300 transition-colors cursor-pointer"
-          >
-            <Archive className="w-3.5 h-3.5" />
-            Archiver
-          </button>
+          {dealView === "archives" ? (
+            <button
+              onClick={() => onReopen(deal.id)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-blue-300 text-blue-700 bg-blue-50 hover:bg-blue-100 hover:border-blue-400 transition-colors cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Remettre en cours
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={() => { setShowAddTask(!showAddTask); setExpanded(true); }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-green-200 text-green-700 bg-green-50 hover:bg-green-100 hover:border-green-300 transition-colors cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Tâche
+              </button>
+              <button
+                onClick={() => onWon(deal.id)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-yellow-300 text-yellow-700 bg-yellow-50 hover:bg-yellow-100 hover:border-yellow-400 transition-colors cursor-pointer"
+              >
+                <Trophy className="w-3.5 h-3.5" />
+                Gagné
+              </button>
+              <button
+                onClick={() => onArchive(null, deal.id, deal.title)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-orange-200 text-orange-700 bg-orange-50 hover:bg-orange-100 hover:border-orange-300 transition-colors cursor-pointer"
+              >
+                <Archive className="w-3.5 h-3.5" />
+                Archiver
+              </button>
+            </>
+          )}
         </div>
 
         <div className="flex-shrink-0 text-gray-400">

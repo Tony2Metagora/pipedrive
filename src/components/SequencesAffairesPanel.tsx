@@ -18,6 +18,10 @@ interface LeadRow {
   company: string;
   dealId: number | null;
   dealTitle: string;
+  pipelineId?: number | null;
+  pipelineName?: string;
+  stageId?: number | null;
+  stageName?: string;
 }
 
 interface FollowupItem {
@@ -311,6 +315,11 @@ export default function SequencesAffairesPanel() {
                   <p className="font-medium text-gray-800 truncate">{l.name || l.email}</p>
                   <p className="text-gray-500 truncate">{l.email}</p>
                   <p className="text-[10px] text-gray-400 truncate">{l.dealTitle || "Sans affaire"}</p>
+                  {(l.pipelineName || l.stageName) && (
+                    <p className="text-[10px] text-violet-500 truncate">
+                      {[l.pipelineName, l.stageName].filter(Boolean).join(" -> ")}
+                    </p>
+                  )}
                 </div>
               </label>
             ))}
