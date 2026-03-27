@@ -8,7 +8,7 @@ import {
 
 /** GET /api/sequences — list campaigns + email accounts */
 export async function GET() {
-  const guard = await requireAuth("sequences" as never, "GET");
+  const guard = await requireAuth("sequences", "GET");
   if (guard.denied) return guard.denied;
 
   try {
@@ -25,7 +25,7 @@ export async function GET() {
 
 /** POST /api/sequences — create a new campaign */
 export async function POST(request: Request) {
-  const guard = await requireAuth("sequences" as never, "POST");
+  const guard = await requireAuth("sequences", "POST");
   if (guard.denied) return guard.denied;
 
   try {

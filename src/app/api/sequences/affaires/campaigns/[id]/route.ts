@@ -1,0 +1,30 @@
+import { NextResponse } from "next/server";
+import { requireAuth } from "@/lib/api-guard";
+import {
+  getCampaignStats,
+  getFollowupCampaign,
+  listFollowupItemsByCampaign,
+} from "@/lib/followup-store";
+
+export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
+  const guard = await requireAuth("sequences", "GET");
+  if (guard.denied) return guard.denied;
+  try {
+    const { id } = await params;
+    const campaignId = Number(id);
+    if (!Number.isFinite(campaignId)) {
+      return NextResponse.json({ error: "ID campagne invalide" }, { status: 400 });
+    }
+    const [campaign, items, stats] = await Promise.all([
+      getFollowupCampaign(campaignId),
+      listFollowupItemsByCampaign(campaignId),
+      getCampaignStats(campaignId),
+    ]);
+    if (!campaign) return NextResponse.json({ error: "Campagne introuvable" }, { status: 404 });
+    return NextResponse.json({ data: { campaign, items, stats } });
+  } catch (error) {
+    console.error("GET /api/sequences/affaires/campaigns/[id] error:", error);
+    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  }
+}
+

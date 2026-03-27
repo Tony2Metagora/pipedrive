@@ -9,6 +9,7 @@ import {
   Pencil, Timer, RotateCcw, BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import SequencesAffairesPanel from "@/components/SequencesAffairesPanel";
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -80,6 +81,7 @@ interface LeadMessage {
 
 type View = "list" | "detail";
 type DetailTab = "overview" | "leads" | "sequences" | "settings";
+type ListSection = "smartlead" | "affaires";
 
 // ─── Helpers ────────────────────────────────────────────
 
@@ -233,6 +235,7 @@ function parseCSVLeads(text: string) {
 // ─── Main Component ─────────────────────────────────────
 
 export default function SequencesPage() {
+  const [listSection, setListSection] = useState<ListSection>("smartlead");
   const [view, setView] = useState<View>("list");
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [allAccounts, setAllAccounts] = useState<EmailAccount[]>([]);
@@ -724,8 +727,33 @@ export default function SequencesPage() {
           </button>
         </div>
 
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-1 mb-4">
+          <button
+            onClick={() => setListSection("smartlead")}
+            className={cn(
+              "px-3 py-1.5 text-xs font-medium rounded-lg cursor-pointer",
+              listSection === "smartlead" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
+            )}
+          >
+            Smartlead
+          </button>
+          <button
+            onClick={() => setListSection("affaires")}
+            className={cn(
+              "px-3 py-1.5 text-xs font-medium rounded-lg cursor-pointer",
+              listSection === "affaires" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
+            )}
+          >
+            Affaires
+          </button>
+        </div>
+
         <MsgBanner />
 
+        {listSection === "affaires" ? (
+          <SequencesAffairesPanel />
+        ) : (
+          <>
         {allAccounts.length > 0 && (
           <div className="mb-4 flex items-center gap-2 text-xs text-gray-500">
             <Mail className="w-3.5 h-3.5" />
@@ -773,6 +801,8 @@ export default function SequencesPage() {
               </div>
             </div>
           </div>
+        )}
+          </>
         )}
       </>
     );

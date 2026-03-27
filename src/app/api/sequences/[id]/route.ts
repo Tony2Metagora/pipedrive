@@ -24,7 +24,7 @@ import {
 
 /** GET /api/sequences/[id] — campaign detail + stats + sequences + leads + campaign email accounts */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await requireAuth("sequences" as never, "GET");
+  const guard = await requireAuth("sequences", "GET");
   if (guard.denied) return guard.denied;
 
   try {
@@ -71,7 +71,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
 /** POST /api/sequences/[id] — all campaign actions */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await requireAuth("sequences" as never, "POST");
+  const guard = await requireAuth("sequences", "POST");
   if (guard.denied) return guard.denied;
 
   try {
