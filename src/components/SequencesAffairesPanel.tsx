@@ -29,6 +29,7 @@ interface FollowupItem {
   leadEmail: string;
   leadName?: string;
   subject: string;
+  cc?: string;
   body: string;
   status: "draft" | "a_envoyer" | "en_cours" | "envoye" | "erreur" | "repondu";
   sequenceStep?: number;
