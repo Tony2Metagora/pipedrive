@@ -128,6 +128,17 @@ export async function updateFollowupCampaign(
   });
 }
 
+export async function deleteFollowupCampaign(id: number): Promise<boolean> {
+  return withLock(CAMPAIGNS_KEY, async () => {
+    const campaigns = await readArray<FollowupCampaign>(CAMPAIGNS_KEY);
+    const before = campaigns.length;
+    const next = campaigns.filter((c) => c.id !== id);
+    if (next.length === before) return false;
+    await writeArray(CAMPAIGNS_KEY, next);
+    return true;
+  });
+}
+
 export async function listFollowupItemsByCampaign(campaignId: number): Promise<FollowupItem[]> {
   const items = await readArray<FollowupItem>(ITEMS_KEY);
   return items
@@ -151,6 +162,14 @@ export async function replaceFollowupItemsForCampaign(
     }));
     await writeArray(ITEMS_KEY, [...retained, ...created]);
     return created;
+  });
+}
+
+export async function deleteFollowupItemsForCampaign(campaignId: number): Promise<void> {
+  await withLock(ITEMS_KEY, async () => {
+    const items = await readArray<FollowupItem>(ITEMS_KEY);
+    const next = items.filter((i) => i.campaignId !== campaignId);
+    await writeArray(ITEMS_KEY, next);
   });
 }
 
