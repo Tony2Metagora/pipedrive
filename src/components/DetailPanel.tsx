@@ -152,11 +152,13 @@ export default function DetailPanel({ personId, allParticipants, dealId, orgId, 
   // Edition contact (nom/poste/email/téléphone/entreprise si disponible)
   const [editingContact, setEditingContact] = useState(false);
   const [savingContact, setSavingContact] = useState(false);
-  const [editContactName, setEditContactName] = useState("");
+  const [editContactPrenom, setEditContactPrenom] = useState("");
+  const [editContactNom, setEditContactNom] = useState("");
   const [editContactJobTitle, setEditContactJobTitle] = useState("");
   const [editContactEmail, setEditContactEmail] = useState("");
   const [editContactPhone, setEditContactPhone] = useState("");
   const [editOrgName, setEditOrgName] = useState("");
+  const [dealOrgName, setDealOrgName] = useState("");
 
   useEffect(() => {
     const fetchContext = async () => {
@@ -178,6 +180,20 @@ export default function DetailPanel({ personId, allParticipants, dealId, orgId, 
     };
     fetchContext();
   }, [personId]);
+
+  useEffect(() => {
+    if (!dealId) return;
+    const loadDealOrgName = async () => {
+      try {
+        const res = await fetch(`/api/deals/${dealId}`);
+        const json = await res.json();
+        setDealOrgName(json.data?.org_name || "");
+      } catch {
+        // no-op
+      }
+    };
+    loadDealOrgName();
+  }, [dealId]);
 
   const reloadContext = async () => {
     setLoading(true);
@@ -339,13 +355,15 @@ export default function DetailPanel({ personId, allParticipants, dealId, orgId, 
 
   const openEditContact = () => {
     if (!context) return;
-    setEditContactName(context.person.name || "");
+    const parts = (context.person.name || "").split(/\s+/).filter(Boolean);
+    setEditContactPrenom(parts[0] || "");
+    setEditContactNom(parts.slice(1).join(" ") || "");
     setEditContactJobTitle(context.person.job_title || "");
     const email = context.person.email?.[0]?.value || "";
     const phone = context.person.phone?.[0]?.value || "";
     setEditContactEmail(email);
     setEditContactPhone(phone);
-    setEditOrgName(context.organization?.name || "");
+    setEditOrgName(context.organization?.name || dealOrgName || "");
     setEditingContact(true);
   };
 
@@ -353,8 +371,11 @@ export default function DetailPanel({ personId, allParticipants, dealId, orgId, 
     if (!context) return;
     setSavingContact(true);
     try {
+      const fullName = [editContactPrenom.trim(), editContactNom.trim()].filter(Boolean).join(" ");
+      if (!fullName.trim()) throw new Error("Nom/prénom requis");
+
       const personPayload: Record<string, unknown> = {
-        name: editContactName.trim(),
+        name: fullName,
       };
       if (editContactJobTitle.trim()) personPayload.job_title = editContactJobTitle.trim();
       if (editContactEmail.trim()) personPayload.email = editContactEmail.trim();
@@ -366,12 +387,20 @@ export default function DetailPanel({ personId, allParticipants, dealId, orgId, 
         body: JSON.stringify(personPayload),
       });
 
-      if (context.organization?.id && editOrgName.trim()) {
-        await fetch(`/api/organizations/${context.organization.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: editOrgName.trim() }),
-        });
+      if (editOrgName.trim()) {
+        if (context.organization?.id) {
+          await fetch(`/api/organizations/${context.organization.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: editOrgName.trim() }),
+          });
+        } else if (dealId) {
+          await fetch(`/api/deals/${dealId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ org_name: editOrgName.trim() }),
+          });
+        }
       }
 
       setEditingContact(false);
@@ -560,10 +589,18 @@ export default function DetailPanel({ personId, allParticipants, dealId, orgId, 
             ) : (
               <div className="space-y-2 pt-1">
                 <div>
-                  <label className="block text-[10px] text-gray-500 mb-1">Nom complet</label>
+                  <label className="block text-[10px] text-gray-500 mb-1">Prénom</label>
                   <input
-                    value={editContactName}
-                    onChange={(e) => setEditContactName(e.target.value)}
+                    value={editContactPrenom}
+                    onChange={(e) => setEditContactPrenom(e.target.value)}
+                    className="w-full px-2 py-1 border border-gray-300 rounded text-xs outline-none focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-gray-500 mb-1">Nom</label>
+                  <input
+                    value={editContactNom}
+                    onChange={(e) => setEditContactNom(e.target.value)}
                     className="w-full px-2 py-1 border border-gray-300 rounded text-xs outline-none focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400"
                   />
                 </div>
@@ -596,7 +633,7 @@ export default function DetailPanel({ personId, allParticipants, dealId, orgId, 
                   <input
                     value={editOrgName}
                     onChange={(e) => setEditOrgName(e.target.value)}
-                    disabled={!context.organization}
+                    disabled={!context.organization && !dealId}
                     className="w-full px-2 py-1 border border-gray-300 rounded text-xs outline-none focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 disabled:opacity-50"
                   />
                 </div>
@@ -610,7 +647,7 @@ export default function DetailPanel({ personId, allParticipants, dealId, orgId, 
                   </button>
                   <button
                     onClick={saveContact}
-                    disabled={savingContact || !editContactName.trim()}
+                    disabled={savingContact || (!editContactPrenom.trim() && !editContactNom.trim())}
                     className="flex-1 px-2 py-1 text-[10px] font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-40 cursor-pointer"
                   >
                     {savingContact ? "Enregistrement..." : "Enregistrer"}

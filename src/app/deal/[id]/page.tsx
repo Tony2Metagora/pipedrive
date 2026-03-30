@@ -74,7 +74,8 @@ export default function DealPage() {
 
   // États édition contact (nom/prénom -> Person.name, poste -> Person.job_title, email/téléphone -> Person.email/phone, entreprise -> Deal.org_name)
   const [editingContact, setEditingContact] = useState(false);
-  const [editContactName, setEditContactName] = useState("");
+  const [editContactPrenom, setEditContactPrenom] = useState("");
+  const [editContactNom, setEditContactNom] = useState("");
   const [editContactJobTitle, setEditContactJobTitle] = useState("");
   const [editContactEmail, setEditContactEmail] = useState("");
   const [editContactPhone, setEditContactPhone] = useState("");
@@ -112,7 +113,9 @@ export default function DealPage() {
       setEditValue(d.value || 0);
 
       if (p) {
-        setEditContactName(p.name || "");
+        const parts = (p.name || "").split(/\s+/).filter(Boolean);
+        setEditContactPrenom(parts[0] || "");
+        setEditContactNom(parts.slice(1).join(" ") || "");
         setEditContactJobTitle(p.job_title || "");
         const email = p.email?.find((e) => e.primary)?.value || p.email?.[0]?.value || "";
         const phone = p.phone?.find((ph) => ph.primary)?.value || p.phone?.[0]?.value || "";
@@ -157,8 +160,10 @@ export default function DealPage() {
     setSavingContact(true);
     try {
       const personId = person.id;
+      const fullName = [editContactPrenom.trim(), editContactNom.trim()].filter(Boolean).join(" ");
+      if (!fullName.trim()) throw new Error("Nom/prénom requis");
       const payloadPerson: Record<string, unknown> = {
-        name: editContactName.trim(),
+        name: fullName,
       };
       if (editContactJobTitle.trim()) payloadPerson.job_title = editContactJobTitle.trim();
       if (editContactEmail.trim()) payloadPerson.email = editContactEmail.trim();
@@ -400,10 +405,18 @@ export default function DealPage() {
               ) : (
                 <div className="space-y-3">
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">Nom complet</label>
+                    <label className="block text-xs text-gray-500 mb-1">Prénom</label>
                     <input
-                      value={editContactName}
-                      onChange={(e) => setEditContactName(e.target.value)}
+                      value={editContactPrenom}
+                      onChange={(e) => setEditContactPrenom(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Nom</label>
+                    <input
+                      value={editContactNom}
+                      onChange={(e) => setEditContactNom(e.target.value)}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-500"
                     />
                   </div>
@@ -450,7 +463,7 @@ export default function DealPage() {
                     </button>
                     <button
                       onClick={saveContact}
-                      disabled={savingContact || !editContactName.trim()}
+                      disabled={savingContact || (!editContactPrenom.trim() && !editContactNom.trim())}
                       className="flex-1 px-3 py-2 text-sm text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-40 cursor-pointer"
                     >
                       {savingContact ? "Enregistrement..." : "Enregistrer"}
