@@ -45,8 +45,11 @@ function sanitizeTemplateText(raw: string, lead: { name?: string; email?: string
   return (raw || "")
     .replace(/\{\{\s*prenom\s*\}\}/gi, prenom)
     .replace(/\{\{\s*pr[ée]nom\s*\}\}/gi, prenom)
+    .replace(/\{\s*pr[ée]nom\s*\}/gi, prenom)
     .replace(/\{\{\s*email\s*\}\}/gi, lead.email || "")
-    .replace(/\{\{\s*entreprise\s*\}\}/gi, lead.company || "");
+    .replace(/\{\s*email\s*\}/gi, lead.email || "")
+    .replace(/\{\{\s*entreprise\s*\}\}/gi, lead.company || "")
+    .replace(/\{\s*entreprise\s*\}/gi, lead.company || "");
 }
 
 function toDelayMinutes(input: { delayMinutes?: number; delayDays?: number }): number {

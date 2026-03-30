@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-guard";
-import { getDeals, getPersons } from "@/lib/blob-store";
+import { getDeals, getOrganizations, getPersons } from "@/lib/blob-store";
 import { getPipelineName, getStageName } from "@/lib/config";
 
 export async function GET(request: Request) {
@@ -10,7 +10,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const search = (searchParams.get("search") || "").toLowerCase().trim();
 
-    const [persons, deals] = await Promise.all([getPersons(), getDeals()]);
+    const [persons, deals, orgs] = await Promise.all([getPersons(), getDeals(), getOrganizations()]);
     const activeDeals = deals.filter((d) => d.status === "open");
 
     type DealRef = {
@@ -25,6 +25,7 @@ export async function GET(request: Request) {
     };
 
     const personById = new Map(persons.map((p) => [p.id, p]));
+    const orgById = new Map(orgs.map((o) => [o.id, o.name]));
     const dealByPerson = new Map<number, DealRef>();
     const dealStatusRank: Record<string, number> = { open: 3, won: 2, lost: 1 };
 
@@ -69,7 +70,7 @@ export async function GET(request: Request) {
           personId: p.id,
           email: primaryEmail,
           name: p.name || "",
-          company: deal.company,
+          company: (p.org_id ? (orgById.get(p.org_id) || "") : "") || deal.company,
           dealId: deal.dealId,
           dealTitle: deal.dealTitle,
           stageId: deal.stageId,

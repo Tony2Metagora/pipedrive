@@ -64,6 +64,33 @@ function defaultDelayDaysForStep(step: number): number {
   return 2 * step - 3;
 }
 
+function extractPrenom(name: string): string {
+  return (name || "").trim().split(/\s+/).filter(Boolean)[0] || "";
+}
+
+function renderFinalText(raw: string, lead: Pick<LeadSequenceDraft, "name" | "email" | "company">): string {
+  const prenom = extractPrenom(lead.name);
+  return (raw || "")
+    .replace(/\{\{\s*prenom\s*\}\}/gi, prenom)
+    .replace(/\{\{\s*pr[ée]nom\s*\}\}/gi, prenom)
+    .replace(/\{\s*pr[ée]nom\s*\}/gi, prenom)
+    .replace(/\{\{\s*entreprise\s*\}\}/gi, lead.company || "")
+    .replace(/\{\s*entreprise\s*\}/gi, lead.company || "")
+    .replace(/\{\{\s*email\s*\}\}/gi, lead.email || "");
+}
+
+function forceBonjourPrenom(body: string, leadName: string): string {
+  const prenom = extractPrenom(leadName);
+  const wanted = prenom ? `Bonjour ${prenom},` : "Bonjour,";
+  const text = (body || "").replace(/\r/g, "").trim();
+  if (!text) return `${wanted}\n\n`;
+  if (/^bonjour\b/i.test(text)) {
+    const afterFirstLine = text.replace(/^bonjour[^\n]*\n*/i, "").trimStart();
+    return `${wanted}\n\n${afterFirstLine}`.trim();
+  }
+  return `${wanted}\n\n${text}`.trim();
+}
+
 function buildDefaultStep(step: number): LeadStepDraft {
   if (step === 1) {
     return {
@@ -298,6 +325,14 @@ export default function SequencesAffairesPanel() {
     return next;
   }
 
+  function renderLeadStepsFinal(lead: LeadSequenceDraft, steps: LeadStepDraft[]): LeadStepDraft[] {
+    return steps.map((s) => ({
+      ...s,
+      subject: renderFinalText(s.subject, lead),
+      body: forceBonjourPrenom(renderFinalText(s.body, lead), lead.name),
+    }));
+  }
+
   async function generateV1AndOpenStep2() {
     if (!selectedCampaignId) {
       setError("Etape 1: creez ou selectionnez une campagne.");
@@ -347,7 +382,10 @@ export default function SequencesAffairesPanel() {
           ...generatedLead,
           steps: adaptLeadSequenceSteps(generatedLead.steps || [], seriesCount),
         };
-        nextLeadSequences.push(normalized);
+        nextLeadSequences.push({
+          ...normalized,
+          steps: renderLeadStepsFinal(normalized, normalized.steps),
+        });
         // Progression demandee: 1/6, 2/6, ...
         for (let stepIdx = 0; stepIdx < normalized.steps.length; stepIdx += 1) {
           setGenerationDone((prev) => prev + 1);
@@ -370,7 +408,12 @@ export default function SequencesAffairesPanel() {
   function applySeriesCount(nextCount: number) {
     const safe = Math.max(1, Math.min(5, nextCount));
     setSeriesCount(safe);
-    setLeadSequences((prev) => prev.map((lead) => ({ ...lead, steps: adaptLeadSequenceSteps(lead.steps, safe) })));
+    setLeadSequences((prev) =>
+      prev.map((lead) => {
+        const steps = adaptLeadSequenceSteps(lead.steps, safe);
+        return { ...lead, steps: renderLeadStepsFinal(lead, steps) };
+      })
+    );
   }
 
   function updateLeadStep(leadEmail: string, step: number, patch: Partial<LeadStepDraft>) {
@@ -455,7 +498,7 @@ export default function SequencesAffairesPanel() {
     const sequences: LeadSequenceDraft[] = Array.from(byLead.entries()).map(([email, leadItems]) => {
       leadItems.sort((a, b) => (a.sequenceStep ?? 1) - (b.sequenceStep ?? 1));
       const first = leadItems[0]!;
-      return {
+      const lead: LeadSequenceDraft = {
         email,
         name: first.leadName || "",
         company: first.company || "",
@@ -470,6 +513,8 @@ export default function SequencesAffairesPanel() {
           body: it.body,
         })),
       };
+      lead.steps = renderLeadStepsFinal(lead, lead.steps);
+      return lead;
     });
     setLeadSequences(sequences);
     setCurrentLeadIndex(0);
@@ -699,9 +744,9 @@ export default function SequencesAffairesPanel() {
                       <p className="text-sm font-semibold text-gray-900">
                         {lead.name || lead.email} <span className="text-xs text-gray-500">({lead.email})</span>
                       </p>
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                      <div className="space-y-3">
                         {lead.steps.map((step) => (
-                          <div key={`${lead.email}-${step.step}`} className="rounded-lg border border-gray-200 p-2 space-y-2 bg-gray-50">
+                          <div key={`${lead.email}-${step.step}`} className="w-full rounded-lg border border-gray-200 p-2 space-y-2 bg-gray-50">
                             <div className="flex items-center justify-between text-xs">
                               <span className="font-medium">Mail {step.step}</span>
                               <div className="flex items-center gap-1">

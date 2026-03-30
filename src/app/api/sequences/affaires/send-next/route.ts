@@ -124,13 +124,19 @@ export async function POST(request: Request) {
       const sanitizedSubject = (item.subject || "")
         .replace(/\{\{\s*prenom\s*\}\}/gi, prenom)
         .replace(/\{\{\s*pr[ée]nom\s*\}\}/gi, prenom)
+        .replace(/\{\s*pr[ée]nom\s*\}/gi, prenom)
         .replace(/\{\{\s*email\s*\}\}/gi, item.leadEmail || "")
-        .replace(/\{\{\s*entreprise\s*\}\}/gi, item.company || "");
+        .replace(/\{\s*email\s*\}/gi, item.leadEmail || "")
+        .replace(/\{\{\s*entreprise\s*\}\}/gi, item.company || "")
+        .replace(/\{\s*entreprise\s*\}/gi, item.company || "");
       const sanitizedBody = (item.body || "")
         .replace(/\{\{\s*prenom\s*\}\}/gi, prenom)
         .replace(/\{\{\s*pr[ée]nom\s*\}\}/gi, prenom)
+        .replace(/\{\s*pr[ée]nom\s*\}/gi, prenom)
         .replace(/\{\{\s*email\s*\}\}/gi, item.leadEmail || "")
-        .replace(/\{\{\s*entreprise\s*\}\}/gi, item.company || "");
+        .replace(/\{\s*email\s*\}/gi, item.leadEmail || "")
+        .replace(/\{\{\s*entreprise\s*\}\}/gi, item.company || "")
+        .replace(/\{\s*entreprise\s*\}/gi, item.company || "");
 
       const sent = await sendGmailMessage(auth, {
         to: item.leadEmail,

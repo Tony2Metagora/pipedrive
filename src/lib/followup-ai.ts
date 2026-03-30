@@ -36,6 +36,27 @@ function header(headers: { name: string; value: string }[], name: string): strin
   return headers.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value || "";
 }
 
+function normalizeTemplateTokens(text: string): string {
+  return (text || "")
+    .replace(/\{\s*pr[ée]nom\s*\}/gi, "{{prenom}}")
+    .replace(/\{\{\s*pr[ée]nom\s*\}\}/gi, "{{prenom}}")
+    .replace(/\{\s*entreprise\s*\}/gi, "{{entreprise}}")
+    .replace(/\{\{\s*entreprise\s*\}\}/gi, "{{entreprise}}");
+}
+
+function ensureBonjourPrenom(body: string): string {
+  const cleaned = normalizeTemplateTokens((body || "").replace(/\r/g, "").trim());
+  const wanted = "Bonjour {{prenom}},";
+  if (!cleaned) return `${wanted}\n\nJe me permets de revenir vers vous.\n\nTony`;
+
+  if (/^bonjour\b/i.test(cleaned)) {
+    const withoutFirstLine = cleaned.replace(/^bonjour[^\n]*\n*/i, "").trimStart();
+    return `${wanted}\n\n${withoutFirstLine}`.trim();
+  }
+
+  return `${wanted}\n\n${cleaned}`.trim();
+}
+
 export async function loadThreadContextForLead(accessToken: string, email: string): Promise<string> {
   const query = encodeURIComponent(`from:${email} OR to:${email}`);
   const listRes = await fetch(
@@ -135,9 +156,9 @@ export async function generateFollowupDraft(input: {
   const system = `Tu es l'assistant commercial de Tony chez Metagora.
 Tu rediges un follow-up email commercial en francais, court, naturel, actionnable.
 IMPORTANT:
-- N'utilise PAS le nom du lead (pas de "Bonjour Mathilde", etc.).
+- Le mail DOIT commencer strictement par "Bonjour {{prenom}},"
 - Utilise uniquement les placeholders exacts "{{prenom}}" (prénom) et "{{entreprise}}" (entreprise).
-- Ne remplace jamais ces placeholders par des valeurs réelles.
+- Ne remplace jamais ces placeholders par des valeurs reelles.
 Respecte ce format STRICT:
 SUBJECT: ...
 BODY:
@@ -168,12 +189,13 @@ Tony`;
   const text = (raw || "").replace(/\r/g, "").trim();
   const subjectMatch = text.match(/SUBJECT:\s*(.+)/i);
   const bodyMatch = text.match(/BODY:\s*([\s\S]+)/i);
+  const subject = normalizeTemplateTokens(subjectMatch?.[1]?.trim() || `Suivi - {{entreprise}}`).trim();
+  const body = ensureBonjourPrenom(
+    bodyMatch?.[1]?.trim() || text || "Je me permets de revenir vers vous.\n\nTony"
+  );
   return {
-    subject: subjectMatch?.[1]?.trim() || `Suivi - {{entreprise}}`,
-    body:
-      bodyMatch?.[1]?.trim() ||
-      text ||
-      "Bonjour {{prenom}},\n\nJe me permets de revenir vers vous.\n\nTony",
+    subject,
+    body,
   };
 }
 
@@ -195,9 +217,11 @@ Contraintes:
 - Chaque email doit etre differencie (pas de repetition).
 - Delais progressifs entre emails (en jours).
 - IMPORTANT:
-  - N'utilise PAS le nom du lead (pas de "Bonjour Mathilde", etc.).
+  - Chaque mail DOIT commencer strictement par "Bonjour {{prenom}},"
   - Utilise uniquement les placeholders exacts "{{prenom}}" (prénom) et "{{entreprise}}" (entreprise).
   - Ne remplace jamais ces placeholders par des valeurs reelles.
+  - Le mail 2 doit rebondir sur le fil Gmail precedent (objection, question, point ouvert).
+  - Le mail 3 doit rebondir sur les mails precedents avec un angle differencie (valeur/CTA).
 - Renvoie uniquement du JSON strict sans markdown.
 Schema attendu:
 {"emails":[{"step":1,"delayDays":0,"subject":"...","body":"..."},{"step":2,"delayDays":1,"subject":"...","body":"..."}]}`;
@@ -246,15 +270,17 @@ Schema attendu:
         return {
           step,
           delayDays: 0,
-          subject: (found.subject || fallbackFirst.subject || "").trim(),
-          body: (found.body || fallbackFirst.body || "").trim(),
+          subject: normalizeTemplateTokens((found.subject || fallbackFirst.subject || "").trim()),
+          body: ensureBonjourPrenom((found.body || fallbackFirst.body || "").trim()),
         };
       }
       return {
         step,
         delayDays: Math.max(0, Number(found.delayDays) || step - 1),
-        subject: (found.subject || `Relance ${step} - {{prenom}}`).trim(),
-        body: (found.body || "Bonjour {{prenom}},\n\nJe me permets de vous relancer.\n\nTony").trim(),
+        subject: normalizeTemplateTokens((found.subject || `Relance ${step} - {{prenom}}`).trim()),
+        body: ensureBonjourPrenom(
+          (found.body || "Je me permets de vous relancer.\n\nTony").trim()
+        ),
       };
     });
 
@@ -268,8 +294,8 @@ Schema attendu:
       return {
         step,
         delayDays: step - 1,
-        subject: `Relance ${step} - {{prenom}}`,
-        body: "Bonjour {{prenom}},\n\nJe me permets de vous relancer.\n\nTony",
+        subject: normalizeTemplateTokens(`Relance ${step} - {{prenom}}`),
+        body: ensureBonjourPrenom("Je me permets de vous relancer.\n\nTony"),
       };
     });
   }
