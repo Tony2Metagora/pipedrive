@@ -64,6 +64,8 @@ export interface FollowupItem {
   sequenceStep?: number;
   totalSteps?: number;
   delayAfterPreviousMinutes?: number;
+  // Business days version of delay; used to compute scheduledAt on send
+  delayAfterPreviousBusinessDays?: number;
   subject: string;
   body: string;
   status: FollowupItemStatus;

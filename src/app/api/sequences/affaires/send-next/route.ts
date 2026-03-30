@@ -45,6 +45,18 @@ async function hasLeadRepliedSince(
   return false;
 }
 
+function addBusinessDays(date: Date, businessDays: number): Date {
+  let remaining = Math.max(0, Math.floor(businessDays || 0));
+  if (remaining === 0) return new Date(date.getTime());
+  const d = new Date(date.getTime());
+  while (remaining > 0) {
+    d.setUTCDate(d.getUTCDate() + 1);
+    const day = d.getUTCDay(); // 0=Sun, 6=Sat
+    if (day !== 0 && day !== 6) remaining -= 1;
+  }
+  return d;
+}
+
 export async function POST(request: Request) {
   const cronCall = isCronAuthorized(request);
   if (!cronCall) {
@@ -108,12 +120,15 @@ export async function POST(request: Request) {
     }
 
     try {
+      const prenom = (item.leadName || "").trim().split(/\s+/).filter(Boolean)[0] || "";
       const sanitizedSubject = (item.subject || "")
-        .replace(/\{\{\s*prenom\s*\}\}/gi, item.leadName || "")
+        .replace(/\{\{\s*prenom\s*\}\}/gi, prenom)
+        .replace(/\{\{\s*pr[ée]nom\s*\}\}/gi, prenom)
         .replace(/\{\{\s*email\s*\}\}/gi, item.leadEmail || "")
         .replace(/\{\{\s*entreprise\s*\}\}/gi, item.company || "");
       const sanitizedBody = (item.body || "")
-        .replace(/\{\{\s*prenom\s*\}\}/gi, item.leadName || "")
+        .replace(/\{\{\s*prenom\s*\}\}/gi, prenom)
+        .replace(/\{\{\s*pr[ée]nom\s*\}\}/gi, prenom)
         .replace(/\{\{\s*email\s*\}\}/gi, item.leadEmail || "")
         .replace(/\{\{\s*entreprise\s*\}\}/gi, item.company || "");
 
@@ -138,10 +153,15 @@ export async function POST(request: Request) {
         (i) => (i.sequenceStep ?? 1) === currentStep + 1 && i.status === "draft"
       );
       if (nextStepItem) {
-        const delayMin = Math.max(0, nextStepItem.delayAfterPreviousMinutes ?? campaign.cadenceMinutes ?? 10);
+        const delayBusinessDays =
+          typeof nextStepItem.delayAfterPreviousBusinessDays === "number"
+            ? Math.max(0, Number(nextStepItem.delayAfterPreviousBusinessDays) || 0)
+            : Math.round(Math.max(0, nextStepItem.delayAfterPreviousMinutes ?? 0) / (24 * 60));
+
+        const scheduledAt = addBusinessDays(sentAt, delayBusinessDays);
         await updateFollowupItem(nextStepItem.id, {
           status: "a_envoyer",
-          scheduledAt: new Date(sentAt.getTime() + delayMin * 60 * 1000).toISOString(),
+          scheduledAt: scheduledAt.toISOString(),
           lastError: undefined,
         });
       }

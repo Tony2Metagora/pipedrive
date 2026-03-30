@@ -38,9 +38,13 @@ interface LeadSequenceInput {
 }
 
 function sanitizeTemplateText(raw: string, lead: { name?: string; email?: string; company?: string }): string {
+  const prenom = (lead.name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)[0] || "";
   return (raw || "")
-    .replace(/\{\{\s*prenom\s*\}\}/gi, lead.name || "")
-    .replace(/\{\{\s*pr[ée]nom\s*\}\}/gi, lead.name || "")
+    .replace(/\{\{\s*prenom\s*\}\}/gi, prenom)
+    .replace(/\{\{\s*pr[ée]nom\s*\}\}/gi, prenom)
     .replace(/\{\{\s*email\s*\}\}/gi, lead.email || "")
     .replace(/\{\{\s*entreprise\s*\}\}/gi, lead.company || "");
 }
@@ -50,6 +54,20 @@ function toDelayMinutes(input: { delayMinutes?: number; delayDays?: number }): n
     return Math.max(0, Number(input.delayDays) || 0) * 24 * 60;
   }
   return Math.max(0, Number(input.delayMinutes) || 0);
+}
+
+function addBusinessDays(date: Date, businessDays: number): Date {
+  let remaining = Math.max(0, Math.floor(businessDays || 0));
+  if (remaining === 0) return new Date(date.getTime());
+
+  const d = new Date(date.getTime());
+  // Work in UTC to avoid DST surprises.
+  while (remaining > 0) {
+    d.setUTCDate(d.getUTCDate() + 1);
+    const day = d.getUTCDay(); // 0=Sun, 6=Sat
+    if (day !== 0 && day !== 6) remaining -= 1;
+  }
+  return d;
 }
 
 export async function POST(request: Request) {
@@ -88,12 +106,23 @@ export async function POST(request: Request) {
     const now = Date.now();
     const items = usePerLead
       ? leadSequences.flatMap((lead, leadIdx) => {
-          let cumulativeDelay = 0;
           const steps = lead.steps.filter((s) => s.enabled).sort((a, b) => a.step - b.step);
           const totalSteps = steps.length;
-          return steps.map((step) => {
-            const stepDelayMinutes = toDelayMinutes(step);
-            cumulativeDelay += stepDelayMinutes;
+
+          const base = new Date(now + leadIdx * 10 * 60 * 1000).toISOString();
+          let prevScheduledAt = new Date(base);
+
+          return steps.map((step, stepIdx) => {
+            const delayBusinessDays = typeof step.delayDays === "number"
+              ? Math.max(0, Number(step.delayDays) || 0)
+              : typeof step.delayMinutes === "number"
+                ? Math.max(0, Math.round(Number(step.delayMinutes) / (24 * 60)) || 0)
+                : 0;
+
+            const delayAfterPreviousMinutes = delayBusinessDays * 24 * 60;
+            const scheduledAt = stepIdx === 0 ? prevScheduledAt : addBusinessDays(prevScheduledAt, delayBusinessDays);
+            prevScheduledAt = scheduledAt;
+
             const subject = sanitizeTemplateText(step.subject, lead);
             const body = sanitizeTemplateText(step.body, lead);
             return {
@@ -104,12 +133,13 @@ export async function POST(request: Request) {
               company: lead.company || "",
               sequenceStep: step.step,
               totalSteps,
-              delayAfterPreviousMinutes: stepDelayMinutes,
+              delayAfterPreviousMinutes,
+              delayAfterPreviousBusinessDays: delayBusinessDays,
               subject: subject || `Suivi ${step.step} - ${lead.company || lead.name || lead.email}`,
               body: body || "Bonjour,\n\nJe me permets de revenir vers vous.\n\nTony",
               status: "draft" as const,
               order: order++,
-              scheduledAt: new Date(now + (leadIdx * 10 + cumulativeDelay) * 60 * 1000).toISOString(),
+              scheduledAt: scheduledAt.toISOString(),
               lastEmailAt: undefined,
               sentAt: undefined,
               gmailMessageId: undefined,
@@ -119,11 +149,16 @@ export async function POST(request: Request) {
           });
         })
       : leads.flatMap((lead, leadIdx) => {
-          let cumulativeDelay = 0;
           const totalSteps = templates.length;
-          return templates.map((tpl) => {
-            const tplDelayMinutes = toDelayMinutes(tpl);
-            cumulativeDelay += tplDelayMinutes;
+          const base = new Date(now + leadIdx * 10 * 60 * 1000);
+          let prevScheduledAt = new Date(base);
+          return templates.map((tpl, stepIdx) => {
+            const delayBusinessDays = typeof tpl.delayDays === "number"
+              ? Math.max(0, Number(tpl.delayDays) || 0)
+              : typeof tpl.delayMinutes === "number"
+                ? Math.max(0, Math.round(Number(tpl.delayMinutes) / (24 * 60)) || 0)
+                : 0;
+            const delayAfterPreviousMinutes = delayBusinessDays * 24 * 60;
             const isStep1 = tpl.step === 1;
             const subject = isStep1 && lead.step1Subject
               ? lead.step1Subject
@@ -131,6 +166,10 @@ export async function POST(request: Request) {
             const body = isStep1 && lead.step1Body
               ? lead.step1Body
               : sanitizeTemplateText(tpl.body, lead);
+
+            const scheduledAt = stepIdx === 0 ? prevScheduledAt : addBusinessDays(prevScheduledAt, delayBusinessDays);
+            prevScheduledAt = scheduledAt;
+
             return {
               campaignId,
               dealId: lead.dealId ?? null,
@@ -139,12 +178,13 @@ export async function POST(request: Request) {
               company: lead.company || "",
               sequenceStep: tpl.step,
               totalSteps,
-              delayAfterPreviousMinutes: tplDelayMinutes,
+              delayAfterPreviousMinutes,
+              delayAfterPreviousBusinessDays: delayBusinessDays,
               subject: subject || `Suivi ${tpl.step} - ${lead.company || lead.name || lead.email}`,
               body: body || "Bonjour,\n\nJe me permets de revenir vers vous.\n\nTony",
               status: "draft" as const,
               order: order++,
-              scheduledAt: new Date(now + (leadIdx * 10 + cumulativeDelay) * 60 * 1000).toISOString(),
+              scheduledAt: scheduledAt.toISOString(),
               lastEmailAt: undefined,
               sentAt: undefined,
               gmailMessageId: undefined,

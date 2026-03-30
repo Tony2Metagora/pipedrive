@@ -36,7 +36,7 @@ export async function GET(request: Request) {
       }
       if (!personIds.size) continue;
 
-      const rank = (dealStatusRank[d.status || ""] || 0) * 1_000_000 + d.id;
+      const baseRank = (dealStatusRank[d.status || ""] || 0) * 1_000_000 + d.id;
       const dealRef: DealRef = {
         dealId: d.id,
         dealTitle: d.title || "",
@@ -45,14 +45,16 @@ export async function GET(request: Request) {
         pipelineId: d.pipeline_id ?? null,
         pipelineName: getPipelineName(d.pipeline_id),
         company: d.org_name || "",
-        rank,
+        rank: baseRank,
       };
 
       for (const personId of personIds) {
         if (!personById.has(personId)) continue;
         const existing = dealByPerson.get(personId);
-        if (!existing || dealRef.rank > existing.rank) {
-          dealByPerson.set(personId, dealRef);
+        const principalBoost = d.person_id === personId ? 1_000_000_000 : 0;
+        const rank = baseRank + principalBoost;
+        if (!existing || rank > existing.rank) {
+          dealByPerson.set(personId, { ...dealRef, rank });
         }
       }
     }

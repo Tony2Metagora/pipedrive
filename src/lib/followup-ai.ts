@@ -134,6 +134,10 @@ export async function generateFollowupDraft(input: {
 }): Promise<{ subject: string; body: string }> {
   const system = `Tu es l'assistant commercial de Tony chez Metagora.
 Tu rediges un follow-up email commercial en francais, court, naturel, actionnable.
+IMPORTANT:
+- N'utilise PAS le nom du lead (pas de "Bonjour Mathilde", etc.).
+- Utilise uniquement les placeholders exacts "{{prenom}}" (prénom) et "{{entreprise}}" (entreprise).
+- Ne remplace jamais ces placeholders par des valeurs réelles.
 Respecte ce format STRICT:
 SUBJECT: ...
 BODY:
@@ -165,8 +169,11 @@ Tony`;
   const subjectMatch = text.match(/SUBJECT:\s*(.+)/i);
   const bodyMatch = text.match(/BODY:\s*([\s\S]+)/i);
   return {
-    subject: subjectMatch?.[1]?.trim() || `Suivi - ${input.company || input.leadName || "votre projet"}`,
-    body: bodyMatch?.[1]?.trim() || text,
+    subject: subjectMatch?.[1]?.trim() || `Suivi - {{entreprise}}`,
+    body:
+      bodyMatch?.[1]?.trim() ||
+      text ||
+      "Bonjour {{prenom}},\n\nJe me permets de revenir vers vous.\n\nTony",
   };
 }
 
@@ -187,6 +194,10 @@ Contraintes:
 - Ton naturel, concis, commercial, actionnable.
 - Chaque email doit etre differencie (pas de repetition).
 - Delais progressifs entre emails (en jours).
+- IMPORTANT:
+  - N'utilise PAS le nom du lead (pas de "Bonjour Mathilde", etc.).
+  - Utilise uniquement les placeholders exacts "{{prenom}}" (prénom) et "{{entreprise}}" (entreprise).
+  - Ne remplace jamais ces placeholders par des valeurs reelles.
 - Renvoie uniquement du JSON strict sans markdown.
 Schema attendu:
 {"emails":[{"step":1,"delayDays":0,"subject":"...","body":"..."},{"step":2,"delayDays":1,"subject":"...","body":"..."}]}`;
@@ -242,8 +253,8 @@ Schema attendu:
       return {
         step,
         delayDays: Math.max(0, Number(found.delayDays) || step - 1),
-        subject: (found.subject || `Relance ${step} - ${input.leadName || input.leadEmail}`).trim(),
-        body: (found.body || "Bonjour,\n\nJe me permets de vous relancer.\n\nTony").trim(),
+        subject: (found.subject || `Relance ${step} - {{prenom}}`).trim(),
+        body: (found.body || "Bonjour {{prenom}},\n\nJe me permets de vous relancer.\n\nTony").trim(),
       };
     });
 
@@ -257,8 +268,8 @@ Schema attendu:
       return {
         step,
         delayDays: step - 1,
-        subject: `Relance ${step} - ${input.leadName || input.leadEmail}`,
-        body: "Bonjour,\n\nJe me permets de vous relancer.\n\nTony",
+        subject: `Relance ${step} - {{prenom}}`,
+        body: "Bonjour {{prenom}},\n\nJe me permets de vous relancer.\n\nTony",
       };
     });
   }

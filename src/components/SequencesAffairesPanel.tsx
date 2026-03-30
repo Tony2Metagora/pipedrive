@@ -35,6 +35,7 @@ interface FollowupItem {
   status: "draft" | "a_envoyer" | "en_cours" | "envoye" | "erreur" | "repondu";
   sequenceStep?: number;
   totalSteps?: number;
+  delayAfterPreviousBusinessDays?: number;
   delayAfterPreviousMinutes?: number;
   lastEmailAt?: string;
   lastError?: string;
@@ -56,6 +57,13 @@ interface LeadSequenceDraft {
   steps: LeadStepDraft[];
 }
 
+function defaultDelayDaysForStep(step: number): number {
+  // Business days (jours ouvrés) to wait between step N-1 and step N.
+  // Default pattern: step1=0, step2=1, step3=3, step4=5, step5=7
+  if (step <= 1) return 0;
+  return 2 * step - 3;
+}
+
 function buildDefaultStep(step: number): LeadStepDraft {
   if (step === 1) {
     return {
@@ -63,15 +71,15 @@ function buildDefaultStep(step: number): LeadStepDraft {
       enabled: true,
       delayDays: 0,
       subject: "Suivi de notre echange",
-      body: "Bonjour,\n\nJe me permets de revenir vers vous.\n\nTony",
+      body: "Bonjour {{prenom}},\n\nJe me permets de revenir vers vous.\n\nTony",
     };
   }
   return {
     step,
     enabled: true,
-    delayDays: 1,
+    delayDays: defaultDelayDaysForStep(step),
     subject: `Relance ${step}`,
-    body: "Bonjour,\n\nJe me permets de vous relancer.\n\nTony",
+    body: "Bonjour {{prenom}},\n\nJe me permets de vous relancer.\n\nTony",
   };
 }
 
@@ -276,7 +284,13 @@ export default function SequencesAffairesPanel() {
     for (let step = 1; step <= count; step += 1) {
       const found = steps.find((s) => s.step === step);
       if (found) {
-        next.push({ ...found, enabled: true });
+        next.push({
+          ...found,
+          enabled: true,
+          // We keep AI subject/body but enforce deterministic delayDays defaults
+          // (business days) so step3 is always 3 by default.
+          delayDays: defaultDelayDaysForStep(step),
+        });
       } else {
         next.push(buildDefaultStep(step));
       }
@@ -449,7 +463,9 @@ export default function SequencesAffairesPanel() {
         steps: leadItems.map((it) => ({
           step: it.sequenceStep ?? 1,
           enabled: true,
-          delayDays: Math.round((it.delayAfterPreviousMinutes ?? 0) / (24 * 60)),
+          delayDays: Math.round(
+            (it.delayAfterPreviousBusinessDays ?? Math.round((it.delayAfterPreviousMinutes ?? 0) / (24 * 60)))
+          ),
           subject: it.subject,
           body: it.body,
         })),
