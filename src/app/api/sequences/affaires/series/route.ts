@@ -26,7 +26,6 @@ interface LeadStepInput {
   delayMinutes?: number;
   delayDays?: number;
   subject: string;
-  cc?: string;
   body: string;
 }
 
@@ -38,9 +37,10 @@ interface LeadSequenceInput {
   steps: LeadStepInput[];
 }
 
-function sanitizeTemplateText(raw: string, lead: SeriesLeadInput): string {
+function sanitizeTemplateText(raw: string, lead: { name?: string; email?: string; company?: string }): string {
   return (raw || "")
     .replace(/\{\{\s*prenom\s*\}\}/gi, lead.name || "")
+    .replace(/\{\{\s*pr[ée]nom\s*\}\}/gi, lead.name || "")
     .replace(/\{\{\s*email\s*\}\}/gi, lead.email || "")
     .replace(/\{\{\s*entreprise\s*\}\}/gi, lead.company || "");
 }
@@ -106,7 +106,6 @@ export async function POST(request: Request) {
               totalSteps,
               delayAfterPreviousMinutes: stepDelayMinutes,
               subject: subject || `Suivi ${step.step} - ${lead.company || lead.name || lead.email}`,
-              cc: (step.cc || "").trim(),
               body: body || "Bonjour,\n\nJe me permets de revenir vers vous.\n\nTony",
               status: "draft" as const,
               order: order++,
@@ -142,7 +141,6 @@ export async function POST(request: Request) {
               totalSteps,
               delayAfterPreviousMinutes: tplDelayMinutes,
               subject: subject || `Suivi ${tpl.step} - ${lead.company || lead.name || lead.email}`,
-              cc: "",
               body: body || "Bonjour,\n\nJe me permets de revenir vers vous.\n\nTony",
               status: "draft" as const,
               order: order++,

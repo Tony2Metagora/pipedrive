@@ -108,11 +108,19 @@ export async function POST(request: Request) {
     }
 
     try {
+      const sanitizedSubject = (item.subject || "")
+        .replace(/\{\{\s*prenom\s*\}\}/gi, item.leadName || "")
+        .replace(/\{\{\s*email\s*\}\}/gi, item.leadEmail || "")
+        .replace(/\{\{\s*entreprise\s*\}\}/gi, item.company || "");
+      const sanitizedBody = (item.body || "")
+        .replace(/\{\{\s*prenom\s*\}\}/gi, item.leadName || "")
+        .replace(/\{\{\s*email\s*\}\}/gi, item.leadEmail || "")
+        .replace(/\{\{\s*entreprise\s*\}\}/gi, item.company || "");
+
       const sent = await sendGmailMessage(auth, {
         to: item.leadEmail,
-        cc: item.cc,
-        subject: item.subject,
-        text: item.body,
+        subject: sanitizedSubject,
+        text: sanitizedBody,
       });
 
       await updateFollowupItem(item.id, {

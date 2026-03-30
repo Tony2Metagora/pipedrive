@@ -243,7 +243,7 @@ Schema attendu:
         step,
         delayDays: Math.max(0, Number(found.delayDays) || step - 1),
         subject: (found.subject || `Relance ${step} - ${input.leadName || input.leadEmail}`).trim(),
-        body: (found.body || "Bonjour {{prenom}},\n\nJe me permets de vous relancer.\n\nTony").trim(),
+        body: (found.body || "Bonjour,\n\nJe me permets de vous relancer.\n\nTony").trim(),
       };
     });
 
@@ -258,7 +258,7 @@ Schema attendu:
         step,
         delayDays: step - 1,
         subject: `Relance ${step} - ${input.leadName || input.leadEmail}`,
-        body: "Bonjour {{prenom}},\n\nJe me permets de vous relancer.\n\nTony",
+        body: "Bonjour,\n\nJe me permets de vous relancer.\n\nTony",
       };
     });
   }

@@ -28,8 +28,9 @@ interface FollowupItem {
   id: number;
   leadEmail: string;
   leadName?: string;
+  company?: string;
+  dealId?: number | null;
   subject: string;
-  cc?: string;
   body: string;
   status: "draft" | "a_envoyer" | "en_cours" | "envoye" | "erreur" | "repondu";
   sequenceStep?: number;
@@ -44,7 +45,6 @@ interface LeadStepDraft {
   enabled: boolean;
   delayDays: number;
   subject: string;
-  cc: string;
   body: string;
 }
 
@@ -63,17 +63,15 @@ function buildDefaultStep(step: number): LeadStepDraft {
       enabled: true,
       delayDays: 0,
       subject: "Suivi de notre echange",
-      cc: "",
-      body: "Bonjour {{prenom}},\n\nJe me permets de revenir vers vous.\n\nTony",
+      body: "Bonjour,\n\nJe me permets de revenir vers vous.\n\nTony",
     };
   }
   return {
     step,
     enabled: true,
     delayDays: 1,
-    subject: `Relance ${step} - {{prenom}}`,
-    cc: "",
-    body: "Bonjour {{prenom}},\n\nJe me permets de vous relancer.\n\nTony",
+    subject: `Relance ${step}`,
+    body: "Bonjour,\n\nJe me permets de vous relancer.\n\nTony",
   };
 }
 
@@ -252,8 +250,9 @@ export default function SequencesAffairesPanel() {
     }
   }
 
-  async function deleteDraftCampaign(campaignId: number) {
+  async function deleteCampaign(campaignId: number) {
     clearFeedback();
+    if (!confirm("Supprimer cette campagne et tous ses mails ?")) return;
     try {
       setBusy(true);
       const res = await fetch(`/api/sequences/affaires/campaigns/${campaignId}`, { method: "DELETE" });
@@ -264,7 +263,7 @@ export default function SequencesAffairesPanel() {
         setSelectedCampaignId(null);
         setItems([]);
       }
-      setMsg("Campagne brouillon supprimee");
+      setMsg("Campagne supprimee");
     } catch (e) {
       setError(String(e));
     } finally {
@@ -277,7 +276,7 @@ export default function SequencesAffairesPanel() {
     for (let step = 1; step <= count; step += 1) {
       const found = steps.find((s) => s.step === step);
       if (found) {
-        next.push({ ...found, cc: found.cc || "", enabled: true });
+        next.push({ ...found, enabled: true });
       } else {
         next.push(buildDefaultStep(step));
       }
@@ -372,50 +371,6 @@ export default function SequencesAffairesPanel() {
     );
   }
 
-  function openDraftForEditing() {
-    if (!selectedCampaignId) return;
-    const draftItems = items.filter((it) => it.status === "draft");
-    if (draftItems.length === 0) {
-      setError("Aucun brouillon a modifier.");
-      return;
-    }
-    const byLead = new Map<string, LeadSequenceDraft>();
-    let maxSteps = 1;
-    for (const it of draftItems) {
-      const key = it.leadEmail.toLowerCase();
-      const step = it.sequenceStep || 1;
-      maxSteps = Math.max(maxSteps, step);
-      const stepDraft: LeadStepDraft = {
-        step,
-        enabled: true,
-        delayDays: Math.round((it.delayAfterPreviousMinutes || 0) / (24 * 60)),
-        subject: it.subject || "",
-        cc: it.cc || "",
-        body: it.body || "",
-      };
-      const existing = byLead.get(key);
-      if (existing) {
-        existing.steps.push(stepDraft);
-      } else {
-        byLead.set(key, {
-          email: it.leadEmail,
-          name: it.leadName || "",
-          company: "",
-          dealId: null,
-          steps: [stepDraft],
-        });
-      }
-    }
-    const sequences = Array.from(byLead.values()).map((lead) => ({
-      ...lead,
-      steps: adaptLeadSequenceSteps(lead.steps.sort((a, b) => a.step - b.step), maxSteps),
-    }));
-    setSeriesCount(maxSteps);
-    setLeadSequences(sequences);
-    setCurrentLeadIndex(0);
-    setShowStep2(true);
-  }
-
   async function sendSeriesNow() {
     if (!selectedCampaignId) {
       setError("Campagne introuvable.");
@@ -475,6 +430,37 @@ export default function SequencesAffairesPanel() {
     }
   }
 
+  function openModifierBrouillon() {
+    if (!items.length) return;
+    const byLead = new Map<string, FollowupItem[]>();
+    for (const item of items) {
+      const existing = byLead.get(item.leadEmail) || [];
+      existing.push(item);
+      byLead.set(item.leadEmail, existing);
+    }
+    const sequences: LeadSequenceDraft[] = Array.from(byLead.entries()).map(([email, leadItems]) => {
+      leadItems.sort((a, b) => (a.sequenceStep ?? 1) - (b.sequenceStep ?? 1));
+      const first = leadItems[0]!;
+      return {
+        email,
+        name: first.leadName || "",
+        company: first.company || "",
+        dealId: first.dealId ?? null,
+        steps: leadItems.map((it) => ({
+          step: it.sequenceStep ?? 1,
+          enabled: true,
+          delayDays: Math.round((it.delayAfterPreviousMinutes ?? 0) / (24 * 60)),
+          subject: it.subject,
+          body: it.body,
+        })),
+      };
+    });
+    setLeadSequences(sequences);
+    setCurrentLeadIndex(0);
+    setSeriesCount(sequences[0]?.steps.length || 3);
+    setShowStep2(true);
+  }
+
   const noCampaign = !selectedCampaignId;
   const canGenerate = !busy && !noCampaign && selectedLeadRows.length > 0;
 
@@ -530,15 +516,13 @@ export default function SequencesAffairesPanel() {
                   <p className="text-xs font-medium">{c.name}</p>
                   <p className="text-[10px] text-gray-500">{c.status}</p>
                 </button>
-                {c.status === "draft" && (
-                  <button
-                    onClick={() => deleteDraftCampaign(c.id)}
-                    disabled={busy}
-                    className="mt-1 text-[10px] text-red-600 hover:text-red-700 cursor-pointer flex items-center gap-1"
-                  >
-                    <Trash2 className="w-3 h-3" /> Supprimer brouillon
-                  </button>
-                )}
+                <button
+                  onClick={() => deleteCampaign(c.id)}
+                  disabled={busy}
+                  className="mt-1 text-[10px] text-red-600 hover:text-red-700 cursor-pointer flex items-center gap-1"
+                >
+                  <Trash2 className="w-3 h-3" /> Supprimer
+                </button>
               </div>
             ))}
             {campaigns.length === 0 && <p className="text-xs text-gray-400">Aucune campagne.</p>}
@@ -631,24 +615,15 @@ export default function SequencesAffairesPanel() {
 
       <div className="bg-white rounded-lg border border-gray-200 p-3">
         <h3 className="text-sm font-semibold text-gray-900 mb-2">Campagne / Statuts</h3>
-        <div className="mb-2 flex gap-2">
+        {items.length > 0 && (
           <button
-            onClick={openDraftForEditing}
-            disabled={busy || !selectedCampaignId}
-            className="px-2 py-1 text-xs rounded border border-violet-300 bg-violet-50 text-violet-700 cursor-pointer disabled:opacity-40"
+            onClick={openModifierBrouillon}
+            disabled={busy}
+            className="mb-2 px-3 py-1.5 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg cursor-pointer hover:bg-violet-100 disabled:opacity-40"
           >
             Modifier brouillon
           </button>
-          {selectedCampaignId && campaigns.find((c) => c.id === selectedCampaignId)?.status === "draft" && (
-            <button
-              onClick={() => deleteDraftCampaign(selectedCampaignId)}
-              disabled={busy}
-              className="px-2 py-1 text-xs rounded border border-red-300 bg-red-50 text-red-700 cursor-pointer disabled:opacity-40"
-            >
-              Supprimer brouillon
-            </button>
-          )}
-        </div>
+        )}
         <div className="max-h-[260px] overflow-y-auto space-y-2">
           {items.map((it) => (
             <div key={it.id} className="border border-gray-200 rounded-lg p-2 text-xs">
@@ -708,11 +683,11 @@ export default function SequencesAffairesPanel() {
                       <p className="text-sm font-semibold text-gray-900">
                         {lead.name || lead.email} <span className="text-xs text-gray-500">({lead.email})</span>
                       </p>
-                      <div className="space-y-3">
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                         {lead.steps.map((step) => (
-                          <div key={`${lead.email}-${step.step}`} className="rounded-lg border border-gray-200 p-3 space-y-2 bg-white">
-                            <div className="flex items-center justify-between text-xs text-gray-500">
-                              <span className="font-medium text-gray-700">Mail {step.step}</span>
+                          <div key={`${lead.email}-${step.step}`} className="rounded-lg border border-gray-200 p-2 space-y-2 bg-gray-50">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-medium">Mail {step.step}</span>
                               <div className="flex items-center gap-1">
                                 <span>Delai (jours):</span>
                                 <input
@@ -724,32 +699,23 @@ export default function SequencesAffairesPanel() {
                                 />
                               </div>
                             </div>
-                            <div className="grid grid-cols-[70px_1fr] gap-2 items-center text-xs">
-                              <span className="text-gray-500">To</span>
-                              <input
-                                value={lead.email}
-                                readOnly
-                                className="w-full px-2 py-1 border border-gray-200 rounded bg-gray-50 text-gray-600"
-                              />
-                              <span className="text-gray-500">Cc</span>
-                              <input
-                                value={step.cc}
-                                onChange={(e) => updateLeadStep(lead.email, step.step, { cc: e.target.value })}
-                                className="w-full px-2 py-1 border border-gray-300 rounded bg-white"
-                                placeholder="contact@entreprise.com"
-                              />
-                              <span className="text-gray-500">Objet</span>
+                            <div className="flex items-center gap-2 text-xs">
+                              <span className="text-gray-500 w-10 shrink-0">To</span>
+                              <input value={lead.email} readOnly className="flex-1 px-2 py-1 border border-gray-200 rounded bg-gray-100 text-gray-500 text-xs" />
+                            </div>
+                            <div className="flex items-center gap-2 text-xs">
+                              <span className="text-gray-500 w-10 shrink-0">Objet</span>
                               <input
                                 value={step.subject}
                                 onChange={(e) => updateLeadStep(lead.email, step.step, { subject: e.target.value })}
-                                className="w-full px-2 py-1 border border-gray-300 rounded bg-white"
+                                className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded bg-white"
                               />
                             </div>
                             <textarea
                               value={step.body}
                               onChange={(e) => updateLeadStep(lead.email, step.step, { body: e.target.value })}
-                              rows={10}
-                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded bg-white"
+                              rows={8}
+                              className="w-full px-2 py-1 text-xs border border-gray-300 rounded bg-white resize-y"
                             />
                           </div>
                         ))}

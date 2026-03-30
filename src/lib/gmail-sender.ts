@@ -20,13 +20,11 @@ function encodeBase64Url(input: string): string {
 
 export function buildRawMessage({
   to,
-  cc,
   subject,
   text,
   html,
 }: {
   to: string;
-  cc?: string;
   subject: string;
   text?: string;
   html?: string;
@@ -34,16 +32,12 @@ export function buildRawMessage({
   const safeSubject = (subject || "").replace(/\r?\n/g, " ").trim();
   const plainText = (text || "").replace(/\r/g, "");
   const htmlBody = html?.replace(/\r/g, "");
-  const baseHeaders = [
-    "MIME-Version: 1.0",
-    `To: ${to}`,
-    ...(cc ? [`Cc: ${cc}`] : []),
-    `Subject: ${safeSubject}`,
-  ];
 
   if (!htmlBody) {
     return [
-      ...baseHeaders,
+      "MIME-Version: 1.0",
+      `To: ${to}`,
+      `Subject: ${safeSubject}`,
       'Content-Type: text/plain; charset="UTF-8"',
       "",
       plainText,
@@ -52,7 +46,9 @@ export function buildRawMessage({
 
   const boundary = `boundary_${Date.now()}`;
   return [
-    ...baseHeaders,
+    "MIME-Version: 1.0",
+    `To: ${to}`,
+    `Subject: ${safeSubject}`,
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
     "",
     `--${boundary}`,
@@ -99,7 +95,7 @@ export async function ensureValidGoogleToken(token: GmailAuthToken): Promise<Gma
 
 export async function sendGmailMessage(
   authToken: GmailAuthToken,
-  payload: { to: string; cc?: string; subject: string; text?: string; html?: string }
+  payload: { to: string; subject: string; text?: string; html?: string }
 ): Promise<{ id: string; threadId: string; token: GmailAuthToken }> {
   const token = await ensureValidGoogleToken(authToken);
   if (!token?.accessToken) throw new Error("Gmail token indisponible");

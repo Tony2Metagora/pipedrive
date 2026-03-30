@@ -19,16 +19,26 @@ export async function GET(request: Request) {
 
     for (const campaign of running) {
       const url = new URL("/api/sequences/affaires/send-next", request.url);
-      const res = await fetch(url.toString(), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-cron-secret": cronSecret,
-        },
-        body: JSON.stringify({ campaignId: campaign.id }),
-      });
-      const payload = await res.json().catch(() => ({}));
-      results.push({ campaignId: campaign.id, ok: res.ok, result: payload });
+      let keepSending = true;
+      let roundsSent = 0;
+      const maxRounds = 20;
+      while (keepSending && roundsSent < maxRounds) {
+        const res = await fetch(url.toString(), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-cron-secret": cronSecret,
+          },
+          body: JSON.stringify({ campaignId: campaign.id }),
+        });
+        const payload = await res.json().catch(() => ({})) as { data?: { sent?: boolean } };
+        results.push({ campaignId: campaign.id, ok: res.ok, result: payload });
+        if (!res.ok || !payload.data?.sent) {
+          keepSending = false;
+        } else {
+          roundsSent += 1;
+        }
+      }
     }
 
     return NextResponse.json({ data: { processed: results.length, results } });

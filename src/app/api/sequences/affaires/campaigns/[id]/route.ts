@@ -41,9 +41,6 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ id: str
     }
     const campaign = await getFollowupCampaign(campaignId);
     if (!campaign) return NextResponse.json({ error: "Campagne introuvable" }, { status: 404 });
-    if (campaign.status !== "draft") {
-      return NextResponse.json({ error: "Suppression autorisee uniquement pour les brouillons" }, { status: 400 });
-    }
     await deleteFollowupItemsForCampaign(campaignId);
     await deleteFollowupCampaign(campaignId);
     return NextResponse.json({ data: { deleted: true } });
