@@ -110,9 +110,15 @@ export async function sendGmailMessage(
     body: JSON.stringify({ raw: encodeBase64Url(raw) }),
   });
 
-  const body = (await sendRes.json().catch(() => ({}))) as { id?: string; threadId?: string };
+  const body = (await sendRes.json().catch(() => ({}))) as {
+    id?: string;
+    threadId?: string;
+    error?: { message?: string; status?: string; code?: number; errors?: Array<{ reason?: string }> };
+  };
   if (!sendRes.ok) {
-    throw new Error(`Gmail send failed: ${sendRes.status}`);
+    const reason = body.error?.errors?.[0]?.reason || "";
+    const detail = body.error?.message || "";
+    throw new Error(`Gmail send failed: ${sendRes.status} ${reason} ${detail}`.trim());
   }
 
   return {
