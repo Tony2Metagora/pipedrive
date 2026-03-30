@@ -222,6 +222,21 @@ export async function createOrganization(name: string): Promise<Organization> {
   return created;
 }
 
+export async function updateOrganization(
+  id: number,
+  data: Partial<Organization>
+): Promise<Organization | null> {
+  let result: Organization | null = null;
+  await mutateKV<Organization>("orgs", (orgs) => {
+    const idx = orgs.findIndex((o) => o.id === id);
+    if (idx === -1) return orgs;
+    orgs[idx] = { ...orgs[idx], ...data, id };
+    result = orgs[idx];
+    return orgs;
+  });
+  return result;
+}
+
 // ─── Activities ──────────────────────────────────────────
 
 export async function getActivities(): Promise<Activity[]> {
