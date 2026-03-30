@@ -457,7 +457,18 @@ export default function SequencesAffairesPanel() {
       setShowStep2(false);
       await loadCampaigns();
       await loadCampaignDetail(selectedCampaignId);
-      setMsg("Serie validee et campagne lancee. Envoi differe automatique actif.");
+
+      // Send the first ready mail immediately (don't wait for cron)
+      try {
+        await fetch("/api/sequences/affaires/send-next", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ campaignId: selectedCampaignId }),
+        });
+        await loadCampaignDetail(selectedCampaignId);
+      } catch { /* best effort */ }
+
+      setMsg("Serie validee et campagne lancee. Le 1er mail est en cours d'envoi.");
     } catch (e) {
       setError(String(e));
     } finally {
