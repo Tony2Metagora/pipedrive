@@ -165,6 +165,14 @@ function trimToMaxWords(text: string, maxWords: number): string {
   return words.slice(0, maxWords).join(" ");
 }
 
+function normalizeBrandKey(value: string): string {
+  return (value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
 function ScoreNumber({ value, onChange }: { value: number; onChange?: (v: number) => void }) {
   const colors = [
     "bg-gray-100 text-gray-400",   // 0
@@ -788,7 +796,7 @@ export default function ProspectsPage() {
   };
 
   const openScoringCard = (company: string) => {
-    const existing = scoringCards.find((c) => c.company.toLowerCase() === company.toLowerCase());
+    const existing = scoringCards.find((c) => normalizeBrandKey(c.company) === normalizeBrandKey(company));
     if (existing) {
       setEditingScoringCard(existing);
       setScoringCardForm({
@@ -828,7 +836,7 @@ export default function ProspectsPage() {
       // Auto-pick good/bad leads from prospects with ai_score
       const companyProspects = prospects.filter((p) => {
         const pList = lists.find((l) => l.id === p.list_id);
-        return pList && pList.company.toLowerCase() === company.toLowerCase();
+        return pList && normalizeBrandKey(pList.company) === normalizeBrandKey(company);
       });
       const scored = companyProspects.filter((p) => p.ai_score && parseInt(p.ai_score) > 0);
       const good = scored
@@ -2233,7 +2241,7 @@ export default function ProspectsPage() {
                   <p className="text-xs text-gray-400 text-center py-4">Aucune entreprise trouvée. Importez d&apos;abord un fichier CSV.</p>
                 ) : (
                   knownCompanies.map((company) => {
-                    const card = scoringCards.find((c) => c.company.toLowerCase() === company.toLowerCase());
+                    const card = scoringCards.find((c) => normalizeBrandKey(c.company) === normalizeBrandKey(company));
                     return (
                       <button
                         key={company}
@@ -2517,7 +2525,7 @@ export default function ProspectsPage() {
                     {(() => {
                       const companyProspects = prospects.filter((p) => {
                         const pList = lists.find((l) => l.id === p.list_id);
-                        return pList && pList.company.toLowerCase() === editingScoringCard.company.toLowerCase();
+                        return pList && normalizeBrandKey(pList.company) === normalizeBrandKey(editingScoringCard.company);
                       });
                       const usedIds = new Set([...scoringGoodLeads.map((l) => l.prospect_id), ...scoringBadLeads.map((l) => l.prospect_id)]);
                       const available = companyProspects.filter((p) => !usedIds.has(p.id));

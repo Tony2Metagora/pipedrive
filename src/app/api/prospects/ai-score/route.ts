@@ -41,6 +41,14 @@ METAGORA : startup IA spécialisée dans la formation retail & luxe par simulati
 - Décideurs ciblés : DRH, Directeur Formation, L&D Manager, Directeur Retail, DG
 - Taille idéale : ETI et GE (>200 employés), mais PME retail/luxe aussi pertinentes`;
 
+function normalizeBrandKey(value: string): string {
+  return (value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
 /** Build dynamic system prompt from scoring card or fallback to hardcoded Metagora */
 function buildBasePrompt(card: ScoringCard | null, companyName: string): string {
   let companyContext: string;
@@ -159,18 +167,18 @@ export async function POST(request: Request) {
       };
 
       // Load scoring card + memory for RAG
-      const brandKey = (brand || "metagora").toLowerCase();
+      const brandKey = normalizeBrandKey(brand || "metagora");
       const companyName = brand || "Metagora";
       let scoringCard: ScoringCard | null = null;
       try {
         const cards = await readBlob<ScoringCard>("scoring-cards.json");
-        scoringCard = cards.find((c) => c.company.toLowerCase() === brandKey) || null;
+        scoringCard = cards.find((c) => normalizeBrandKey(c.company) === brandKey) || null;
         if (scoringCard) console.log(`[AI Score] Using scoring card for "${companyName}" (${scoringCard.good_leads.length} good, ${scoringCard.bad_leads.length} bad leads)`);
       } catch { /* no cards yet */ }
       let corrections: ScoringCorrection[] = [];
       try {
         const all = await readBlob<ScoringCorrection>("scoring-memory.json");
-        corrections = all.filter((c) => c.brand === brandKey);
+        corrections = all.filter((c) => normalizeBrandKey(c.brand) === brandKey);
         console.log(`[AI Score] Loaded ${corrections.length} scoring corrections for "${brandKey}"`);
       } catch { /* no corrections yet */ }
       const systemPrompt = buildSystemPrompt(scoringCard, companyName, corrections);

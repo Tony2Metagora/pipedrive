@@ -27,13 +27,22 @@ export interface ScoringCorrection {
 
 const STORE_KEY = "scoring-memory.json";
 
+function normalizeBrandKey(value: string): string {
+  return (value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
 export async function GET(request: NextRequest) {
   const guard = await requireAuth("prospects", "GET");
   if (guard.denied) return guard.denied;
 
   const brand = request.nextUrl.searchParams.get("brand") || "";
   const all = await readBlob<ScoringCorrection>(STORE_KEY);
-  const filtered = brand ? all.filter((c) => c.brand.toLowerCase() === brand.toLowerCase()) : all;
+  const brandKey = normalizeBrandKey(brand);
+  const filtered = brand ? all.filter((c) => normalizeBrandKey(c.brand) === brandKey) : all;
 
   return NextResponse.json({ corrections: filtered, count: filtered.length });
 }
@@ -59,7 +68,7 @@ export async function POST(request: Request) {
 
   const correction: ScoringCorrection = {
     id: `sc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    brand: brand.toLowerCase(),
+    brand: normalizeBrandKey(brand),
     prospect_id,
     poste: poste || "",
     entreprise: entreprise || "",

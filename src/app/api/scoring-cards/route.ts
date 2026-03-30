@@ -40,6 +40,14 @@ export interface ScoringCard {
 
 const STORE_KEY = "scoring-cards.json";
 
+function normalizeBrandKey(value: string): string {
+  return (value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
 export async function GET(request: NextRequest) {
   const guard = await requireAuth("prospects", "GET");
   if (guard.denied) return guard.denied;
@@ -48,7 +56,8 @@ export async function GET(request: NextRequest) {
   const cards = await readBlob<ScoringCard>(STORE_KEY);
 
   if (company) {
-    const card = cards.find((c) => c.company.toLowerCase() === company.toLowerCase());
+    const companyKey = normalizeBrandKey(company);
+    const card = cards.find((c) => normalizeBrandKey(c.company) === companyKey);
     return NextResponse.json({ card: card || null });
   }
 
@@ -76,14 +85,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "company requis" }, { status: 400 });
   }
 
-  const companyKey = company.trim().toLowerCase();
+  const companyKey = normalizeBrandKey(company);
   const now = new Date().toISOString();
 
   let result: ScoringCard | null = null;
 
   await withLock(STORE_KEY, async () => {
     const cards = await readBlob<ScoringCard>(STORE_KEY);
-    const idx = cards.findIndex((c) => c.company.toLowerCase() === companyKey);
+    const idx = cards.findIndex((c) => normalizeBrandKey(c.company) === companyKey);
 
     const goodCount = (good_leads || []).length;
     const badCount = (bad_leads || []).length;
