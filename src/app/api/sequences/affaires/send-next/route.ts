@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
 import { requireAuth } from "@/lib/api-guard";
-import { sendGmailMessage } from "@/lib/gmail-sender";
+import { sendGmailMessage, type GmailAuthToken } from "@/lib/gmail-sender";
 import {
   getCampaignStats,
   getFollowupCampaign,
@@ -86,8 +87,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ data: { sent: false, reason: "Aucun item pret" } });
     }
 
-    const auth = campaign.senderAuth;
-    if (!auth?.accessToken) {
+    // Prefer fresh session token (browser call) over stored campaign token (cron)
+    let authToken: GmailAuthToken | undefined;
+    if (!cronCall) {
+      const session = await auth();
+      const record = session as unknown as Record<string, unknown>;
+      const at = record.accessToken as string | undefined;
+      if (at) {
+        authToken = {
+          accessToken: at,
+          refreshToken: record.refreshToken as string | undefined,
+          expiresAt: record.expiresAt as number | undefined,
+        };
+      }
+    }
+    if (!authToken) authToken = campaign.senderAuth as GmailAuthToken | undefined;
+    if (!authToken?.accessToken) {
       await updateFollowupItem(item.id, { status: "erreur", lastError: "Token sender manquant" });
       return NextResponse.json({ error: "Token sender manquant" }, { status: 400 });
     }
@@ -101,7 +116,7 @@ export async function POST(request: Request) {
       .sort((a, b) => new Date(b.sentAt || 0).getTime() - new Date(a.sentAt || 0).getTime())[0];
     if (prevSent?.gmailThreadId) {
       const replied = await hasLeadRepliedSince(
-        auth.accessToken,
+        authToken.accessToken,
         prevSent.gmailThreadId,
         item.leadEmail,
         prevSent.sentAt
@@ -131,7 +146,7 @@ export async function POST(request: Request) {
         .replace(/\{+\s*email\s*\}+/gi, item.leadEmail || "")
         .replace(/\{+\s*entreprise\s*\}+/gi, item.company || "");
 
-      const sent = await sendGmailMessage(auth, {
+      const sent = await sendGmailMessage(authToken, {
         to: item.leadEmail,
         subject: sanitizedSubject,
         text: sanitizedBody,

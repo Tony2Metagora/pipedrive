@@ -481,6 +481,13 @@ export default function SequencesAffairesPanel() {
     clearFeedback();
     try {
       setBusy(true);
+      // Reset error items to a_envoyer so they can be retried
+      await fetch("/api/sequences/affaires/retry-errors", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ campaignId: selectedCampaignId }),
+      }).catch(() => {});
+
       const res = await fetch("/api/sequences/affaires/send-next", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
