@@ -93,7 +93,14 @@ export default function DealPage() {
     setLoading(true);
     try {
       const res = await fetch(`/api/deals/${dealId}`);
-      const json = await res.json();
+      const json = (await res.json()) as {
+        data: {
+          deal: Deal;
+          person: Person | null;
+          activities?: Activity[];
+          notes?: Note[];
+        };
+      };
       const { deal: d, person: p, activities: a, notes: n } = json.data;
       setDeal(d);
       setPerson(p);
