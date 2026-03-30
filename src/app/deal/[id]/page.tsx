@@ -72,6 +72,15 @@ export default function DealPage() {
   const [editValue, setEditValue] = useState(0);
   const [savingDeal, setSavingDeal] = useState(false);
 
+  // États édition contact (nom/prénom -> Person.name, poste -> Person.job_title, email/téléphone -> Person.email/phone, entreprise -> Deal.org_name)
+  const [editingContact, setEditingContact] = useState(false);
+  const [editContactName, setEditContactName] = useState("");
+  const [editContactJobTitle, setEditContactJobTitle] = useState("");
+  const [editContactEmail, setEditContactEmail] = useState("");
+  const [editContactPhone, setEditContactPhone] = useState("");
+  const [editOrgName, setEditOrgName] = useState("");
+  const [savingContact, setSavingContact] = useState(false);
+
   // Notes
   const [newNote, setNewNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
@@ -94,6 +103,16 @@ export default function DealPage() {
       setEditPipeline(d.pipeline_id);
       setEditStage(d.stage_id);
       setEditValue(d.value || 0);
+
+      if (p) {
+        setEditContactName(p.name || "");
+        setEditContactJobTitle(p.job_title || "");
+        const email = p.email?.find((e) => e.primary)?.value || p.email?.[0]?.value || "";
+        const phone = p.phone?.find((ph) => ph.primary)?.value || p.phone?.[0]?.value || "";
+        setEditContactEmail(email);
+        setEditContactPhone(phone);
+      }
+      setEditOrgName(d.org_name || "");
     } catch (err) {
       console.error("Erreur chargement deal:", err);
     } finally {
@@ -123,6 +142,42 @@ export default function DealPage() {
       console.error("Erreur sauvegarde deal:", err);
     } finally {
       setSavingDeal(false);
+    }
+  };
+
+  const saveContact = async () => {
+    if (!person) return;
+    setSavingContact(true);
+    try {
+      const personId = person.id;
+      const payloadPerson: Record<string, unknown> = {
+        name: editContactName.trim(),
+      };
+      if (editContactJobTitle.trim()) payloadPerson.job_title = editContactJobTitle.trim();
+      if (editContactEmail.trim()) payloadPerson.email = editContactEmail.trim();
+      if (editContactPhone.trim()) payloadPerson.phone = editContactPhone.trim();
+
+      await fetch(`/api/persons/${personId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payloadPerson),
+      });
+
+      // Entreprise est portée par le deal (org_name)
+      await fetch(`/api/deals/${dealId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          org_name: editOrgName.trim(),
+        }),
+      });
+
+      setEditingContact(false);
+      fetchDeal();
+    } catch (err) {
+      console.error("Erreur sauvegarde contact:", err);
+    } finally {
+      setSavingContact(false);
     }
   };
 
@@ -291,32 +346,111 @@ export default function DealPage() {
               <h2 className="text-sm font-semibold text-gray-700 mb-4">
                 Contact principal
               </h2>
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm">
-                  <User className="w-4 h-4 text-gray-400" />
-                  <span className="font-medium">{person.name}</span>
+
+              {!editingContact ? (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-sm">
+                    <User className="w-4 h-4 text-gray-400" />
+                    <span className="font-medium">{person.name}</span>
+                  </div>
+                  {person.job_title && (
+                    <div className="flex items-center gap-2 text-sm text-gray-500">
+                      <Briefcase className="w-4 h-4 text-gray-400" />
+                      {person.job_title}
+                    </div>
+                  )}
+                  {primaryEmail && (
+                    <div className="flex items-center gap-2 text-sm text-gray-500">
+                      <Mail className="w-4 h-4 text-gray-400" />
+                      <a href={`mailto:${primaryEmail}`} className="hover:text-indigo-600">
+                        {primaryEmail}
+                      </a>
+                    </div>
+                  )}
+                  {primaryPhone && (
+                    <div className="flex items-center gap-2 text-sm text-gray-500">
+                      <Phone className="w-4 h-4 text-gray-400" />
+                      {primaryPhone}
+                    </div>
+                  )}
+                  {deal.org_name && (
+                    <div className="flex items-center gap-2 text-sm text-gray-500">
+                      <Building2 className="w-4 h-4 text-gray-400" />
+                      {deal.org_name}
+                    </div>
+                  )}
+
+                  <div className="pt-3">
+                    <button
+                      onClick={() => setEditingContact(true)}
+                      disabled={savingContact}
+                      className="w-full px-3 py-2 text-sm text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 disabled:opacity-40 cursor-pointer"
+                    >
+                      Modifier
+                    </button>
+                  </div>
                 </div>
-                {person.job_title && (
-                  <div className="flex items-center gap-2 text-sm text-gray-500">
-                    <Briefcase className="w-4 h-4 text-gray-400" />
-                    {person.job_title}
+              ) : (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Nom complet</label>
+                    <input
+                      value={editContactName}
+                      onChange={(e) => setEditContactName(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-500"
+                    />
                   </div>
-                )}
-                {primaryEmail && (
-                  <div className="flex items-center gap-2 text-sm text-gray-500">
-                    <Mail className="w-4 h-4 text-gray-400" />
-                    <a href={`mailto:${primaryEmail}`} className="hover:text-indigo-600">
-                      {primaryEmail}
-                    </a>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Poste</label>
+                    <input
+                      value={editContactJobTitle}
+                      onChange={(e) => setEditContactJobTitle(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-500"
+                    />
                   </div>
-                )}
-                {primaryPhone && (
-                  <div className="flex items-center gap-2 text-sm text-gray-500">
-                    <Phone className="w-4 h-4 text-gray-400" />
-                    {primaryPhone}
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Entreprise</label>
+                    <input
+                      value={editOrgName}
+                      onChange={(e) => setEditOrgName(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-500"
+                    />
                   </div>
-                )}
-              </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Email</label>
+                    <input
+                      value={editContactEmail}
+                      onChange={(e) => setEditContactEmail(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Téléphone</label>
+                    <input
+                      value={editContactPhone}
+                      onChange={(e) => setEditContactPhone(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={() => setEditingContact(false)}
+                      disabled={savingContact}
+                      className="flex-1 px-3 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40 cursor-pointer"
+                    >
+                      Annuler
+                    </button>
+                    <button
+                      onClick={saveContact}
+                      disabled={savingContact || !editContactName.trim()}
+                      className="flex-1 px-3 py-2 text-sm text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-40 cursor-pointer"
+                    >
+                      {savingContact ? "Enregistrement..." : "Enregistrer"}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
