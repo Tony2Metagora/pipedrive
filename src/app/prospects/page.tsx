@@ -149,6 +149,22 @@ const PROSPECT_COLUMNS = [
   { key: "ai_comment", label: "Analyse IA", defaultVisible: true, defaultWidth: 180, minWidth: 80 },
 ] as { key: string; label: string; defaultVisible: boolean; defaultWidth: number; minWidth: number }[];
 
+const SCORING_TEXT_MAX_WORDS = 200;
+
+function splitWords(text: string): string[] {
+  return (text || "").trim().split(/\s+/).filter(Boolean);
+}
+
+function countWords(text: string): number {
+  return splitWords(text).length;
+}
+
+function trimToMaxWords(text: string, maxWords: number): string {
+  const words = splitWords(text);
+  if (words.length <= maxWords) return text;
+  return words.slice(0, maxWords).join(" ");
+}
+
 function ScoreNumber({ value, onChange }: { value: number; onChange?: (v: number) => void }) {
   const colors = [
     "bg-gray-100 text-gray-400",   // 0
@@ -256,6 +272,8 @@ export default function ProspectsPage() {
   const [scoringBadLeads, setScoringBadLeads] = useState<ScoringLeadExample[]>([]);
   const [scoringCardSaving, setScoringCardSaving] = useState(false);
   const [scoringLeadPickerType, setScoringLeadPickerType] = useState<"good" | "bad" | null>(null);
+  const [scoringLeadSearch, setScoringLeadSearch] = useState("");
+  const [scoringLeadSelectedIds, setScoringLeadSelectedIds] = useState<Set<string>>(new Set());
   const [visibleCols, setVisibleCols] = useState<Set<string>>(
     new Set(PROSPECT_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key))
   );
@@ -749,8 +767,8 @@ export default function ProspectsPage() {
     if (existing) {
       setEditingScoringCard(existing);
       setScoringCardForm({
-        product: existing.product,
-        value_proposition: existing.value_proposition,
+        product: trimToMaxWords(existing.product || "", SCORING_TEXT_MAX_WORDS),
+        value_proposition: trimToMaxWords(existing.value_proposition || "", SCORING_TEXT_MAX_WORDS),
         ideal_client_types: existing.ideal_client_types.length >= 3
           ? existing.ideal_client_types.slice(0, 3)
           : [...existing.ideal_client_types, ...Array(3 - existing.ideal_client_types.length).fill("")],
@@ -815,6 +833,9 @@ export default function ProspectsPage() {
       setScoringGoodLeads(good);
       setScoringBadLeads(bad);
     }
+    setScoringLeadPickerType(null);
+    setScoringLeadSearch("");
+    setScoringLeadSelectedIds(new Set());
   };
 
   const saveScoringCard = async () => {
@@ -826,8 +847,8 @@ export default function ProspectsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           company: editingScoringCard.company,
-          product: scoringCardForm.product,
-          value_proposition: scoringCardForm.value_proposition,
+          product: trimToMaxWords(scoringCardForm.product, SCORING_TEXT_MAX_WORDS),
+          value_proposition: trimToMaxWords(scoringCardForm.value_proposition, SCORING_TEXT_MAX_WORDS),
           ideal_client_types: scoringCardForm.ideal_client_types.filter(Boolean),
           company_size_ideal: scoringCardForm.company_size_ideal,
           company_size_min: scoringCardForm.company_size_min,
@@ -854,15 +875,17 @@ export default function ProspectsPage() {
     setScoringCardSaving(false);
   };
 
-  const addScoringLead = (prospect: Prospect, type: "good" | "bad") => {
-    const entry: ScoringLeadExample = {
+  const buildScoringLeadEntry = (prospect: Prospect, type: "good" | "bad"): ScoringLeadExample => ({
       prospect_id: prospect.id,
       name: `${prospect.prenom} ${prospect.nom}`.trim(),
       poste: prospect.poste || "",
       entreprise: prospect.entreprise || "",
       rating: type === "good" ? 5 : 1,
       reason: "",
-    };
+    });
+
+  const addScoringLead = (prospect: Prospect, type: "good" | "bad") => {
+    const entry = buildScoringLeadEntry(prospect, type);
     if (type === "good") {
       if (scoringGoodLeads.length >= 10) return;
       if (scoringGoodLeads.some((l) => l.prospect_id === prospect.id)) return;
@@ -872,7 +895,49 @@ export default function ProspectsPage() {
       if (scoringBadLeads.some((l) => l.prospect_id === prospect.id)) return;
       setScoringBadLeads((prev) => [...prev, entry]);
     }
-    setScoringLeadPickerType(null);
+    setScoringLeadSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(prospect.id);
+      return next;
+    });
+  };
+
+  const addSelectedScoringLeads = (type: "good" | "bad", available: Prospect[]) => {
+    const selectedProspects = available.filter((p) => scoringLeadSelectedIds.has(p.id));
+    if (selectedProspects.length === 0) return;
+    if (type === "good") {
+      const remaining = Math.max(0, 10 - scoringGoodLeads.length);
+      if (remaining <= 0) return;
+      const toAdd = selectedProspects
+        .filter((p) => !scoringGoodLeads.some((l) => l.prospect_id === p.id))
+        .slice(0, remaining)
+        .map((p) => buildScoringLeadEntry(p, type));
+      if (toAdd.length > 0) setScoringGoodLeads((prev) => [...prev, ...toAdd]);
+    } else {
+      const remaining = Math.max(0, 10 - scoringBadLeads.length);
+      if (remaining <= 0) return;
+      const toAdd = selectedProspects
+        .filter((p) => !scoringBadLeads.some((l) => l.prospect_id === p.id))
+        .slice(0, remaining)
+        .map((p) => buildScoringLeadEntry(p, type));
+      if (toAdd.length > 0) setScoringBadLeads((prev) => [...prev, ...toAdd]);
+    }
+    setScoringLeadSelectedIds(new Set());
+  };
+
+  const toggleScoringLeadPicker = (type: "good" | "bad") => {
+    setScoringLeadPickerType((prev) => (prev === type ? null : type));
+    setScoringLeadSearch("");
+    setScoringLeadSelectedIds(new Set());
+  };
+
+  const toggleScoringLeadSelect = (prospectId: string) => {
+    setScoringLeadSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(prospectId)) next.delete(prospectId);
+      else next.add(prospectId);
+      return next;
+    });
   };
 
   const removeScoringLead = (prospectId: string, type: "good" | "bad") => {
@@ -1042,6 +1107,8 @@ export default function ProspectsPage() {
 
   const allFilteredSelected = filtered.length > 0 && filtered.every((p) => selected.has(p.id));
   const someFilteredSelected = filtered.some((p) => selected.has(p.id));
+  const productWordCount = countWords(scoringCardForm.product);
+  const valuePropWordCount = countWords(scoringCardForm.value_proposition);
 
   const toggleSelectAll = () => {
     if (allFilteredSelected) {
@@ -2162,13 +2229,21 @@ export default function ProspectsPage() {
               {/* Product */}
               <div>
                 <label className="block text-xs font-semibold text-gray-700 mb-1">Quel produit vendez-vous ?</label>
-                <input
-                  type="text"
+                <textarea
                   value={scoringCardForm.product}
-                  onChange={(e) => setScoringCardForm((f) => ({ ...f, product: e.target.value }))}
+                  onChange={(e) =>
+                    setScoringCardForm((f) => ({
+                      ...f,
+                      product: trimToMaxWords(e.target.value, SCORING_TEXT_MAX_WORDS),
+                    }))
+                  }
+                  rows={5}
                   placeholder="Ex: Simsell — simulateur de vente IA"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 focus:border-violet-400 outline-none"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 focus:border-violet-400 outline-none resize-y"
                 />
+                <p className={cn("mt-1 text-[10px]", productWordCount >= SCORING_TEXT_MAX_WORDS ? "text-red-600" : "text-gray-500")}>
+                  {productWordCount}/{SCORING_TEXT_MAX_WORDS} mots ({Math.max(0, SCORING_TEXT_MAX_WORDS - productWordCount)} restants)
+                </p>
               </div>
 
               {/* Value proposition */}
@@ -2176,11 +2251,19 @@ export default function ProspectsPage() {
                 <label className="block text-xs font-semibold text-gray-700 mb-1">Quelle est la valeur ajoutée pour le client ?</label>
                 <textarea
                   value={scoringCardForm.value_proposition}
-                  onChange={(e) => setScoringCardForm((f) => ({ ...f, value_proposition: e.target.value }))}
-                  rows={2}
+                  onChange={(e) =>
+                    setScoringCardForm((f) => ({
+                      ...f,
+                      value_proposition: trimToMaxWords(e.target.value, SCORING_TEXT_MAX_WORDS),
+                    }))
+                  }
+                  rows={7}
                   placeholder="Ex: +30% de performance commerciale, déploiement en 1 jour..."
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 focus:border-violet-400 outline-none resize-none"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 focus:border-violet-400 outline-none resize-y"
                 />
+                <p className={cn("mt-1 text-[10px]", valuePropWordCount >= SCORING_TEXT_MAX_WORDS ? "text-red-600" : "text-gray-500")}>
+                  {valuePropWordCount}/{SCORING_TEXT_MAX_WORDS} mots ({Math.max(0, SCORING_TEXT_MAX_WORDS - valuePropWordCount)} restants)
+                </p>
               </div>
 
               {/* 3 best client types */}
@@ -2250,7 +2333,7 @@ export default function ProspectsPage() {
                   </label>
                   {scoringGoodLeads.length < 10 && (
                     <button
-                      onClick={() => setScoringLeadPickerType(scoringLeadPickerType === "good" ? null : "good")}
+                      onClick={() => toggleScoringLeadPicker("good")}
                       className="text-[10px] text-violet-600 hover:underline cursor-pointer font-medium"
                     >
                       + Ajouter
@@ -2311,7 +2394,7 @@ export default function ProspectsPage() {
                   </label>
                   {scoringBadLeads.length < 10 && (
                     <button
-                      onClick={() => setScoringLeadPickerType(scoringLeadPickerType === "bad" ? null : "bad")}
+                      onClick={() => toggleScoringLeadPicker("bad")}
                       className="text-[10px] text-violet-600 hover:underline cursor-pointer font-medium"
                     >
                       + Ajouter
@@ -2371,6 +2454,12 @@ export default function ProspectsPage() {
                     </p>
                     <button onClick={() => setScoringLeadPickerType(null)} className="text-gray-400 hover:text-gray-600 cursor-pointer"><X className="w-3.5 h-3.5" /></button>
                   </div>
+                  <input
+                    value={scoringLeadSearch}
+                    onChange={(e) => setScoringLeadSearch(e.target.value)}
+                    placeholder="Rechercher par prénom ou nom..."
+                    className="w-full px-2 py-1.5 text-xs border border-violet-200 bg-white rounded-lg outline-none focus:border-violet-400"
+                  />
                   <div className="max-h-40 overflow-y-auto space-y-0.5">
                     {(() => {
                       const companyProspects = prospects.filter((p) => {
@@ -2379,19 +2468,71 @@ export default function ProspectsPage() {
                       });
                       const usedIds = new Set([...scoringGoodLeads.map((l) => l.prospect_id), ...scoringBadLeads.map((l) => l.prospect_id)]);
                       const available = companyProspects.filter((p) => !usedIds.has(p.id));
-                      if (available.length === 0) return <p className="text-[10px] text-gray-400 text-center py-2">Aucun prospect disponible pour cette entreprise</p>;
-                      return available.slice(0, 50).map((p) => (
-                        <button
-                          key={p.id}
-                          onClick={() => addScoringLead(p, scoringLeadPickerType)}
-                          className="w-full text-left px-2 py-1.5 rounded-md hover:bg-white text-xs transition-colors cursor-pointer flex items-center gap-2"
-                        >
-                          <Users className="w-3 h-3 text-violet-500 flex-shrink-0" />
-                          <span className="font-medium text-gray-800">{p.prenom} {p.nom}</span>
-                          <span className="text-gray-500 truncate">— {p.poste || "?"} @ {p.entreprise || "?"}</span>
-                          {p.ai_score && <span className="ml-auto text-[10px] font-bold text-gray-500">{p.ai_score}/5</span>}
-                        </button>
-                      ));
+                      const q = scoringLeadSearch.trim().toLowerCase();
+                      const searched = q
+                        ? available.filter((p) =>
+                            (p.prenom || "").toLowerCase().includes(q) ||
+                            (p.nom || "").toLowerCase().includes(q) ||
+                            `${p.prenom || ""} ${p.nom || ""}`.toLowerCase().includes(q)
+                          )
+                        : available;
+                      const remaining = scoringLeadPickerType === "good"
+                        ? Math.max(0, 10 - scoringGoodLeads.length)
+                        : Math.max(0, 10 - scoringBadLeads.length);
+                      const selectedCount = searched.filter((p) => scoringLeadSelectedIds.has(p.id)).length;
+
+                      if (searched.length === 0) {
+                        return <p className="text-[10px] text-gray-400 text-center py-2">Aucun prospect disponible pour cette entreprise</p>;
+                      }
+
+                      return (
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between px-1 py-1">
+                            <p className="text-[10px] text-violet-700">
+                              {searched.length} résultat(s) — {remaining} place(s) restante(s)
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => addSelectedScoringLeads(scoringLeadPickerType, searched)}
+                                disabled={selectedCount === 0 || remaining === 0}
+                                className="text-[10px] px-2 py-1 rounded bg-violet-600 text-white disabled:opacity-40 cursor-pointer"
+                              >
+                                Ajouter sélection ({selectedCount})
+                              </button>
+                              <button
+                                onClick={() => setScoringLeadSelectedIds(new Set())}
+                                className="text-[10px] text-gray-500 hover:text-gray-700 cursor-pointer"
+                              >
+                                Vider
+                              </button>
+                            </div>
+                          </div>
+
+                          {searched.slice(0, 120).map((p) => (
+                            <div
+                              key={p.id}
+                              className="w-full px-2 py-1.5 rounded-md hover:bg-white text-xs transition-colors flex items-center gap-2"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={scoringLeadSelectedIds.has(p.id)}
+                                onChange={() => toggleScoringLeadSelect(p.id)}
+                                className="accent-violet-600 cursor-pointer"
+                              />
+                              <Users className="w-3 h-3 text-violet-500 flex-shrink-0" />
+                              <span className="font-medium text-gray-800">{p.prenom} {p.nom}</span>
+                              <span className="text-gray-500 truncate">— {p.poste || "?"} @ {p.entreprise || "?"}</span>
+                              {p.ai_score && <span className="ml-auto text-[10px] font-bold text-gray-500">{p.ai_score}/5</span>}
+                              <button
+                                onClick={() => addScoringLead(p, scoringLeadPickerType)}
+                                className="ml-2 text-[10px] px-1.5 py-0.5 rounded border border-violet-300 text-violet-700 cursor-pointer"
+                              >
+                                +1
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      );
                     })()}
                   </div>
                 </div>
