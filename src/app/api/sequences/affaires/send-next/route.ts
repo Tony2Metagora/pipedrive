@@ -120,23 +120,16 @@ export async function POST(request: Request) {
     }
 
     try {
-      const prenom = (item.leadName || "").trim().split(/\s+/).filter(Boolean)[0] || "";
+      const prenomRaw = (item.leadName || "").trim().split(/\s+/).filter(Boolean)[0] || "";
+      const prenom = prenomRaw ? prenomRaw.charAt(0).toUpperCase() + prenomRaw.slice(1) : "";
       const sanitizedSubject = (item.subject || "")
-        .replace(/\{\{\s*prenom\s*\}\}/gi, prenom)
-        .replace(/\{\{\s*pr[ée]nom\s*\}\}/gi, prenom)
-        .replace(/\{\s*pr[ée]nom\s*\}/gi, prenom)
-        .replace(/\{\{\s*email\s*\}\}/gi, item.leadEmail || "")
-        .replace(/\{\s*email\s*\}/gi, item.leadEmail || "")
-        .replace(/\{\{\s*entreprise\s*\}\}/gi, item.company || "")
-        .replace(/\{\s*entreprise\s*\}/gi, item.company || "");
+        .replace(/\{+\s*pr[ée]nom\s*\}+/gi, prenom)
+        .replace(/\{+\s*email\s*\}+/gi, item.leadEmail || "")
+        .replace(/\{+\s*entreprise\s*\}+/gi, item.company || "");
       const sanitizedBody = (item.body || "")
-        .replace(/\{\{\s*prenom\s*\}\}/gi, prenom)
-        .replace(/\{\{\s*pr[ée]nom\s*\}\}/gi, prenom)
-        .replace(/\{\s*pr[ée]nom\s*\}/gi, prenom)
-        .replace(/\{\{\s*email\s*\}\}/gi, item.leadEmail || "")
-        .replace(/\{\s*email\s*\}/gi, item.leadEmail || "")
-        .replace(/\{\{\s*entreprise\s*\}\}/gi, item.company || "")
-        .replace(/\{\s*entreprise\s*\}/gi, item.company || "");
+        .replace(/\{+\s*pr[ée]nom\s*\}+/gi, prenom)
+        .replace(/\{+\s*email\s*\}+/gi, item.leadEmail || "")
+        .replace(/\{+\s*entreprise\s*\}+/gi, item.company || "");
 
       const sent = await sendGmailMessage(auth, {
         to: item.leadEmail,

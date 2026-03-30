@@ -38,18 +38,15 @@ interface LeadSequenceInput {
 }
 
 function sanitizeTemplateText(raw: string, lead: { name?: string; email?: string; company?: string }): string {
-  const prenom = (lead.name || "")
+  const prenomRaw = (lead.name || "")
     .trim()
     .split(/\s+/)
     .filter(Boolean)[0] || "";
+  const prenom = prenomRaw ? prenomRaw.charAt(0).toUpperCase() + prenomRaw.slice(1) : "";
   return (raw || "")
-    .replace(/\{\{\s*prenom\s*\}\}/gi, prenom)
-    .replace(/\{\{\s*pr[ée]nom\s*\}\}/gi, prenom)
-    .replace(/\{\s*pr[ée]nom\s*\}/gi, prenom)
-    .replace(/\{\{\s*email\s*\}\}/gi, lead.email || "")
-    .replace(/\{\s*email\s*\}/gi, lead.email || "")
-    .replace(/\{\{\s*entreprise\s*\}\}/gi, lead.company || "")
-    .replace(/\{\s*entreprise\s*\}/gi, lead.company || "");
+    .replace(/\{+\s*pr[ée]nom\s*\}+/gi, prenom)
+    .replace(/\{+\s*email\s*\}+/gi, lead.email || "")
+    .replace(/\{+\s*entreprise\s*\}+/gi, lead.company || "");
 }
 
 function toDelayMinutes(input: { delayMinutes?: number; delayDays?: number }): number {

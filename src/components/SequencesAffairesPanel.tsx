@@ -65,18 +65,17 @@ function defaultDelayDaysForStep(step: number): number {
 }
 
 function extractPrenom(name: string): string {
-  return (name || "").trim().split(/\s+/).filter(Boolean)[0] || "";
+  const first = (name || "").trim().split(/\s+/).filter(Boolean)[0] || "";
+  if (!first) return "";
+  return first.charAt(0).toUpperCase() + first.slice(1);
 }
 
 function renderFinalText(raw: string, lead: Pick<LeadSequenceDraft, "name" | "email" | "company">): string {
   const prenom = extractPrenom(lead.name);
   return (raw || "")
-    .replace(/\{\{\s*prenom\s*\}\}/gi, prenom)
-    .replace(/\{\{\s*pr[ée]nom\s*\}\}/gi, prenom)
-    .replace(/\{\s*pr[ée]nom\s*\}/gi, prenom)
-    .replace(/\{\{\s*entreprise\s*\}\}/gi, lead.company || "")
-    .replace(/\{\s*entreprise\s*\}/gi, lead.company || "")
-    .replace(/\{\{\s*email\s*\}\}/gi, lead.email || "");
+    .replace(/\{+\s*pr[ée]nom\s*\}+/gi, prenom)
+    .replace(/\{+\s*entreprise\s*\}+/gi, lead.company || "")
+    .replace(/\{+\s*email\s*\}+/gi, lead.email || "");
 }
 
 function forceBonjourPrenom(body: string, leadName: string): string {
