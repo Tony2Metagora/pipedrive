@@ -1056,7 +1056,21 @@ export default function ProspectsPage() {
   };
 
   const downloadCsv = () => {
+    const defaultTitle = selectedListId
+      ? `prospects-${(lists.find((l) => l.id === selectedListId)?.name || "liste").toLowerCase()}`
+      : selected.size > 0
+        ? "prospects-selection"
+        : "prospects-export";
+    const inputTitle = prompt("Titre du fichier CSV (sans extension) :", defaultTitle);
+    if (inputTitle == null) return;
+    const cleanTitle = inputTitle.trim().replace(/[\\/:*?"<>|]/g, "").slice(0, 80);
+    if (!cleanTitle) {
+      alert("Veuillez saisir un titre de fichier valide.");
+      return;
+    }
+
     const params = new URLSearchParams();
+    params.set("filename", cleanTitle);
     if (selected.size > 0) {
       params.set("ids", Array.from(selected).join(","));
     } else {

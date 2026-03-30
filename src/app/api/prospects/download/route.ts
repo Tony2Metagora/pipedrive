@@ -56,6 +56,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const idsParam = searchParams.get("ids");
     const listId = searchParams.get("list_id");
+    const filenameParam = searchParams.get("filename");
 
     let rows = await readBlob<ProspectRow>("prospects.json");
 
@@ -87,7 +88,13 @@ export async function GET(request: Request) {
     ];
     const csvContent = "\uFEFF" + csvLines.join("\n");
 
-    const filename = listId ? `prospects-liste-${listId}.csv` : idsParam ? `prospects-selection.csv` : "prospects.csv";
+    const safeCustomName = (filenameParam || "")
+      .trim()
+      .replace(/[\\/:*?"<>|]/g, "")
+      .replace(/\s+/g, "-")
+      .slice(0, 80);
+    const fallbackName = listId ? `prospects-liste-${listId}` : idsParam ? "prospects-selection" : "prospects";
+    const filename = `${safeCustomName || fallbackName}.csv`;
 
     return new NextResponse(csvContent, {
       headers: {
