@@ -219,6 +219,7 @@ export default function ProspectsPage() {
   const [search, setSearch] = useState("");
   const [statusFilters, setStatusFilters] = useState<Set<StatusKey>>(new Set(["en cours", "perdu"]));
   const [scoreFilters, setScoreFilters] = useState<Set<number>>(new Set());
+  const [onlyUnscored, setOnlyUnscored] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editData, setEditData] = useState<Partial<Prospect>>({});
   const [saving, setSaving] = useState(false);
@@ -597,14 +598,21 @@ export default function ProspectsPage() {
   };
 
   /** Shared SSE handler for streaming API routes (API Gouv, AI Score) */
-  const runStreamingAction = async (url: string, label: string, doneMsg: (data: Record<string, unknown>) => string, extraBody?: Record<string, unknown>) => {
-    if (selected.size === 0) return;
+  const runStreamingAction = async (
+    url: string,
+    label: string,
+    doneMsg: (data: Record<string, unknown>) => string,
+    extraBody?: Record<string, unknown>,
+    explicitIds?: string[]
+  ) => {
+    const targetIds = explicitIds && explicitIds.length > 0 ? explicitIds : Array.from(selected);
+    if (targetIds.length === 0) return;
     setProcessing({ label, message: "Démarrage...", current: 0, total: 1 });
     try {
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: Array.from(selected), ...extraBody }),
+        body: JSON.stringify({ ids: targetIds, ...extraBody }),
       });
       if (!res.ok || !res.body) {
         const err = await res.text();
@@ -656,6 +664,23 @@ export default function ProspectsPage() {
     return runStreamingAction("/api/prospects/ai-score", "Score IA", (d) =>
       `${d.scored}/${d.total} prospects analysés par l'IA (${brand})`
     , { brand });
+  };
+
+  const aiScoreUnscoredFromSelectedList = () => {
+    if (!selectedListId) return;
+    const listProspects = prospects.filter((p) => p.list_id === selectedListId);
+    const unscoredIds = listProspects
+      .filter((p) => (parseInt(p.ai_score || "0") || 0) === 0)
+      .map((p) => p.id);
+    const selectedList = lists.find((l) => l.id === selectedListId);
+    const brand = selectedList?.company || "Metagora";
+    return runStreamingAction(
+      "/api/prospects/ai-score",
+      "Score IA (non notés)",
+      (d) => `${d.scored}/${d.total} prospects non notés analysés (${brand})`,
+      { brand },
+      unscoredIds
+    );
   };
 
   const enrichGouvProspects = () =>
@@ -1076,6 +1101,10 @@ export default function ProspectsPage() {
         const score = parseInt(p.ai_score || "0") || 0;
         if (!scoreFilters.has(score)) return false;
       }
+      if (onlyUnscored) {
+        const score = parseInt(p.ai_score || "0") || 0;
+        if (score > 0) return false;
+      }
       if (search) {
         const q = search.toLowerCase();
         const baseMatch = (
@@ -1099,7 +1128,7 @@ export default function ProspectsPage() {
       }
       return true;
     });
-  }, [prospects, search, statusFilters, scoreFilters, selectedListId]);
+  }, [prospects, search, statusFilters, scoreFilters, selectedListId, onlyUnscored]);
 
   const enCoursCount = prospects.filter((p) => (p.computed_statut || p.statut) === "en cours").length;
   const perduCount = prospects.filter((p) => (p.computed_statut || p.statut) === "perdu").length;
@@ -1107,6 +1136,10 @@ export default function ProspectsPage() {
 
   const allFilteredSelected = filtered.length > 0 && filtered.every((p) => selected.has(p.id));
   const someFilteredSelected = filtered.some((p) => selected.has(p.id));
+  const unscoredInSelectedListCount = useMemo(() => {
+    if (!selectedListId) return 0;
+    return prospects.filter((p) => p.list_id === selectedListId && (parseInt(p.ai_score || "0") || 0) === 0).length;
+  }, [prospects, selectedListId]);
   const productWordCount = countWords(scoringCardForm.product);
   const valuePropWordCount = countWords(scoringCardForm.value_proposition);
 
@@ -1243,6 +1276,17 @@ export default function ProspectsPage() {
                 Archiver ({selected.size})
               </button>
             </>
+          )}
+          {selectedListId && !processing && (
+            <button
+              onClick={aiScoreUnscoredFromSelectedList}
+              disabled={unscoredInSelectedListCount === 0}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-fuchsia-700 bg-fuchsia-50 border border-fuchsia-200 rounded-lg hover:bg-fuchsia-100 disabled:opacity-50 cursor-pointer"
+              title="Lancer le scoring IA uniquement sur les prospects non notés de la liste sélectionnée"
+            >
+              <Bot className="w-3.5 h-3.5" />
+              IA non notés liste ({unscoredInSelectedListCount})
+            </button>
           )}
           <button
             onClick={() => { setShowScoringCards(true); fetchScoringCards(); }}
@@ -1404,6 +1448,15 @@ export default function ProspectsPage() {
               </button>
             )}
           </div>
+          <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={onlyUnscored}
+              onChange={(e) => setOnlyUnscored(e.target.checked)}
+              className="rounded border-gray-300 text-fuchsia-600 focus:ring-fuchsia-500 cursor-pointer"
+            />
+            <span className="text-fuchsia-700 font-medium">Non notés IA</span>
+          </label>
           <div className="ml-2 border-l border-gray-200 pl-2 relative">
             <button
               onClick={() => setShowColPicker(!showColPicker)}
