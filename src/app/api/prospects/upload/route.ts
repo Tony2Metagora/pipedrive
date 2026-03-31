@@ -355,7 +355,9 @@ export async function POST(request: Request) {
       newRows.push(row);
     }
 
-    // Append to existing prospects, dedup by email OR nom+prenom+entreprise (locked)
+    // Append to existing prospects.
+    // Option 2: dedup by list (not globally) when list_id is provided.
+    // Fallback to global dedup when no list is targeted.
     let skippedDuplicates = 0;
     const nameKey = (r: ProspectRow) => {
       const nom = (r.nom || "").toLowerCase().trim();
@@ -368,6 +370,8 @@ export async function POST(request: Request) {
       const existingEmails = new Set<string>();
       const existingNames = new Set<string>();
       for (const r of existing) {
+        const sameListScope = finalListId ? r.list_id === finalListId : true;
+        if (!sameListScope) continue;
         if (r.email) existingEmails.add(r.email.toLowerCase().trim());
         else {
           const nk = nameKey(r);

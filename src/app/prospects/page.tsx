@@ -1316,7 +1316,7 @@ export default function ProspectsPage() {
       case "date_creation_entreprise":
       case "ai_comment":
       case "resume_entreprise": {
-        const value = String((p as Record<string, unknown>)[colKey] || "");
+        const value = String((p as unknown as Record<string, unknown>)[colKey] || "");
         const clickable = colKey === "ai_comment" || colKey === "resume_entreprise";
         return (
           <td
@@ -1350,8 +1350,8 @@ export default function ProspectsPage() {
         );
       case "chiffre_affaires":
       case "resultat_net": {
-        const n = Number((p as Record<string, unknown>)[colKey] || 0);
-        const has = Boolean((p as Record<string, unknown>)[colKey]);
+        const n = Number((p as unknown as Record<string, unknown>)[colKey] || 0);
+        const has = Boolean((p as unknown as Record<string, unknown>)[colKey]);
         return (
           <td key={colKey} className="px-1 py-1.5 truncate overflow-hidden text-right" style={style}>
             {has ? (
@@ -1365,7 +1365,7 @@ export default function ProspectsPage() {
       default:
         return (
           <td key={colKey} className={tdBase} style={style}>
-            <span className="text-gray-600 text-[9px]">{String((p as Record<string, unknown>)[colKey] || "") || <span className="text-gray-300">—</span>}</span>
+            <span className="text-gray-600 text-[9px]">{String((p as unknown as Record<string, unknown>)[colKey] || "") || <span className="text-gray-300">—</span>}</span>
           </td>
         );
     }
