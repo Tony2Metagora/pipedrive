@@ -212,8 +212,11 @@ export async function POST(request: Request) {
       const json: string[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
       if (json.length < 2) throw new Error("Le fichier est vide ou n'a pas d'en-têtes");
       rawHeaders = json[0].map((h) => String(h));
-      totalRows = json.length - 1;
-      sampleRows = json.slice(1, 4).map((row) => row.map((cell) => {
+      const dataRows = json.slice(1).filter((row) =>
+        row.some((cell) => String(cell ?? "").trim() !== "")
+      );
+      totalRows = dataRows.length;
+      sampleRows = dataRows.slice(0, 4).map((row) => row.map((cell) => {
         const s = String(cell ?? "");
         return s.length > 100 ? s.slice(0, 100) + "…" : s;
       }));
@@ -225,7 +228,7 @@ export async function POST(request: Request) {
       const sep = detectSeparator(lines[0]);
       rawHeaders = parseLine(lines[0], sep);
       totalRows = lines.length - 1;
-      sampleRows = lines.slice(1, 4).map((line) =>
+      sampleRows = lines.slice(1, 5).map((line) =>
         parseLine(line, sep).map((v) => {
           const s = v.trim();
           return s.length > 100 ? s.slice(0, 100) + "…" : s;

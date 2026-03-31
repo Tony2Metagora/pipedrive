@@ -283,9 +283,11 @@ export default function ProspectsPage() {
   const [scoringLeadPickerType, setScoringLeadPickerType] = useState<"good" | "bad" | null>(null);
   const [scoringLeadSearch, setScoringLeadSearch] = useState("");
   const [scoringLeadSelectedIds, setScoringLeadSelectedIds] = useState<Set<string>>(new Set());
+  const [draggingColKey, setDraggingColKey] = useState<string | null>(null);
   const [visibleCols, setVisibleCols] = useState<Set<string>>(
     new Set(PROSPECT_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key))
   );
+  const [columnOrder, setColumnOrder] = useState<string[]>(PROSPECT_COLUMNS.map((c) => c.key));
   const [showColPicker, setShowColPicker] = useState(false);
   const colVisible = (key: string) => visibleCols.has(key);
 
@@ -311,6 +313,22 @@ export default function ProspectsPage() {
 
   // Merged columns: base + extra
   const allColumns = useMemo(() => [...PROSPECT_COLUMNS, ...extraColumns], [extraColumns]);
+
+  // Keep a stable manual order, adding new columns at the end.
+  useEffect(() => {
+    const allKeys = allColumns.map((c) => c.key);
+    setColumnOrder((prev) => {
+      const kept = prev.filter((k) => allKeys.includes(k));
+      const missing = allKeys.filter((k) => !kept.includes(k));
+      return [...kept, ...missing];
+    });
+  }, [allColumns]);
+
+  const orderedVisibleColumnKeys = useMemo(() => {
+    const allKeys = allColumns.map((c) => c.key);
+    const merged = [...columnOrder.filter((k) => allKeys.includes(k)), ...allKeys.filter((k) => !columnOrder.includes(k))];
+    return merged.filter((k) => colVisible(k));
+  }, [allColumns, columnOrder, visibleCols]);
 
   // Auto-show new extra columns when they appear
   const prevExtraKeysRef = useRef<Set<string>>(new Set());
@@ -1173,6 +1191,186 @@ export default function ProspectsPage() {
     }
   };
 
+  const moveColumn = (fromKey: string, toKey: string) => {
+    if (!fromKey || !toKey || fromKey === toKey) return;
+    setColumnOrder((prev) => {
+      const fromIdx = prev.indexOf(fromKey);
+      const toIdx = prev.indexOf(toKey);
+      if (fromIdx < 0 || toIdx < 0) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      return next;
+    });
+  };
+
+  const renderProspectCell = (
+    colKey: string,
+    p: Prospect,
+    isEditing: boolean,
+    isLinking: boolean,
+    statut: string
+  ) => {
+    const tdBase = "px-1 py-1.5 truncate overflow-hidden";
+    const style = { width: colWidths[colKey], maxWidth: colWidths[colKey] };
+    if (colKey.startsWith("extra:")) {
+      const extraKey = colKey.replace(/^extra:/, "");
+      const val = getExtraField(p, extraKey);
+      return (
+        <td key={colKey} className={tdBase} style={style}>
+          <span className="text-gray-600 text-[9px]" title={val}>{val || <span className="text-gray-300">—</span>}</span>
+        </td>
+      );
+    }
+    switch (colKey) {
+      case "prenom":
+      case "nom":
+      case "email":
+      case "telephone":
+      case "poste":
+      case "entreprise": {
+        const field = colKey as keyof Prospect;
+        const type = colKey === "email" ? "email" : "text";
+        const isName = colKey === "prenom" || colKey === "nom";
+        const value = String(p[field] || "");
+        return (
+          <td key={colKey} className={tdBase} style={style}>
+            {isEditing ? (
+              <input
+                type={type}
+                value={String(editData[field] || "")}
+                onChange={(e) => setEditData({ ...editData, [field]: e.target.value })}
+                className="w-full px-1 py-0.5 text-[11px] border border-gray-300 rounded focus:ring-1 focus:ring-indigo-400 outline-none"
+              />
+            ) : (
+              <span className={cn(isName ? "text-[11px]" : "text-[10px]", colKey === "prenom" ? "font-medium text-gray-900" : colKey === "entreprise" ? "text-gray-700 font-medium" : "text-gray-600")} title={value}>{value}</span>
+            )}
+          </td>
+        );
+      }
+      case "statut":
+        return (
+          <td key={colKey} className="px-1 py-1.5" style={style}>
+            <StatusBadge statut={statut} />
+          </td>
+        );
+      case "affaire":
+        return (
+          <td key={colKey} className="px-1 py-1.5 overflow-hidden" style={style}>
+            {p.deal_id ? (
+              <Link
+                href={`/dashboard?deal=${p.deal_id}`}
+                className="inline-flex items-center gap-0.5 text-[10px] text-indigo-600 hover:text-indigo-800 font-medium truncate max-w-full"
+                title={p.deal_title || ""}
+              >
+                <Briefcase className="w-3 h-3 flex-shrink-0" />
+                <span className="truncate">{p.deal_title}</span>
+                <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
+              </Link>
+            ) : isLinking ? (
+              <div className="flex items-center gap-0.5">
+                <input
+                  type="text"
+                  value={newDealTitle}
+                  onChange={(e) => setNewDealTitle(e.target.value)}
+                  placeholder="Nom affaire"
+                  className="w-20 px-1 py-0.5 text-[10px] border border-gray-300 rounded focus:ring-1 focus:ring-indigo-400 outline-none"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") createDealForProspect(p.id);
+                    if (e.key === "Escape") { setLinkingId(null); setNewDealTitle(""); }
+                  }}
+                />
+                <button onClick={() => createDealForProspect(p.id)} disabled={!newDealTitle.trim()} className="p-0.5 text-green-600 hover:text-green-700 cursor-pointer disabled:opacity-40"><Check className="w-3 h-3" /></button>
+                <button onClick={() => { setLinkingId(null); setNewDealTitle(""); }} className="p-0.5 text-gray-400 hover:text-gray-600 cursor-pointer"><X className="w-3 h-3" /></button>
+              </div>
+            ) : (
+              <button
+                onClick={() => { setLinkingId(p.id); setNewDealTitle(p.entreprise ? `${p.entreprise} - ${p.prenom} ${p.nom}`.trim() : `${p.prenom} ${p.nom}`.trim()); }}
+                className="inline-flex items-center gap-0.5 text-[10px] text-gray-400 hover:text-indigo-600 cursor-pointer transition-colors"
+                title="Créer une affaire"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Créer</span>
+              </button>
+            )}
+          </td>
+        );
+      case "linkedin":
+        return (
+          <td key={colKey} className="px-1 py-1.5 text-center" style={style}>
+            {p.linkedin ? (
+              <a href={p.linkedin.startsWith("http") ? p.linkedin : `https://${p.linkedin}`} target="_blank" rel="noopener noreferrer" className="text-[#0077B5] hover:text-[#005885]" title={p.linkedin}>
+                <Linkedin className="w-3.5 h-3.5 mx-auto" />
+              </a>
+            ) : (
+              <span className="text-gray-200"><Linkedin className="w-3.5 h-3.5 mx-auto" /></span>
+            )}
+          </td>
+        );
+      case "naf_code":
+      case "effectifs":
+      case "ville":
+      case "siren":
+      case "dirigeants":
+      case "date_creation_entreprise":
+      case "ai_comment":
+      case "resume_entreprise": {
+        const value = String((p as Record<string, unknown>)[colKey] || "");
+        const clickable = colKey === "ai_comment" || colKey === "resume_entreprise";
+        return (
+          <td
+            key={colKey}
+            className={cn(tdBase, clickable && "cursor-pointer hover:bg-violet-50/50 transition-colors")}
+            style={style}
+            onClick={clickable ? () => openScoreEdit(p) : undefined}
+            title={clickable ? "Cliquer pour modifier" : value}
+          >
+            <span className="text-gray-500 text-[9px]">{value || <span className="text-gray-300">—</span>}</span>
+          </td>
+        );
+      }
+      case "ai_score":
+        return (
+          <td key={colKey} className="px-1 py-1.5 text-center cursor-pointer hover:bg-violet-50/50 transition-colors" style={style} onClick={() => openScoreEdit(p)} title="Cliquer pour modifier">
+            <ScoreNumber value={parseInt(p.ai_score || "0") || 0} />
+          </td>
+        );
+      case "categorie_entreprise":
+        return (
+          <td key={colKey} className="px-1 py-1.5 text-center" style={style}>
+            {p.categorie_entreprise ? (
+              <span className={cn("inline-flex items-center px-1 py-0.5 rounded text-[8px] font-bold",
+                p.categorie_entreprise === "GE" ? "bg-purple-100 text-purple-700" :
+                p.categorie_entreprise === "ETI" ? "bg-blue-100 text-blue-700" :
+                "bg-green-100 text-green-700"
+              )}>{p.categorie_entreprise}</span>
+            ) : <span className="text-gray-300 text-[9px]">—</span>}
+          </td>
+        );
+      case "chiffre_affaires":
+      case "resultat_net": {
+        const n = Number((p as Record<string, unknown>)[colKey] || 0);
+        const has = Boolean((p as Record<string, unknown>)[colKey]);
+        return (
+          <td key={colKey} className="px-1 py-1.5 truncate overflow-hidden text-right" style={style}>
+            {has ? (
+              <span className={cn("text-[9px] font-medium", colKey === "resultat_net" ? (n >= 0 ? "text-green-700" : "text-red-600") : "text-gray-700")} title={`${n.toLocaleString("fr-FR")} €`}>
+                {Math.abs(n) >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M€` : `${(n / 1_000).toFixed(0)}k€`}
+              </span>
+            ) : <span className="text-gray-300 text-[9px]">—</span>}
+          </td>
+        );
+      }
+      default:
+        return (
+          <td key={colKey} className={tdBase} style={style}>
+            <span className="text-gray-600 text-[9px]">{String((p as Record<string, unknown>)[colKey] || "") || <span className="text-gray-300">—</span>}</span>
+          </td>
+        );
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -1612,22 +1810,48 @@ export default function ProspectsPage() {
                       className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                     />
                   </th>
-                  {allColumns.filter((c) => colVisible(c.key)).map((col) => (
-                    <th
-                      key={col.key}
-                      className={cn(
-                        "relative px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide select-none",
-                        ["linkedin", "ai_score"].includes(col.key) ? "text-center" : "text-left"
-                      )}
-                      style={{ width: colWidths[col.key], minWidth: col.minWidth, maxWidth: colWidths[col.key] }}
-                    >
-                      {col.key === "linkedin" ? <Linkedin className="w-3 h-3 mx-auto text-gray-500" /> : col.label}
-                      <span
-                        onMouseDown={(e) => onColResize(col.key, e)}
-                        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-indigo-400/40 transition-colors"
-                      />
-                    </th>
-                  ))}
+                  {orderedVisibleColumnKeys.map((key) => {
+                    const col = allColumns.find((c) => c.key === key);
+                    if (!col) return null;
+                    return (
+                      <th
+                        key={col.key}
+                        draggable
+                        onDragStart={() => setDraggingColKey(col.key)}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={() => {
+                          if (draggingColKey) moveColumn(draggingColKey, col.key);
+                          setDraggingColKey(null);
+                        }}
+                        className={cn(
+                          "relative px-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide select-none",
+                          ["linkedin", "ai_score"].includes(col.key) ? "text-center" : "text-left",
+                          draggingColKey === col.key && "bg-indigo-100"
+                        )}
+                        style={{ width: colWidths[col.key], minWidth: col.minWidth, maxWidth: colWidths[col.key] }}
+                        title="Glisser pour déplacer la colonne"
+                      >
+                        <div className={cn("flex items-center gap-1", ["linkedin", "ai_score"].includes(col.key) ? "justify-center" : "")}>
+                          {col.key === "linkedin" ? <Linkedin className="w-3 h-3 text-gray-500" /> : <span>{col.label}</span>}
+                          <button
+                            onClick={() => setVisibleCols((prev) => {
+                              const next = new Set(prev);
+                              next.delete(col.key);
+                              return next;
+                            })}
+                            className="text-gray-400 hover:text-gray-600 cursor-pointer"
+                            title={`Masquer ${col.label}`}
+                          >
+                            <EyeOff className="w-3 h-3" />
+                          </button>
+                        </div>
+                        <span
+                          onMouseDown={(e) => onColResize(col.key, e)}
+                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-indigo-400/40 transition-colors"
+                        />
+                      </th>
+                    );
+                  })}
                   <th className="text-center pr-3 pl-1 py-2.5 font-semibold text-gray-600 text-[10px] uppercase tracking-wide" style={{ width: 50, minWidth: 50 }}></th>
                 </tr>
               </thead>
@@ -1648,190 +1872,9 @@ export default function ProspectsPage() {
                           className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                         />
                       </td>
-                      {colVisible("prenom") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["prenom"], maxWidth: colWidths["prenom"] }}>
-                        {isEditing ? (
-                          <input
-                            type="text"
-                            value={editData.prenom || ""}
-                            onChange={(e) => setEditData({ ...editData, prenom: e.target.value })}
-                            className="w-full px-1 py-0.5 text-[11px] border border-gray-300 rounded focus:ring-1 focus:ring-indigo-400 outline-none"
-                          />
-                        ) : (
-                          <span className="font-medium text-gray-900 text-[11px]">{p.prenom}</span>
-                        )}
-                      </td>}
-                      {colVisible("nom") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["nom"], maxWidth: colWidths["nom"] }}>
-                        {isEditing ? (
-                          <input
-                            type="text"
-                            value={editData.nom || ""}
-                            onChange={(e) => setEditData({ ...editData, nom: e.target.value })}
-                            className="w-full px-1 py-0.5 text-[11px] border border-gray-300 rounded focus:ring-1 focus:ring-indigo-400 outline-none"
-                          />
-                        ) : (
-                          <span className="text-gray-700 text-[11px]">{p.nom}</span>
-                        )}
-                      </td>}
-                      {colVisible("email") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["email"], maxWidth: colWidths["email"] }}>
-                        {isEditing ? (
-                          <input
-                            type="email"
-                            value={editData.email || ""}
-                            onChange={(e) => setEditData({ ...editData, email: e.target.value })}
-                            className="w-full px-1 py-0.5 text-[11px] border border-gray-300 rounded focus:ring-1 focus:ring-indigo-400 outline-none"
-                          />
-                        ) : (
-                          <span className="text-gray-600 text-[10px]" title={p.email}>{p.email}</span>
-                        )}
-                      </td>}
-                      {colVisible("telephone") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["telephone"], maxWidth: colWidths["telephone"] }}>
-                        {isEditing ? (
-                          <input
-                            type="text"
-                            value={editData.telephone || ""}
-                            onChange={(e) => setEditData({ ...editData, telephone: e.target.value })}
-                            className="w-full px-1 py-0.5 text-[11px] border border-gray-300 rounded focus:ring-1 focus:ring-indigo-400 outline-none"
-                          />
-                        ) : (
-                          <span className="text-gray-600 text-[10px]">{p.telephone}</span>
-                        )}
-                      </td>}
-                      {colVisible("poste") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["poste"], maxWidth: colWidths["poste"] }}>
-                        {isEditing ? (
-                          <input
-                            type="text"
-                            value={editData.poste || ""}
-                            onChange={(e) => setEditData({ ...editData, poste: e.target.value })}
-                            className="w-full px-1 py-0.5 text-[11px] border border-gray-300 rounded focus:ring-1 focus:ring-indigo-400 outline-none"
-                          />
-                        ) : (
-                          <span className="text-gray-600 text-[10px]" title={p.poste}>{p.poste}</span>
-                        )}
-                      </td>}
-                      {colVisible("entreprise") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["entreprise"], maxWidth: colWidths["entreprise"] }}>
-                        {isEditing ? (
-                          <input
-                            type="text"
-                            value={editData.entreprise || ""}
-                            onChange={(e) => setEditData({ ...editData, entreprise: e.target.value })}
-                            className="w-full px-1 py-0.5 text-[11px] border border-gray-300 rounded focus:ring-1 focus:ring-indigo-400 outline-none"
-                          />
-                        ) : (
-                          <span className="text-gray-700 text-[10px] font-medium" title={p.entreprise}>{p.entreprise}</span>
-                        )}
-                      </td>}
-                      {colVisible("statut") && <td className="px-1 py-1.5" style={{ width: colWidths["statut"], maxWidth: colWidths["statut"] }}>
-                        <StatusBadge statut={statut} />
-                      </td>}
-                      {colVisible("affaire") && <td className="px-1 py-1.5 overflow-hidden" style={{ width: colWidths["affaire"], maxWidth: colWidths["affaire"] }}>
-                        {p.deal_id ? (
-                          <Link
-                            href={`/dashboard?deal=${p.deal_id}`}
-                            className="inline-flex items-center gap-0.5 text-[10px] text-indigo-600 hover:text-indigo-800 font-medium truncate max-w-full"
-                            title={p.deal_title || ""}
-                          >
-                            <Briefcase className="w-3 h-3 flex-shrink-0" />
-                            <span className="truncate">{p.deal_title}</span>
-                            <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
-                          </Link>
-                        ) : isLinking ? (
-                          <div className="flex items-center gap-0.5">
-                            <input
-                              type="text"
-                              value={newDealTitle}
-                              onChange={(e) => setNewDealTitle(e.target.value)}
-                              placeholder="Nom affaire"
-                              className="w-20 px-1 py-0.5 text-[10px] border border-gray-300 rounded focus:ring-1 focus:ring-indigo-400 outline-none"
-                              autoFocus
-                              onKeyDown={(e) => { if (e.key === "Enter") createDealForProspect(p.id); if (e.key === "Escape") { setLinkingId(null); setNewDealTitle(""); } }}
-                            />
-                            <button onClick={() => createDealForProspect(p.id)} disabled={!newDealTitle.trim()} className="p-0.5 text-green-600 hover:text-green-700 cursor-pointer disabled:opacity-40"><Check className="w-3 h-3" /></button>
-                            <button onClick={() => { setLinkingId(null); setNewDealTitle(""); }} className="p-0.5 text-gray-400 hover:text-gray-600 cursor-pointer"><X className="w-3 h-3" /></button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => { setLinkingId(p.id); setNewDealTitle(p.entreprise ? `${p.entreprise} - ${p.prenom} ${p.nom}`.trim() : `${p.prenom} ${p.nom}`.trim()); }}
-                            className="inline-flex items-center gap-0.5 text-[10px] text-gray-400 hover:text-indigo-600 cursor-pointer transition-colors"
-                            title="Créer une affaire"
-                          >
-                            <Plus className="w-3 h-3" />
-                            <span>Créer</span>
-                          </button>
-                        )}
-                      </td>}
-                      {colVisible("linkedin") && <td className="px-1 py-1.5 text-center" style={{ width: colWidths["linkedin"], maxWidth: colWidths["linkedin"] }}>
-                        {p.linkedin ? (
-                          <a href={p.linkedin.startsWith("http") ? p.linkedin : `https://${p.linkedin}`} target="_blank" rel="noopener noreferrer" className="text-[#0077B5] hover:text-[#005885]" title={p.linkedin}>
-                            <Linkedin className="w-3.5 h-3.5 mx-auto" />
-                          </a>
-                        ) : (
-                          <span className="text-gray-200"><Linkedin className="w-3.5 h-3.5 mx-auto" /></span>
-                        )}
-                      </td>}
-                      {colVisible("naf_code") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["naf_code"], maxWidth: colWidths["naf_code"] }}>
-                        <span className="text-gray-600 text-[9px]" title={p.naf_code}>{p.naf_code}</span>
-                      </td>}
-                      {colVisible("effectifs") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["effectifs"], maxWidth: colWidths["effectifs"] }}>
-                        <span className="text-gray-600 text-[9px]">{p.effectifs}</span>
-                      </td>}
-                      {colVisible("ville") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["ville"], maxWidth: colWidths["ville"] }}>
-                        <span className="text-gray-600 text-[9px]" title={p.ville || ""}>{p.ville || <span className="text-gray-300">—</span>}</span>
-                      </td>}
-                      {colVisible("siren") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["siren"], maxWidth: colWidths["siren"] }}>
-                        <span className="text-gray-600 text-[9px] font-mono">{p.siren || <span className="text-gray-300">—</span>}</span>
-                      </td>}
-                      {colVisible("categorie_entreprise") && <td className="px-1 py-1.5 text-center" style={{ width: colWidths["categorie_entreprise"], maxWidth: colWidths["categorie_entreprise"] }}>
-                        {p.categorie_entreprise ? (
-                          <span className={cn("inline-flex items-center px-1 py-0.5 rounded text-[8px] font-bold",
-                            p.categorie_entreprise === "GE" ? "bg-purple-100 text-purple-700" :
-                            p.categorie_entreprise === "ETI" ? "bg-blue-100 text-blue-700" :
-                            "bg-green-100 text-green-700"
-                          )}>{p.categorie_entreprise}</span>
-                        ) : <span className="text-gray-300 text-[9px]">—</span>}
-                      </td>}
-                      {colVisible("chiffre_affaires") && <td className="px-1 py-1.5 truncate overflow-hidden text-right" style={{ width: colWidths["chiffre_affaires"], maxWidth: colWidths["chiffre_affaires"] }}>
-                        {p.chiffre_affaires ? (
-                          <span className="text-gray-700 text-[9px] font-medium" title={`${Number(p.chiffre_affaires).toLocaleString("fr-FR")} €`}>
-                            {Number(p.chiffre_affaires) >= 1_000_000
-                              ? `${(Number(p.chiffre_affaires) / 1_000_000).toFixed(1)}M€`
-                              : `${(Number(p.chiffre_affaires) / 1_000).toFixed(0)}k€`}
-                          </span>
-                        ) : <span className="text-gray-300 text-[9px]">—</span>}
-                      </td>}
-                      {colVisible("resultat_net") && <td className="px-1 py-1.5 truncate overflow-hidden text-right" style={{ width: colWidths["resultat_net"], maxWidth: colWidths["resultat_net"] }}>
-                        {p.resultat_net ? (
-                          <span className={cn("text-[9px] font-medium", Number(p.resultat_net) >= 0 ? "text-green-700" : "text-red-600")} title={`${Number(p.resultat_net).toLocaleString("fr-FR")} €`}>
-                            {Number(p.resultat_net) >= 1_000_000 || Number(p.resultat_net) <= -1_000_000
-                              ? `${(Number(p.resultat_net) / 1_000_000).toFixed(1)}M€`
-                              : `${(Number(p.resultat_net) / 1_000).toFixed(0)}k€`}
-                          </span>
-                        ) : <span className="text-gray-300 text-[9px]">—</span>}
-                      </td>}
-                      {colVisible("dirigeants") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["dirigeants"], maxWidth: colWidths["dirigeants"] }}>
-                        <span className="text-gray-500 text-[9px]" title={p.dirigeants || ""}>{p.dirigeants || <span className="text-gray-300">—</span>}</span>
-                      </td>}
-                      {colVisible("date_creation_entreprise") && <td className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths["date_creation_entreprise"], maxWidth: colWidths["date_creation_entreprise"] }}>
-                        <span className="text-gray-600 text-[9px]">{p.date_creation_entreprise || <span className="text-gray-300">—</span>}</span>
-                      </td>}
-                      {colVisible("resume_entreprise") && <td className="px-1 py-1.5 truncate overflow-hidden cursor-pointer hover:bg-violet-50/50 transition-colors" style={{ width: colWidths["resume_entreprise"], maxWidth: colWidths["resume_entreprise"] }} onClick={() => openScoreEdit(p)} title="Cliquer pour modifier">
-                        <span className="text-gray-500 text-[9px]">{p.resume_entreprise || <span className="text-gray-300">—</span>}</span>
-                      </td>}
-                      {colVisible("ai_score") && <td className="px-1 py-1.5 text-center cursor-pointer hover:bg-violet-50/50 transition-colors" style={{ width: colWidths["ai_score"], maxWidth: colWidths["ai_score"] }} onClick={() => openScoreEdit(p)} title="Cliquer pour modifier">
-                        <ScoreNumber value={parseInt(p.ai_score || "0") || 0} />
-                      </td>}
-                      {colVisible("ai_comment") && <td className="px-1 py-1.5 truncate overflow-hidden cursor-pointer hover:bg-violet-50/50 transition-colors" style={{ width: colWidths["ai_comment"], maxWidth: colWidths["ai_comment"] }} onClick={() => openScoreEdit(p)} title="Cliquer pour modifier">
-                        <span className="text-gray-500 text-[9px]">{p.ai_comment || <span className="text-gray-300">—</span>}</span>
-                      </td>}
-                      {/* Dynamic extra columns */}
-                      {extraColumns.filter((ec) => colVisible(ec.key)).map((ec) => {
-                        const extraKey = ec.key.replace(/^extra:/, "");
-                        const val = getExtraField(p, extraKey);
-                        return (
-                          <td key={ec.key} className="px-1 py-1.5 truncate overflow-hidden" style={{ width: colWidths[ec.key], maxWidth: colWidths[ec.key] }}>
-                            <span className="text-gray-600 text-[9px]" title={val}>{val || <span className="text-gray-300">—</span>}</span>
-                          </td>
-                        );
-                      })}
+                      {orderedVisibleColumnKeys.map((colKey) =>
+                        renderProspectCell(colKey, p, isEditing, isLinking, statut)
+                      )}
                       <td className="pr-3 pl-1 py-1.5 text-center">
                         {isEditing ? (
                           <div className="flex items-center gap-0.5 justify-center">
@@ -2003,8 +2046,18 @@ export default function ProspectsPage() {
                                   <span className="text-[10px] text-gray-400">extra</span>
                                 )}
                               </td>
-                              <td className="px-2 py-1.5 max-w-[200px]">
-                                <span className="text-[10px] text-gray-500 truncate block">{col.samples[0] || "—"}</span>
+                              <td className="px-2 py-1.5 max-w-[260px]">
+                                {col.samples.length > 0 ? (
+                                  <div className="space-y-0.5">
+                                    {col.samples.slice(0, 3).map((sample, sampleIdx) => (
+                                      <p key={sampleIdx} className="text-[10px] text-gray-500 truncate" title={sample}>
+                                        - {sample}
+                                      </p>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] text-gray-400">—</span>
+                                )}
                               </td>
                             </tr>
                           );
