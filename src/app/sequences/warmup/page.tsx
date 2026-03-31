@@ -7,6 +7,7 @@ import {
   Eye, EyeOff, Globe, Lock, RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatDateParis } from "@/lib/date-paris";
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -35,6 +36,13 @@ interface WarmupAccountData {
     reputation_score: number;
     daily_stats: WarmupDayStat[];
   } | null;
+  warmup_meta?: {
+    firstObservedSendAt: string | null;
+    emailAgeDays: number | null;
+    historyWeeklySent: number;
+    historyDailyAvg: number;
+    historyDaysCount: number;
+  };
 }
 
 // ─── Warmup ramp logic ─────────────────────────────────
@@ -68,6 +76,8 @@ function getAccountProfile(acc: WarmupAccountData) {
   else if (totalSent > 50) maturity = "warming";
 
   const rampTable = isGoogle ? RAMP_NEW_GOOGLE : RAMP_NEW_HOSTINGER;
+  const providerCapDaily = isGoogle ? 80 : 40;
+  const providerBaseDaily = isGoogle ? 10 : 5;
 
   // Estimate current week based on totalSent and daily average from stats
   const ds = acc.warmup_stats?.daily_stats || [];
@@ -79,9 +89,35 @@ function getAccountProfile(acc: WarmupAccountData) {
   else if (avgDaily > 10) currentWeek = 2;
 
   const rampEntry = rampTable.find((r) => r.week >= currentWeek) || rampTable[rampTable.length - 1];
-  const dailyTarget = rampEntry.daily;
+  const historyWeeklySent = acc.warmup_meta?.historyWeeklySent ?? ds.reduce((s, d) => s + d.sent, 0);
+  const historyDailyObserved = Math.max(
+    Number(acc.daily_sent_count || 0),
+    Number(acc.warmup_meta?.historyDailyAvg || avgDaily || 0)
+  );
+  const emailAgeDays = acc.warmup_meta?.emailAgeDays ?? null;
+  const ageBoostDaily = emailAgeDays === null
+    ? providerBaseDaily
+    : emailAgeDays < 14
+      ? providerBaseDaily
+      : emailAgeDays < 30
+        ? providerBaseDaily + 5
+        : emailAgeDays < 60
+          ? providerBaseDaily + 10
+          : providerBaseDaily + 15;
+  const historyDrivenDaily = historyDailyObserved > 0
+    ? Math.ceil(historyDailyObserved * 1.15)
+    : 0;
+  const dailyTarget = Math.min(
+    providerCapDaily,
+    Math.max(rampEntry.daily, ageBoostDaily, historyDrivenDaily, providerBaseDaily)
+  );
   const weeklyTarget = dailyTarget * 7;
   const weeklySent = ds.reduce((s, d) => s + d.sent, 0);
+  const estimationConfidence = (acc.warmup_meta?.historyDaysCount || 0) >= 7
+    ? "haute"
+    : (acc.warmup_meta?.historyDaysCount || 0) >= 3
+      ? "moyenne"
+      : "faible";
 
   // Health score — contextual based on account state
   let health = 0;
@@ -110,6 +146,7 @@ function getAccountProfile(acc: WarmupAccountData) {
   return {
     isGoogle, isHostinger, totalSent, rep, spamRate, maturity, rampTable,
     currentWeek, dailyTarget, weeklyTarget, weeklySent, avgDaily,
+    historyWeeklySent, emailAgeDays, estimationConfidence,
     health, healthColor, healthBg, healthLabel,
   };
 }
@@ -380,7 +417,11 @@ export default function WarmupPage() {
                       <span className={cn("font-medium", acc.warmup_details?.status === "ACTIVE" || acc.warmup_details?.status === "ENABLED" ? "text-green-600" : "text-gray-500")}>
                         {acc.warmup_details?.status === "ACTIVE" || acc.warmup_details?.status === "ENABLED" ? "✅ Actif" : acc.warmup_details?.status || "Inactif"}
                       </span>
-                      {" "}• Réputation: {acc.warmup_details?.warmup_reputation || "N/A"}
+                      {" "}• Réputation: {acc.warmup_details?.warmup_reputation || "N/A"}{" "}
+                      • Ancienneté estimée: {p.emailAgeDays === null ? "non déterminée" : `${p.emailAgeDays} j`}
+                    </p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      1er envoi observé: {formatDateParis(acc.warmup_meta?.firstObservedSendAt)}
                     </p>
                   </div>
 
@@ -417,6 +458,10 @@ export default function WarmupPage() {
                       <div className="bg-blue-50 rounded-lg p-2 text-center">
                         <p className="text-lg font-bold text-blue-700">{p.totalSent}</p>
                         <p className="text-[9px] text-blue-500">Total envoyés</p>
+                      </div>
+                      <div className="bg-violet-50 rounded-lg p-2 text-center">
+                        <p className="text-lg font-bold text-violet-700">{p.historyWeeklySent}</p>
+                        <p className="text-[9px] text-violet-500">Envoyés 7j observés</p>
                       </div>
                       <div className={cn("rounded-lg p-2 text-center", p.spamRate > 2 ? "bg-red-50" : "bg-green-50")}>
                         <p className={cn("text-lg font-bold", p.spamRate > 2 ? "text-red-700" : "text-green-700")}>{p.spamRate.toFixed(1)}%</p>
@@ -463,6 +508,10 @@ export default function WarmupPage() {
                       <TrendingUp className="w-3 h-3" /> Rampe recommandée
                     </h4>
                     <div className="space-y-1">
+                      <p className="text-[10px] text-gray-500 mb-1">
+                        Recommandation hebdo: <span className="font-semibold text-gray-700">{p.weeklyTarget}/sem</span>{" "}
+                        <span className="text-gray-400">(confiance {p.estimationConfidence})</span>
+                      </p>
                       {p.rampTable.map((r) => (
                         <div key={r.week} className={cn("flex items-center justify-between text-xs", r.week === p.currentWeek ? "font-bold text-orange-700" : "text-gray-500")}>
                           <span>Semaine {r.week} {r.week === p.currentWeek ? "←" : ""}</span>

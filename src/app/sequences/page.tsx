@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import SequencesAffairesPanel from "@/components/SequencesAffairesPanel";
+import { formatDateTimeParis } from "@/lib/date-paris";
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -18,6 +19,7 @@ interface Campaign {
   name: string;
   status: string;
   created_at: string;
+  nextSendAt?: string | null;
   max_leads_per_day?: number;
   stop_lead_settings?: string;
   track_settings?: string[];
@@ -81,7 +83,31 @@ interface LeadMessage {
 
 type View = "list" | "detail";
 type DetailTab = "overview" | "leads" | "sequences" | "settings";
-type ListSection = "smartlead" | "affaires";
+type ListSection = "smartlead" | "affaires" | "stats";
+
+interface SequenceStatsRow {
+  id: number;
+  name: string;
+  status: string;
+  nextSendAt?: string | null;
+  sent_count: number;
+  open_count: number;
+  reply_count: number;
+  bounce_count: number;
+  openMeasured: boolean;
+}
+
+interface SequenceStatsData {
+  period: { key: "7d" | "30d" | "month"; start: string; end: string };
+  smartlead: {
+    campaigns: SequenceStatsRow[];
+    totals: { sent_count: number; open_count: number; reply_count: number; bounce_count: number };
+  };
+  affaires: {
+    campaigns: SequenceStatsRow[];
+    totals: { sent_count: number; open_count: number; reply_count: number; bounce_count: number };
+  };
+}
 
 // ─── Helpers ────────────────────────────────────────────
 
@@ -258,6 +284,9 @@ export default function SequencesPage() {
   const [sequences, setSequences] = useState<SequenceStep[]>([]);
   const [leadsResp, setLeadsResp] = useState<LeadsResponse | null>(null);
   const [campaignAccounts, setCampaignAccounts] = useState<EmailAccount[]>([]);
+  const [statsPeriod, setStatsPeriod] = useState<"7d" | "30d" | "month">("7d");
+  const [globalStats, setGlobalStats] = useState<SequenceStatsData | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
 
   // Lead filters
   const [leadFilter, setLeadFilter] = useState<string>("");
@@ -334,6 +363,25 @@ export default function SequencesPage() {
   }, []);
 
   useEffect(() => { fetchCampaigns(); }, [fetchCampaigns]);
+
+  const fetchGlobalStats = useCallback(async () => {
+    setStatsLoading(true);
+    try {
+      const res = await fetch(`/api/sequences/stats?period=${statsPeriod}`);
+      const data = await res.json();
+      if (data.error) throw new Error(String(data.error));
+      setGlobalStats(data as SequenceStatsData);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setStatsLoading(false);
+    }
+  }, [statsPeriod]);
+
+  useEffect(() => {
+    if (view !== "list" || listSection !== "stats") return;
+    fetchGlobalStats();
+  }, [view, listSection, fetchGlobalStats]);
 
   const openDetail = useCallback(async (id: number, filter?: string) => {
     setSelectedId(id); setView("detail"); setDetailLoading(true); setError(null);
@@ -746,62 +794,182 @@ export default function SequencesPage() {
           >
             Affaires
           </button>
+          <button
+            onClick={() => setListSection("stats")}
+            className={cn(
+              "px-3 py-1.5 text-xs font-medium rounded-lg cursor-pointer",
+              listSection === "stats" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
+            )}
+          >
+            Statistiques
+          </button>
         </div>
 
         <MsgBanner />
 
         {listSection === "affaires" ? (
           <SequencesAffairesPanel />
-        ) : (
-          <>
-        {allAccounts.length > 0 && (
-          <div className="mb-4 flex items-center gap-2 text-xs text-gray-500">
-            <Mail className="w-3.5 h-3.5" />
-            {allAccounts.filter((a) => a.is_smtp_success).length} compte(s) email connecté(s) : {allAccounts.filter((a) => a.is_smtp_success).map((a) => a.from_email).join(", ")}
-          </div>
-        )}
-
-        {loading ? (
-          <div className="flex justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-violet-400" /></div>
-        ) : campaigns.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-            <Mail className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-            <p className="text-lg font-medium text-gray-600">Aucune campagne</p>
-            <p className="text-sm text-gray-400 mt-1">Créez votre première campagne.</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {campaigns.map((c) => (
-              <button key={c.id} onClick={() => { setDetailTab("overview"); openDetail(c.id); }}
-                className="w-full flex items-center gap-4 bg-white rounded-lg border border-gray-200 px-4 py-3 hover:border-violet-300 hover:shadow-sm transition-all cursor-pointer text-left">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 truncate">{c.name}</p>
-                  <p className="text-[10px] text-gray-400 mt-0.5">ID {c.id} • {new Date(c.created_at).toLocaleDateString("fr-FR")}</p>
-                </div>
-                {statusBadge(c.status)}
-                <ChevronRight className="w-4 h-4 text-gray-300" />
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Create modal */}
-        {showCreate && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowCreate(false)}>
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
-              <h3 className="text-sm font-semibold text-gray-900">Nouvelle campagne</h3>
-              <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Nom de la campagne..."
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 outline-none" autoFocus
-                onKeyDown={(e) => e.key === "Enter" && createCampaign()} />
-              <div className="flex justify-end gap-2">
-                <button onClick={() => setShowCreate(false)} className="px-3 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-lg cursor-pointer">Annuler</button>
-                <button onClick={createCampaign} disabled={creating || !newName.trim()} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-violet-600 rounded-lg disabled:opacity-50 cursor-pointer">
-                  {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />} Créer
+        ) : listSection === "stats" ? (
+          <div className="space-y-4">
+            <div className="bg-white border border-gray-200 rounded-lg p-3 flex items-center justify-between">
+              <div className="text-xs text-gray-500">
+                Période statistiques: {globalStats?.period?.start || "—"} → {globalStats?.period?.end || "—"}
+              </div>
+              <div className="flex items-center gap-1">
+                {(["7d", "30d", "month"] as const).map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => setStatsPeriod(p)}
+                    className={cn(
+                      "px-2.5 py-1 text-xs rounded border cursor-pointer",
+                      statsPeriod === p ? "bg-violet-50 border-violet-300 text-violet-700" : "bg-white border-gray-200 text-gray-600"
+                    )}
+                  >
+                    {p === "7d" ? "7j" : p === "30d" ? "30j" : "Mois"}
+                  </button>
+                ))}
+                <button onClick={fetchGlobalStats} className="px-2.5 py-1 text-xs rounded border border-gray-200 text-gray-600 bg-white cursor-pointer">
+                  Actualiser
                 </button>
               </div>
             </div>
+
+            {statsLoading ? (
+              <div className="flex justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-violet-400" /></div>
+            ) : (
+              <>
+                <div className="bg-white border border-gray-200 rounded-lg p-3">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-2">Smartlead</h3>
+                  <p className="text-xs text-gray-500 mb-2">
+                    Envoyés: {globalStats?.smartlead?.totals?.sent_count || 0} • Ouverts: {globalStats?.smartlead?.totals?.open_count || 0} • Réponses: {globalStats?.smartlead?.totals?.reply_count || 0}
+                  </p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-left text-gray-500 border-b border-gray-100">
+                          <th className="py-1.5 pr-2">Campagne</th>
+                          <th className="py-1.5 pr-2">Statut</th>
+                          <th className="py-1.5 pr-2">Prochain envoi</th>
+                          <th className="py-1.5 pr-2">Envoyés</th>
+                          <th className="py-1.5 pr-2">Ouverts</th>
+                          <th className="py-1.5 pr-2">Réponses</th>
+                          <th className="py-1.5 pr-2">% ouverture</th>
+                          <th className="py-1.5 pr-2">% réponse</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(globalStats?.smartlead?.campaigns || []).map((row) => {
+                          const openRate = row.sent_count > 0 ? Math.round((row.open_count / row.sent_count) * 100) : 0;
+                          const replyRate = row.sent_count > 0 ? Math.round((row.reply_count / row.sent_count) * 100) : 0;
+                          return (
+                            <tr key={`smartlead-${row.id}`} className="border-b border-gray-50">
+                              <td className="py-1.5 pr-2 text-gray-800 font-medium">{row.name}</td>
+                              <td className="py-1.5 pr-2 text-gray-600">{row.status}</td>
+                              <td className="py-1.5 pr-2 text-violet-600">{formatDateTimeParis(row.nextSendAt)}</td>
+                              <td className="py-1.5 pr-2">{row.sent_count}</td>
+                              <td className="py-1.5 pr-2">{row.open_count}</td>
+                              <td className="py-1.5 pr-2">{row.reply_count}</td>
+                              <td className="py-1.5 pr-2">{openRate}%</td>
+                              <td className="py-1.5 pr-2">{replyRate}%</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="bg-white border border-gray-200 rounded-lg p-3">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-2">Affaires</h3>
+                  <p className="text-xs text-gray-500 mb-2">
+                    Envoyés: {globalStats?.affaires?.totals?.sent_count || 0} • Réponses: {globalStats?.affaires?.totals?.reply_count || 0} • Ouvertures: non mesurées
+                  </p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-left text-gray-500 border-b border-gray-100">
+                          <th className="py-1.5 pr-2">Campagne</th>
+                          <th className="py-1.5 pr-2">Statut</th>
+                          <th className="py-1.5 pr-2">Prochain envoi</th>
+                          <th className="py-1.5 pr-2">Envoyés</th>
+                          <th className="py-1.5 pr-2">Ouverts</th>
+                          <th className="py-1.5 pr-2">Réponses</th>
+                          <th className="py-1.5 pr-2">% réponse</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(globalStats?.affaires?.campaigns || []).map((row) => {
+                          const replyRate = row.sent_count > 0 ? Math.round((row.reply_count / row.sent_count) * 100) : 0;
+                          return (
+                            <tr key={`affaires-${row.id}`} className="border-b border-gray-50">
+                              <td className="py-1.5 pr-2 text-gray-800 font-medium">{row.name}</td>
+                              <td className="py-1.5 pr-2 text-gray-600">{row.status}</td>
+                              <td className="py-1.5 pr-2 text-violet-600">{formatDateTimeParis(row.nextSendAt)}</td>
+                              <td className="py-1.5 pr-2">{row.sent_count}</td>
+                              <td className="py-1.5 pr-2">—</td>
+                              <td className="py-1.5 pr-2">{row.reply_count}</td>
+                              <td className="py-1.5 pr-2">{replyRate}%</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
-        )}
+        ) : (
+          <>
+            {allAccounts.length > 0 && (
+              <div className="mb-4 flex items-center gap-2 text-xs text-gray-500">
+                <Mail className="w-3.5 h-3.5" />
+                {allAccounts.filter((a) => a.is_smtp_success).length} compte(s) email connecté(s) : {allAccounts.filter((a) => a.is_smtp_success).map((a) => a.from_email).join(", ")}
+              </div>
+            )}
+
+            {loading ? (
+              <div className="flex justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-violet-400" /></div>
+            ) : campaigns.length === 0 ? (
+              <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+                <Mail className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                <p className="text-lg font-medium text-gray-600">Aucune campagne</p>
+                <p className="text-sm text-gray-400 mt-1">Créez votre première campagne.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {campaigns.map((c) => (
+                  <button key={c.id} onClick={() => { setDetailTab("overview"); openDetail(c.id); }}
+                    className="w-full flex items-center gap-4 bg-white rounded-lg border border-gray-200 px-4 py-3 hover:border-violet-300 hover:shadow-sm transition-all cursor-pointer text-left">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{c.name}</p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">ID {c.id} • {new Date(c.created_at).toLocaleDateString("fr-FR")}</p>
+                      <p className="text-[10px] text-violet-600 mt-0.5">Prochain envoi: {formatDateTimeParis(c.nextSendAt)}</p>
+                    </div>
+                    {statusBadge(c.status)}
+                    <ChevronRight className="w-4 h-4 text-gray-300" />
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Create modal */}
+            {showCreate && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowCreate(false)}>
+                <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+                  <h3 className="text-sm font-semibold text-gray-900">Nouvelle campagne</h3>
+                  <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Nom de la campagne..."
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 outline-none" autoFocus
+                    onKeyDown={(e) => e.key === "Enter" && createCampaign()} />
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => setShowCreate(false)} className="px-3 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-lg cursor-pointer">Annuler</button>
+                    <button onClick={createCampaign} disabled={creating || !newName.trim()} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-violet-600 rounded-lg disabled:opacity-50 cursor-pointer">
+                      {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />} Créer
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         )}
       </>
@@ -875,7 +1043,8 @@ export default function SequencesPage() {
               <h1 className="text-lg font-bold text-gray-900 truncate">{campaign?.name || "Campagne"}</h1>
               {statusBadge(campaign.status)}
             </div>
-            <p className="text-xs text-gray-400">Configuration de la campagne — Étape {wizardStep}/4</p>
+          <p className="text-xs text-gray-400">Configuration de la campagne — Étape {wizardStep}/4</p>
+          <p className="text-xs text-violet-600">Prochain envoi: {formatDateTimeParis(campaign?.nextSendAt)}</p>
           </div>
           <button onClick={() => { setForceAdvancedView(true); setDetailTab("overview"); }} className="text-[10px] text-gray-400 underline cursor-pointer">
             Vue avancée →
@@ -1597,6 +1766,7 @@ export default function SequencesPage() {
             {campaign && statusBadge(campaign.status)}
           </div>
           <p className="text-xs text-gray-400">ID {selectedId} • {campaignAccounts.length} compte(s) email</p>
+          <p className="text-xs text-violet-600">Prochain envoi: {formatDateTimeParis(campaign?.nextSendAt)}</p>
         </div>
         <div className="flex items-center gap-1.5">
           {isDrafted && forceAdvancedView && (

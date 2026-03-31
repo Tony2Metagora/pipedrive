@@ -22,9 +22,34 @@ export async function GET() {
 
     const data = accounts.map((account, i) => {
       const wr = warmupResults[i];
+      const warmupStats = wr.status === "fulfilled" ? wr.value : null;
+      const daily = warmupStats?.daily_stats || [];
+      const firstObservedSend = daily
+        .filter((d) => Number(d.sent || 0) > 0)
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
+      const historyWeeklySent = daily
+        .slice(-7)
+        .reduce((sum, day) => sum + Number(day.sent || 0), 0);
+      const historyDailyAvg = daily.length > 0
+        ? daily.reduce((sum, day) => sum + Number(day.sent || 0), 0) / daily.length
+        : 0;
+      const firstObservedSendAt = firstObservedSend?.date || null;
+      const emailAgeDays = firstObservedSendAt
+        ? Math.max(
+          0,
+          Math.floor((Date.now() - new Date(firstObservedSendAt).getTime()) / (24 * 60 * 60 * 1000))
+        )
+        : null;
       return {
         ...account,
-        warmup_stats: wr.status === "fulfilled" ? wr.value : null,
+        warmup_stats: warmupStats,
+        warmup_meta: {
+          firstObservedSendAt,
+          emailAgeDays,
+          historyWeeklySent,
+          historyDailyAvg: Number(historyDailyAvg.toFixed(2)),
+          historyDaysCount: daily.length,
+        },
       };
     });
 

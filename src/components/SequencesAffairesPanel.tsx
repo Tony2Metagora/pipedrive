@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle, Loader2, Play, Plus, Send, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatDateTimeParis } from "@/lib/date-paris";
 
 interface AffCampaign {
   id: number;
   name: string;
   status: "draft" | "running" | "paused" | "completed";
   createdAt: string;
+  nextSendAt?: string | null;
 }
 
 interface LeadRow {
@@ -37,6 +39,7 @@ interface FollowupItem {
   totalSteps?: number;
   delayAfterPreviousBusinessDays?: number;
   delayAfterPreviousMinutes?: number;
+  scheduledAt?: string;
   lastEmailAt?: string;
   lastError?: string;
 }
@@ -593,6 +596,9 @@ export default function SequencesAffairesPanel() {
                 <button onClick={() => setSelectedCampaignId(c.id)} className="w-full text-left cursor-pointer">
                   <p className="text-xs font-medium">{c.name}</p>
                   <p className="text-[10px] text-gray-500">{c.status}</p>
+                  <p className="text-[10px] text-violet-600">
+                    Prochain envoi: {formatDateTimeParis(c.nextSendAt)}
+                  </p>
                 </button>
                 <button
                   onClick={() => deleteCampaign(c.id)}
@@ -707,6 +713,9 @@ export default function SequencesAffairesPanel() {
             <div key={it.id} className="border border-gray-200 rounded-lg p-2 text-xs">
               <p className="font-medium">{it.leadName || it.leadEmail}</p>
               <p className="text-gray-500">Mail {it.sequenceStep || 1}/{it.totalSteps || 1} - {it.status}</p>
+              {it.scheduledAt && (
+                <p className="text-gray-400">Prochain envoi: {formatDateTimeParis(it.scheduledAt)}</p>
+              )}
               {it.lastEmailAt && <p className="text-gray-400">Dernier envoi: {new Date(it.lastEmailAt).toLocaleString("fr-FR")}</p>}
               {it.lastError && <p className="text-red-600">{it.lastError}</p>}
             </div>

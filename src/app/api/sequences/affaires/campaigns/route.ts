@@ -1,13 +1,25 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-guard";
-import { createFollowupCampaign, listFollowupCampaigns } from "@/lib/followup-store";
+import { createFollowupCampaign, listFollowupCampaigns, listFollowupItemsByCampaign } from "@/lib/followup-store";
 
 export async function GET() {
   const guard = await requireAuth("sequences", "GET");
   if (guard.denied) return guard.denied;
   try {
     const campaigns = await listFollowupCampaigns();
-    return NextResponse.json({ data: campaigns });
+    const campaignsWithNextSend = await Promise.all(
+      campaigns.map(async (campaign) => {
+        const items = await listFollowupItemsByCampaign(campaign.id);
+        const nextScheduled = items
+          .filter((item) => item.status === "a_envoyer" || item.status === "en_cours")
+          .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime())[0];
+        return {
+          ...campaign,
+          nextSendAt: nextScheduled?.scheduledAt || null,
+        };
+      })
+    );
+    return NextResponse.json({ data: campaignsWithNextSend });
   } catch (error) {
     console.error("GET /api/sequences/affaires/campaigns error:", error);
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });

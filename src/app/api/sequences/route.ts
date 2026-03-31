@@ -5,6 +5,7 @@ import {
   createCampaign,
   listEmailAccounts,
 } from "@/lib/smartlead";
+import { estimateNextSendAtFromSchedule } from "@/lib/date-paris";
 
 /** GET /api/sequences — list campaigns + email accounts */
 export async function GET() {
@@ -16,7 +17,14 @@ export async function GET() {
       listCampaigns(),
       listEmailAccounts(),
     ]);
-    return NextResponse.json({ campaigns, emailAccounts });
+    const enrichedCampaigns = campaigns.map((campaign) => {
+      const active = ["STARTED", "ACTIVE"].includes((campaign.status || "").toUpperCase());
+      const nextSendAt = active
+        ? estimateNextSendAtFromSchedule(campaign.scheduler_cron_value || null)
+        : null;
+      return { ...campaign, nextSendAt };
+    });
+    return NextResponse.json({ campaigns: enrichedCampaigns, emailAccounts });
   } catch (error) {
     console.error("GET /api/sequences error:", error);
     return NextResponse.json({ error: String(error) }, { status: 500 });

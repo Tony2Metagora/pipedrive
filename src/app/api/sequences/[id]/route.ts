@@ -21,6 +21,7 @@ import {
   type CampaignSettings,
   type CampaignSchedule,
 } from "@/lib/smartlead";
+import { estimateNextSendAtFromSchedule } from "@/lib/date-paris";
 
 /** GET /api/sequences/[id] — campaign detail + stats + sequences + leads + campaign email accounts */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -56,8 +57,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       getCampaignEmailAccounts(campaignId),
     ]);
 
+    const campaignValue = campaign.status === "fulfilled" ? campaign.value : null;
+    const active = ["STARTED", "ACTIVE"].includes((campaignValue?.status || "").toUpperCase());
+    const nextSendAt = active
+      ? estimateNextSendAtFromSchedule(campaignValue?.scheduler_cron_value || null)
+      : null;
+
     return NextResponse.json({
-      campaign: campaign.status === "fulfilled" ? campaign.value : null,
+      campaign: campaignValue ? { ...campaignValue, nextSendAt } : null,
       stats: stats.status === "fulfilled" ? stats.value : null,
       sequences: sequences.status === "fulfilled" ? sequences.value : [],
       leads: leads.status === "fulfilled" ? leads.value : { total_leads: "0", offset: 0, limit: 100, data: [] },
