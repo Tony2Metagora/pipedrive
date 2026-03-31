@@ -358,7 +358,8 @@ export async function POST(request: Request) {
     // Append to existing prospects.
     // Option 2: dedup by list (not globally) when list_id is provided.
     // Fallback to global dedup when no list is targeted.
-    let skippedDuplicates = 0;
+    let dupInFile = 0;
+    let dupWithExisting = 0;
     const nameKey = (r: ProspectRow) => {
       const nom = (r.nom || "").toLowerCase().trim();
       const prenom = (r.prenom || "").toLowerCase().trim();
@@ -384,12 +385,16 @@ export async function POST(request: Request) {
       for (const r of newRows) {
         const email = r.email?.toLowerCase().trim();
         if (email) {
-          if (existingEmails.has(email) || seenEmails.has(email)) { skippedDuplicates++; continue; }
+          if (existingEmails.has(email)) { dupWithExisting++; continue; }
+          if (seenEmails.has(email)) { dupInFile++; continue; }
           seenEmails.add(email);
         } else {
           const nk = nameKey(r);
-          if (nk !== "||||" && (existingNames.has(nk) || seenNames.has(nk))) { skippedDuplicates++; continue; }
-          if (nk !== "||||") seenNames.add(nk);
+          if (nk !== "||||") {
+            if (existingNames.has(nk)) { dupWithExisting++; continue; }
+            if (seenNames.has(nk)) { dupInFile++; continue; }
+            seenNames.add(nk);
+          }
         }
         deduped.push(r);
       }
@@ -430,7 +435,10 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       count: newRows.length,
-      skippedDuplicates,
+      skippedDuplicates: dupInFile + dupWithExisting,
+      dupInFile,
+      dupWithExisting,
+      totalRows: newRows.length + dupInFile + dupWithExisting,
       list_id: finalListId || null,
       extraColumns: extraLabels,
     });

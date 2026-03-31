@@ -417,10 +417,15 @@ export default function ProspectsPage() {
       const res = await fetch("/api/prospects/upload", { method: "POST", body: formData });
       const json = await res.json();
       if (json.success) {
-        const dupMsg = json.skippedDuplicates ? ` (${json.skippedDuplicates} doublons ignorés)` : "";
-        const extraMsg = json.extraColumns?.length ? ` + ${json.extraColumns.length} colonnes supplémentaires` : "";
-        setActionMsg(`${json.count} contacts importés dans "${uploadListName.trim()}"${dupMsg}${extraMsg}`);
-        setTimeout(() => setActionMsg(null), 5000);
+        const parts: string[] = [`✓ ${json.count} contacts importés dans "${uploadListName.trim()}"`];
+        if (json.dupInFile > 0) parts.push(`${json.dupInFile} doublons dans le fichier source`);
+        if (json.dupWithExisting > 0) parts.push(`${json.dupWithExisting} doublons déjà présents en base`);
+        if (json.extraColumns?.length) parts.push(`${json.extraColumns.length} colonnes supplémentaires`);
+        if (json.totalRows && (json.dupInFile > 0 || json.dupWithExisting > 0)) {
+          parts.push(`(${json.totalRows} lignes lues → ${json.count} uniques)`);
+        }
+        setActionMsg(parts.join(" · "));
+        setTimeout(() => setActionMsg(null), 15000);
         resetUploadModal();
         syncProspects();
         fetchLists();
@@ -1386,7 +1391,10 @@ export default function ProspectsPage() {
         </div>
         <div className="flex items-center gap-2">
           {actionMsg && !processing && (
-            <span className="text-xs font-medium px-2 py-1 rounded bg-green-50 text-green-700">{actionMsg}</span>
+            <span className={`text-xs font-medium px-3 py-1.5 rounded-lg shadow-sm border ${actionMsg.includes("doublon") ? "bg-amber-50 text-amber-800 border-amber-200" : "bg-green-50 text-green-700 border-green-200"}`}>
+              {actionMsg}
+              <button onClick={() => setActionMsg(null)} className="ml-2 text-current opacity-50 hover:opacity-100">✕</button>
+            </span>
           )}
           {processing ? (
             <div className="flex items-center gap-3 px-3 py-1.5 bg-white border border-gray-200 rounded-lg min-w-[320px]">
