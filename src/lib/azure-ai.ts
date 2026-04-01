@@ -117,7 +117,7 @@ export async function askAzureFast(
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", "api-key": cfg.apiKey },
-    body: JSON.stringify({ messages, max_tokens: maxTokens }),
+    body: JSON.stringify({ messages, max_completion_tokens: maxTokens }),
   });
 
   if (!res.ok) {
