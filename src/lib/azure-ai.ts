@@ -23,7 +23,7 @@ function readConfig() {
   const deployment =
     process.env.AZURE_OPENAI_DEPLOYMENT_FAST ||
     process.env.AZURE_OPENAI_DEPLOYMENT ||
-    "gpt-5.2-chat";
+    "gpt-5-2";
   const chatApiVersion =
     process.env.AZURE_OPENAI_API_VERSION_FAST ||
     process.env.AZURE_OPENAI_API_VERSION ||
