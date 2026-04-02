@@ -34,7 +34,7 @@ function sleep(ms: number) {
 /**
  * POST body:
  * - mode omitted or "summary": { nafs? } → france + idf par NAF
- * - mode "matrix": { nafs?, regions: string[] } → matrixApi[region][naf] = somme API par départements de la région
+ * - mode "matrix": exactement 1 région + 1 NAF — champs `region` + `naf` (ou un seul élément dans regions[] / nafs[])
  */
 export async function POST(request: Request) {
   const guard = await requireAuth("scrapping", "POST");
@@ -45,30 +45,58 @@ export async function POST(request: Request) {
       mode?: "summary" | "matrix";
       nafs?: string[];
       regions?: string[];
+      naf?: string;
+      region?: string;
     };
 
     const nafs = (body.nafs?.length ? body.nafs : RETAIL_NAF_CODES.map((x) => x.code)).map((c) => String(c).trim().toUpperCase());
 
-    if (body.mode === "matrix" && Array.isArray(body.regions) && body.regions.length > 0) {
-      const regions = body.regions.slice(0, 20);
-      const matrix: Record<string, Record<string, number>> = {};
-      for (const region of regions) {
-        matrix[region] = {};
-        const depts = departementsForRegion(region);
-        for (const naf of nafs) {
-          let sum = 0;
-          for (const dept of depts) {
-            const t = await fetchTotalResults(naf, dept);
-            if (t >= 0) sum += t;
-            await sleep(120);
-          }
-          matrix[region][naf] = sum;
-        }
+    if (body.mode === "matrix") {
+      const regionRaw =
+        typeof body.region === "string" && body.region.trim()
+          ? body.region.trim()
+          : Array.isArray(body.regions) && body.regions.length
+            ? String(body.regions[0]).trim()
+            : "";
+      const nafRaw =
+        typeof body.naf === "string" && body.naf.trim()
+          ? body.naf.trim().toUpperCase()
+          : Array.isArray(body.nafs) && body.nafs?.length
+            ? String(body.nafs[0]).trim().toUpperCase()
+            : "";
+
+      if (!regionRaw || !nafRaw) {
+        return NextResponse.json(
+          {
+            error:
+              "Matrice : indiquer exactement une région et un code NAF (champs region et naf, ou tableaux d’un seul élément).",
+          },
+          { status: 400 }
+        );
       }
+
+      const depts = departementsForRegion(regionRaw);
+      if (depts.length === 0) {
+        return NextResponse.json({ error: `Région inconnue ou sans département : ${regionRaw}` }, { status: 400 });
+      }
+
+      let sum = 0;
+      for (const dept of depts) {
+        const t = await fetchTotalResults(nafRaw, dept);
+        if (t >= 0) sum += t;
+        await sleep(120);
+      }
+
+      const matrix: Record<string, Record<string, number>> = {
+        [regionRaw]: { [nafRaw]: sum },
+      };
+
       return NextResponse.json({
         success: true,
         matrix,
-        note: "Total par région = somme des total_results API par département de la région (établissements / entreprises selon l'API).",
+        region: regionRaw,
+        naf: nafRaw,
+        note: "Un seul couple région × NAF : somme des total_results API par département de la région.",
       });
     }
 

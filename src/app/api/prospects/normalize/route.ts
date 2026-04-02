@@ -48,8 +48,6 @@ const TARGET_FIELDS = [
 
 const TARGET_FIELD_SET = new Set<string>(TARGET_FIELDS);
 const META_FIELD_SET = new Set<string>(["id", "list_id", "statut"]);
-const DEBUG_ENDPOINT = "http://127.0.0.1:7720/ingest/16cbdbe8-2060-402e-a2b2-0978bf515ae3";
-const DEBUG_SESSION_ID = "d3538e";
 
 function clean(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
@@ -197,22 +195,6 @@ export async function POST(request: Request) {
   if (guard.denied) return guard.denied;
 
   try {
-    // #region agent log
-    fetch(DEBUG_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": DEBUG_SESSION_ID },
-      body: JSON.stringify({
-        sessionId: DEBUG_SESSION_ID,
-        runId: "pre-fix",
-        hypothesisId: "H1",
-        location: "src/app/api/prospects/normalize/route.ts:196",
-        message: "normalize-target-fields-snapshot",
-        data: { targetFields: [...TARGET_FIELDS] },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-
     const body = (await request.json().catch(() => ({}))) as { dryRun?: boolean; dedupe?: boolean };
     const dryRun = Boolean(body.dryRun);
     const shouldDedupe = body.dedupe !== false;
@@ -239,39 +221,7 @@ export async function POST(request: Request) {
         // 1) Try to copy canonical values from extra_fields.
         for (const [extraKey, rawValue] of Object.entries(extra)) {
           const canonical = resolveCanonicalProspectField(extraKey);
-          if (canonical && !TARGET_FIELD_SET.has(canonical)) {
-            // #region agent log
-            fetch(DEBUG_ENDPOINT, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", "X-Debug-Session-Id": DEBUG_SESSION_ID },
-              body: JSON.stringify({
-                sessionId: DEBUG_SESSION_ID,
-                runId: "pre-fix",
-                hypothesisId: "H2",
-                location: "src/app/api/prospects/normalize/route.ts:230",
-                message: "canonical-rejected-by-target-set",
-                data: { extraKey, canonical },
-                timestamp: Date.now(),
-              }),
-            }).catch(() => {});
-            // #endregion
-          }
           if (!canonical || !TARGET_FIELD_SET.has(canonical)) continue;
-          // #region agent log
-          fetch(DEBUG_ENDPOINT, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": DEBUG_SESSION_ID },
-            body: JSON.stringify({
-              sessionId: DEBUG_SESSION_ID,
-              runId: "pre-fix",
-              hypothesisId: "H3",
-              location: "src/app/api/prospects/normalize/route.ts:246",
-              message: "canonical-accepted-before-copy",
-              data: { extraKey, canonical },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
           setCanonicalIfEmpty(row, canonical, rawValue, stats);
         }
 

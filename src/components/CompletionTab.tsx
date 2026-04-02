@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { BarChart3, Database, Loader2, RefreshCcw, Building2 } from "lucide-react";
-import { RETAIL_NAF_CODES } from "@/lib/retail-naf";
+import { GRANDES_REGIONS_ORDER, RETAIL_NAF_CODES } from "@/lib/retail-naf";
 
 type CompletionRow = {
   label: string;
@@ -50,6 +50,10 @@ export default function CompletionTab() {
   const [loadingGouvSummary, setLoadingGouvSummary] = useState(false);
   const [loadingGouvMatrix, setLoadingGouvMatrix] = useState(false);
   const [gouvMsg, setGouvMsg] = useState<string | null>(null);
+  const [matrixNaf, setMatrixNaf] = useState<string>(RETAIL_NAF_CODES[0].code);
+  const [matrixRegion, setMatrixRegion] = useState<string>(
+    GRANDES_REGIONS_ORDER[0] ?? "Ile-de-France"
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -104,18 +108,16 @@ export default function CompletionTab() {
   };
 
   const fetchGouvMatrix = async () => {
-    if (!retailMatrix.length) return;
     setLoadingGouvMatrix(true);
     setGouvMsg(null);
     try {
-      const regions = retailMatrix.map((r) => r.region);
       const res = await fetch("/api/scraping/gouv-count", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mode: "matrix",
-          regions,
-          nafs: nafCodes,
+          region: matrixRegion,
+          naf: matrixNaf,
         }),
       });
       const json = await res.json();
@@ -123,8 +125,18 @@ export default function CompletionTab() {
         setGouvMsg(json.error || "Erreur API matrice");
         return;
       }
-      setApiMatrix(json.matrix || {});
-      setGouvMsg(json.note || "Matrice API régions × NAF chargée (peut prendre du temps).");
+      const patch = (json.matrix || {}) as Record<string, Record<string, number>>;
+      setApiMatrix((prev) => {
+        const next = { ...prev };
+        for (const [r, byNaf] of Object.entries(patch)) {
+          next[r] = { ...(next[r] || {}), ...byNaf };
+        }
+        return next;
+      });
+      setGouvMsg(
+        json.note ||
+          `API Gouv : ${matrixRegion} × ${matrixNaf} (les autres cellules restent inchangées).`
+      );
     } catch {
       setGouvMsg("Erreur réseau (matrice API)");
     } finally {
@@ -154,15 +166,45 @@ export default function CompletionTab() {
             {loadingGouvSummary ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Building2 className="w-3.5 h-3.5" />}
             API Gouv : France + IDF
           </button>
-          <button
-            type="button"
-            onClick={fetchGouvMatrix}
-            disabled={loadingGouvMatrix || loading || !retailMatrix.length}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-900 bg-emerald-100 border border-emerald-300 rounded-lg hover:bg-emerald-200 disabled:opacity-50 cursor-pointer"
-          >
-            {loadingGouvMatrix ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Building2 className="w-3.5 h-3.5" />}
-            API Gouv : matrice régions × NAF
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1.5 text-[11px] text-gray-600">
+              <span className="whitespace-nowrap">NAF</span>
+              <select
+                value={matrixNaf}
+                onChange={(e) => setMatrixNaf(e.target.value)}
+                className="border border-gray-300 rounded-md px-2 py-1 text-[11px] font-mono bg-white max-w-[120px]"
+              >
+                {RETAIL_NAF_CODES.map((x) => (
+                  <option key={x.code} value={x.code}>
+                    {x.code}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-1.5 text-[11px] text-gray-600">
+              <span className="whitespace-nowrap">Région</span>
+              <select
+                value={matrixRegion}
+                onChange={(e) => setMatrixRegion(e.target.value)}
+                className="border border-gray-300 rounded-md px-2 py-1 text-[11px] bg-white max-w-[200px]"
+              >
+                {GRANDES_REGIONS_ORDER.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={fetchGouvMatrix}
+              disabled={loadingGouvMatrix || loading}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-900 bg-emerald-100 border border-emerald-300 rounded-lg hover:bg-emerald-200 disabled:opacity-50 cursor-pointer"
+            >
+              {loadingGouvMatrix ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Building2 className="w-3.5 h-3.5" />}
+              API Gouv : 1 région × 1 NAF
+            </button>
+          </div>
           <button
             onClick={load}
             disabled={loading}
@@ -254,7 +296,7 @@ export default function CompletionTab() {
             <div className="px-4 py-3 border-b border-gray-100">
               <p className="text-sm font-semibold text-gray-700">Détail par grande région × code NAF</p>
               <p className="text-[11px] text-gray-500 mt-0.5">
-                Première valeur = entreprises scrapées dans votre base ; seconde = total API (somme par départements de la région) après chargement.
+                Première valeur = entreprises scrapées dans votre base ; seconde = total API pour la cellule choisie (un couple région + NAF par clic, cumul possible sur plusieurs cellules).
               </p>
             </div>
             <div className="overflow-x-auto max-h-[560px] overflow-y-auto">
