@@ -123,6 +123,7 @@ interface ScoringCard {
 }
 
 type StatusKey = "en cours" | "perdu" | "archivé";
+type ListFilterMode = "all" | "list" | "orphans";
 
 // Column definitions for visibility toggle + resizable widths
 const PROSPECT_COLUMNS = [
@@ -225,7 +226,7 @@ export default function ProspectsPage() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [search, setSearch] = useState("");
-  const [statusFilters, setStatusFilters] = useState<Set<StatusKey>>(new Set(["en cours", "perdu"]));
+  const [statusFilters, setStatusFilters] = useState<Set<StatusKey>>(new Set(["en cours", "perdu", "archivé"]));
   const [scoreFilters, setScoreFilters] = useState<Set<number>>(new Set());
   const [onlyUnscored, setOnlyUnscored] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -252,6 +253,7 @@ export default function ProspectsPage() {
   // Lists panel
   const [lists, setLists] = useState<ProspectList[]>([]);
   const [loadingLists, setLoadingLists] = useState(true);
+  const [listFilterMode, setListFilterMode] = useState<ListFilterMode>("all");
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadListName, setUploadListName] = useState("");
@@ -429,7 +431,10 @@ export default function ProspectsPage() {
         resetUploadModal();
         syncProspects();
         fetchLists();
-        if (json.list_id) setSelectedListId(json.list_id);
+        if (json.list_id) {
+          setSelectedListId(json.list_id);
+          setListFilterMode("list");
+        }
       } else {
         alert("Erreur lors de l'import : " + (json.error || "inconnue"));
       }
@@ -446,7 +451,10 @@ export default function ProspectsPage() {
     if (!confirm("Supprimer cette liste et tous ses contacts ?")) return;
     try {
       await fetch(`/api/prospects/lists?id=${listId}`, { method: "DELETE" });
-      if (selectedListId === listId) setSelectedListId(null);
+      if (listFilterMode === "list" && selectedListId === listId) {
+        setSelectedListId(null);
+        setListFilterMode("all");
+      }
       fetchLists();
       syncProspects();
       setActionMsg("Liste supprimée");
@@ -690,7 +698,7 @@ export default function ProspectsPage() {
 
   const aiScoreProspects = () => {
     // Detect company from selected list to pass as brand for dynamic scoring card
-    const selectedList = selectedListId ? lists.find((l) => l.id === selectedListId) : null;
+    const selectedList = listFilterMode === "list" && selectedListId ? lists.find((l) => l.id === selectedListId) : null;
     const brand = selectedList?.company || "Metagora";
     return runStreamingAction("/api/prospects/ai-score", "Score IA", (d) =>
       `${d.scored}/${d.total} prospects analysés par l'IA (${brand})`
@@ -698,7 +706,7 @@ export default function ProspectsPage() {
   };
 
   const aiScoreUnscoredFromSelectedList = () => {
-    if (!selectedListId) return;
+    if (listFilterMode !== "list" || !selectedListId) return;
     const listProspects = prospects.filter((p) => p.list_id === selectedListId);
     const unscoredIds = listProspects
       .filter((p) => (parseInt(p.ai_score || "0") || 0) === 0)
@@ -1079,8 +1087,10 @@ export default function ProspectsPage() {
   };
 
   const downloadCsv = () => {
-    const defaultTitle = selectedListId
+    const defaultTitle = listFilterMode === "list" && selectedListId
       ? `prospects-${(lists.find((l) => l.id === selectedListId)?.name || "liste").toLowerCase()}`
+      : listFilterMode === "orphans"
+        ? "prospects-hors-liste"
       : selected.size > 0
         ? "prospects-selection"
         : "prospects-export";
@@ -1138,8 +1148,12 @@ export default function ProspectsPage() {
   // Filtered and searched prospects
   const filtered = useMemo(() => {
     return prospects.filter((p) => {
-      // Filter by selected list
-      if (selectedListId && p.list_id !== selectedListId) return false;
+      // Filter by list scope
+      if (listFilterMode === "list") {
+        if (!selectedListId || p.list_id !== selectedListId) return false;
+      } else if (listFilterMode === "orphans") {
+        if ((p.list_id || "").trim()) return false;
+      }
       const statut = p.computed_statut || p.statut;
       if (statusFilters.size > 0 && !statusFilters.has(statut as StatusKey)) return false;
       if (scoreFilters.size > 0) {
@@ -1173,18 +1187,19 @@ export default function ProspectsPage() {
       }
       return true;
     });
-  }, [prospects, search, statusFilters, scoreFilters, selectedListId, onlyUnscored]);
+  }, [prospects, search, statusFilters, scoreFilters, selectedListId, onlyUnscored, listFilterMode]);
 
   const enCoursCount = prospects.filter((p) => (p.computed_statut || p.statut) === "en cours").length;
   const perduCount = prospects.filter((p) => (p.computed_statut || p.statut) === "perdu").length;
   const archivedCount = prospects.filter((p) => (p.computed_statut || p.statut) === "archivé").length;
+  const orphanCount = prospects.filter((p) => !(p.list_id || "").trim()).length;
 
   const allFilteredSelected = filtered.length > 0 && filtered.every((p) => selected.has(p.id));
   const someFilteredSelected = filtered.some((p) => selected.has(p.id));
   const unscoredInSelectedListCount = useMemo(() => {
-    if (!selectedListId) return 0;
+    if (listFilterMode !== "list" || !selectedListId) return 0;
     return prospects.filter((p) => p.list_id === selectedListId && (parseInt(p.ai_score || "0") || 0) === 0).length;
-  }, [prospects, selectedListId]);
+  }, [prospects, selectedListId, listFilterMode]);
   const productWordCount = countWords(scoringCardForm.product);
   const valuePropWordCount = countWords(scoringCardForm.value_proposition);
 
@@ -1505,7 +1520,7 @@ export default function ProspectsPage() {
               </button>
             </>
           )}
-          {selectedListId && !processing && (
+          {listFilterMode === "list" && selectedListId && !processing && (
             <button
               onClick={aiScoreUnscoredFromSelectedList}
               disabled={unscoredInSelectedListCount === 0}
@@ -1735,15 +1750,32 @@ export default function ProspectsPage() {
             <div className="p-2 space-y-0.5 max-h-[500px] overflow-y-auto">
               {/* All contacts */}
               <button
-                onClick={() => setSelectedListId(null)}
+                onClick={() => {
+                  setListFilterMode("all");
+                  setSelectedListId(null);
+                }}
                 className={cn(
                   "w-full text-left px-2.5 py-2 rounded-md text-xs transition-colors cursor-pointer flex items-center gap-2",
-                  !selectedListId ? "bg-indigo-50 text-indigo-700 font-semibold" : "hover:bg-gray-50 text-gray-600"
+                  listFilterMode === "all" ? "bg-indigo-50 text-indigo-700 font-semibold" : "hover:bg-gray-50 text-gray-600"
                 )}
               >
                 <Users className="w-3.5 h-3.5 flex-shrink-0" />
                 <span className="flex-1 truncate">Tous les contacts</span>
                 <span className="text-[9px] text-gray-400">{prospects.length}</span>
+              </button>
+              <button
+                onClick={() => {
+                  setListFilterMode("orphans");
+                  setSelectedListId(null);
+                }}
+                className={cn(
+                  "w-full text-left px-2.5 py-2 rounded-md text-xs transition-colors cursor-pointer flex items-center gap-2",
+                  listFilterMode === "orphans" ? "bg-indigo-50 text-indigo-700 font-semibold" : "hover:bg-gray-50 text-gray-600"
+                )}
+              >
+                <Users className="w-3.5 h-3.5 flex-shrink-0" />
+                <span className="flex-1 truncate">Hors liste</span>
+                <span className="text-[9px] text-gray-400">{orphanCount}</span>
               </button>
 
               {loadingLists ? (
@@ -1754,9 +1786,15 @@ export default function ProspectsPage() {
                 lists.map((l) => (
                   <div key={l.id} className={cn(
                     "group flex items-center gap-1.5 px-2.5 py-2 rounded-md text-xs transition-colors cursor-pointer",
-                    selectedListId === l.id ? "bg-indigo-50 text-indigo-700 font-semibold" : "hover:bg-gray-50 text-gray-600"
+                    listFilterMode === "list" && selectedListId === l.id ? "bg-indigo-50 text-indigo-700 font-semibold" : "hover:bg-gray-50 text-gray-600"
                   )}>
-                    <button onClick={() => setSelectedListId(l.id)} className="flex-1 text-left flex items-center gap-2 min-w-0 cursor-pointer">
+                    <button
+                      onClick={() => {
+                        setSelectedListId(l.id);
+                        setListFilterMode("list");
+                      }}
+                      className="flex-1 text-left flex items-center gap-2 min-w-0 cursor-pointer"
+                    >
                       <List className="w-3.5 h-3.5 flex-shrink-0 text-indigo-400" />
                       <div className="flex-1 min-w-0">
                         <p className="truncate">{l.name}</p>
