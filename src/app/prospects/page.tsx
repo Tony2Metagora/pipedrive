@@ -327,6 +327,8 @@ export default function ProspectsPage() {
   const [scoringLeadPickerType, setScoringLeadPickerType] = useState<"good" | "bad" | null>(null);
   const [scoringLeadSearch, setScoringLeadSearch] = useState("");
   const [scoringLeadSelectedIds, setScoringLeadSelectedIds] = useState<Set<string>>(new Set());
+  /** Filtre liste pour le sélecteur de bons / mauvais leads (fiche entreprise) */
+  const [scoringListFilterId, setScoringListFilterId] = useState<string>("");
   const [draggingColKey, setDraggingColKey] = useState<string | null>(null);
   const [visibleCols, setVisibleCols] = useState<Set<string>>(
     new Set(PROSPECT_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key))
@@ -1065,6 +1067,7 @@ export default function ProspectsPage() {
     setScoringLeadPickerType(null);
     setScoringLeadSearch("");
     setScoringLeadSelectedIds(new Set());
+    setScoringListFilterId("");
   };
 
   const saveScoringCard = async () => {
@@ -2785,7 +2788,7 @@ export default function ProspectsPage() {
             <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between rounded-t-xl z-10">
               <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
                 <ClipboardList className="w-4 h-4 text-violet-600" />
-                Fiche scoring — {editingScoringCard.company}
+                Fiche entreprise — {editingScoringCard.company}
               </h3>
               <button onClick={() => setEditingScoringCard(null)} className="p-0.5 text-gray-400 hover:text-gray-600 cursor-pointer">
                 <X className="w-4 h-4" />
@@ -2889,6 +2892,28 @@ export default function ProspectsPage() {
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* Liste pour filtrer les contacts (bons / mauvais leads) */}
+              <div className="rounded-lg border border-violet-100 bg-violet-50/50 p-3">
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Liste pour choisir les contacts</label>
+                <p className="text-[10px] text-gray-500 mb-2">
+                  Sélectionnez une liste importée liée à cette entreprise pour afficher uniquement ces contacts lors de l&apos;ajout aux 10 bons / 10 mauvais leads.
+                </p>
+                <select
+                  value={scoringListFilterId}
+                  onChange={(e) => setScoringListFilterId(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-violet-200 rounded-lg bg-white focus:ring-2 focus:ring-violet-400 outline-none"
+                >
+                  <option value="">Toutes les listes ({editingScoringCard.company})</option>
+                  {lists
+                    .filter((l) => normalizeBrandKey(l.company) === normalizeBrandKey(editingScoringCard.company))
+                    .map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.name} ({l.count} contacts)
+                      </option>
+                    ))}
+                </select>
               </div>
 
               {/* Good leads */}
@@ -3031,7 +3056,9 @@ export default function ProspectsPage() {
                     {(() => {
                       const companyProspects = prospects.filter((p) => {
                         const pList = lists.find((l) => l.id === p.list_id);
-                        return pList && normalizeBrandKey(pList.company) === normalizeBrandKey(editingScoringCard.company);
+                        if (!pList || normalizeBrandKey(pList.company) !== normalizeBrandKey(editingScoringCard.company)) return false;
+                        if (scoringListFilterId && p.list_id !== scoringListFilterId) return false;
+                        return true;
                       });
                       const usedIds = new Set([...scoringGoodLeads.map((l) => l.prospect_id), ...scoringBadLeads.map((l) => l.prospect_id)]);
                       const available = companyProspects.filter((p) => !usedIds.has(p.id));
