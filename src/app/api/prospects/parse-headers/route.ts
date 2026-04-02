@@ -6,6 +6,7 @@
 import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { requireAuth } from "@/lib/api-guard";
+import { resolveCanonicalProspectField } from "@/lib/prospect-canonical";
 
 function parseCsvLine(line: string): string[] {
   const fields: string[] = [];
@@ -72,6 +73,7 @@ const LABEL_SUGGESTIONS: Record<string, string> = {
   mobile: "Téléphone",
   "phone number": "Téléphone",
   title: "Poste",
+  job: "Poste",
   "job title": "Poste",
   job_title: "Poste",
   poste: "Poste",
@@ -241,7 +243,11 @@ export async function POST(request: Request) {
       const clean = h.trim().toLowerCase().replace(/[\u201c\u201d]/g, "");
       const cleanNoSpace = clean.replace(/[\s_-]/g, "");
       const suggestedLabel = LABEL_SUGGESTIONS[clean] || LABEL_SUGGESTIONS[cleanNoSpace] || h.trim();
-      const knownField = KNOWN_FIELD_MAP[clean] || KNOWN_FIELD_MAP[cleanNoSpace] || null;
+      const knownField =
+        resolveCanonicalProspectField(h.trim()) ||
+        KNOWN_FIELD_MAP[clean] ||
+        KNOWN_FIELD_MAP[cleanNoSpace] ||
+        null;
       // Auto-select if it maps to a known field
       const autoSelected = !!knownField;
       // Sample values for this column

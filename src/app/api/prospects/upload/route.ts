@@ -8,6 +8,10 @@ import { NextResponse } from "next/server";
 import { readBlob, writeBlob, withLock } from "@/lib/blob-store";
 import * as XLSX from "xlsx";
 import { requireAuth } from "@/lib/api-guard";
+import {
+  CANONICAL_PROSPECT_FIELDS,
+  resolveCanonicalProspectField,
+} from "@/lib/prospect-canonical";
 
 interface ProspectRow {
   [key: string]: string | undefined;
@@ -200,13 +204,7 @@ function parseFileToHeadersAndRows(file: File, buffer: ArrayBuffer): { rawHeader
 }
 
 // Known prospect fields (top-level)
-const KNOWN_FIELDS = new Set([
-  "nom", "prenom", "email", "telephone", "poste", "entreprise",
-  "statut", "pipelines", "notes", "linkedin", "naf_code", "effectifs",
-  "ai_score", "ai_comment", "resume_entreprise", "siren", "siret",
-  "adresse_siege", "categorie_entreprise", "chiffre_affaires",
-  "resultat_net", "date_creation_entreprise", "dirigeants", "ville",
-]);
+const KNOWN_FIELDS = new Set<string>(CANONICAL_PROSPECT_FIELDS);
 
 /**
  * column_mapping JSON format (sent by client after parse-headers step):
@@ -261,6 +259,16 @@ export async function POST(request: Request) {
         } else if (colDef.knownField && KNOWN_FIELDS.has(colDef.knownField)) {
           headerMapping.push(colDef.knownField as keyof ProspectRow);
           extraFieldMapping.push(null);
+        } else if (colDef.label) {
+          const resolved = resolveCanonicalProspectField(colDef.label);
+          if (resolved) {
+            headerMapping.push(resolved as keyof ProspectRow);
+            extraFieldMapping.push(null);
+          } else {
+            // Extra field — store under the user's label
+            headerMapping.push(null);
+            extraFieldMapping.push(colDef.label || rawHeaders[i]);
+          }
         } else {
           // Extra field — store under the user's label
           headerMapping.push(null);
@@ -271,7 +279,8 @@ export async function POST(request: Request) {
       // Legacy auto-mapping
       for (const h of rawHeaders) {
         const clean = h.trim().toLowerCase().replace(/[\u201c\u201d]/g, "");
-        headerMapping.push(COLUMN_MAP[clean] || null);
+        const canonical = resolveCanonicalProspectField(clean);
+        headerMapping.push((canonical as keyof ProspectRow) || COLUMN_MAP[clean] || null);
         extraFieldMapping.push(null);
       }
     }
@@ -333,7 +342,12 @@ export async function POST(request: Request) {
         }
         const extraLabel = extraFieldMapping[j];
         if (extraLabel) {
-          extra[extraLabel] = val;
+          const canonicalFromLabel = resolveCanonicalProspectField(extraLabel);
+          if (canonicalFromLabel) {
+            if (!row[canonicalFromLabel]) row[canonicalFromLabel] = val;
+          } else {
+            extra[extraLabel] = val;
+          }
         }
       }
 

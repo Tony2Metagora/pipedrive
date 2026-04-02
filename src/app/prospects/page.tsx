@@ -307,7 +307,7 @@ export default function ProspectsPage() {
     return Array.from(keys).map((k) => ({
       key: `extra:${k}`,
       label: k,
-      defaultVisible: true,
+      defaultVisible: false,
       defaultWidth: 120,
       minWidth: 50,
     }));
@@ -331,20 +331,6 @@ export default function ProspectsPage() {
     const merged = [...columnOrder.filter((k) => allKeys.includes(k)), ...allKeys.filter((k) => !columnOrder.includes(k))];
     return merged.filter((k) => colVisible(k));
   }, [allColumns, columnOrder, visibleCols]);
-
-  // Auto-show new extra columns when they appear
-  const prevExtraKeysRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    const newKeys = extraColumns.map((c) => c.key).filter((k) => !prevExtraKeysRef.current.has(k));
-    if (newKeys.length > 0) {
-      setVisibleCols((prev) => {
-        const next = new Set(prev);
-        for (const k of newKeys) next.add(k);
-        return next;
-      });
-    }
-    prevExtraKeysRef.current = new Set(extraColumns.map((c) => c.key));
-  }, [extraColumns]);
 
   const { widths: colWidths, onMouseDown: onColResize } = useResizableColumns(
     allColumns.map((c) => ({ key: c.key, minWidth: c.minWidth, defaultWidth: c.defaultWidth }))

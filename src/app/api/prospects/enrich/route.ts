@@ -15,6 +15,7 @@ import { NextResponse } from "next/server";
 import { readBlob, writeBlob, withLock } from "@/lib/blob-store";
 import { requireAuth } from "@/lib/api-guard";
 import { submitBatchEnrich, pollBatchEnrich, type DropcontactResult } from "@/lib/dropcontact";
+import { resolveCanonicalProspectField } from "@/lib/prospect-canonical";
 
 interface ProspectRow {
   id: string;
@@ -107,23 +108,6 @@ interface EnrichApplyResult {
   raw?: Record<string, unknown>;
 }
 
-const TOP_LEVEL_DROP_KEYS = new Set([
-  "email",
-  "mobile_phone",
-  "phone",
-  "job",
-  "linkedin",
-  "first_name",
-  "last_name",
-  "company",
-  "naf5_code",
-  "naf5_des",
-  "nb_employees",
-  "siren",
-  "siret",
-  "siret_address",
-]);
-
 function cleanString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -139,6 +123,26 @@ function pickBestEmail(dcResult: DropcontactResult): string {
   const list = Array.isArray(dcResult.email) ? dcResult.email : [];
   const professional = list.find((e) => cleanString(e?.qualification).toLowerCase() === "professional");
   return cleanString(professional?.email || list[0]?.email || "");
+}
+
+function getCanonicalDropValues(dcResult: DropcontactResult): Record<string, string> {
+  const nafCode = cleanString(dcResult.naf5_code);
+  const nafDes = cleanString(dcResult.naf5_des);
+  return {
+    email: pickBestEmail(dcResult),
+    mobile_phone: cleanString(dcResult.mobile_phone),
+    phone: cleanString(dcResult.phone),
+    job: cleanString(dcResult.job),
+    linkedin: ensureHttpsUrl(cleanString(dcResult.linkedin)),
+    first_name: cleanString(dcResult.first_name),
+    last_name: cleanString(dcResult.last_name),
+    company: cleanString(dcResult.company),
+    naf5_code: nafCode ? `${nafCode}${nafDes ? ` — ${nafDes}` : ""}` : "",
+    nb_employees: cleanString(dcResult.nb_employees),
+    siren: cleanString(dcResult.siren),
+    siret: cleanString(dcResult.siret),
+    siret_address: cleanString(dcResult.siret_address),
+  };
 }
 
 function readExtraFields(row: ProspectRow): Record<string, string> {
@@ -208,32 +212,21 @@ function applyResults(rows: ProspectRow[], prospectIds: string[], dcResults: Dro
     const addedExtraFields: string[] = [];
 
     if (dcResult) {
-      // Top-level mapping (strict fill-empty-only)
-      setIfEmpty(rows[idx], "email", pickBestEmail(dcResult), updatedTopLevel);
-      setIfEmpty(rows[idx], "telephone", cleanString(dcResult.mobile_phone || dcResult.phone), updatedTopLevel);
-      setIfEmpty(rows[idx], "poste", cleanString(dcResult.job), updatedTopLevel);
-      setIfEmpty(rows[idx], "linkedin", ensureHttpsUrl(cleanString(dcResult.linkedin)), updatedTopLevel);
-      setIfEmpty(rows[idx], "prenom", cleanString(dcResult.first_name), updatedTopLevel);
-      setIfEmpty(rows[idx], "nom", cleanString(dcResult.last_name), updatedTopLevel);
-      setIfEmpty(rows[idx], "entreprise", cleanString(dcResult.company), updatedTopLevel);
-      setIfEmpty(
-        rows[idx],
-        "naf_code",
-        cleanString(dcResult.naf5_code)
-          ? `${cleanString(dcResult.naf5_code)}${cleanString(dcResult.naf5_des) ? ` — ${cleanString(dcResult.naf5_des)}` : ""}`
-          : "",
-        updatedTopLevel
-      );
-      setIfEmpty(rows[idx], "effectifs", cleanString(dcResult.nb_employees), updatedTopLevel);
-      setIfEmpty(rows[idx], "siren", cleanString(dcResult.siren), updatedTopLevel);
-      setIfEmpty(rows[idx], "siret", cleanString(dcResult.siret), updatedTopLevel);
-      setIfEmpty(rows[idx], "adresse_siege", cleanString(dcResult.siret_address), updatedTopLevel);
+      const canonicalDropValues = getCanonicalDropValues(dcResult);
+      const mappedDropKeys = new Set<string>();
+      for (const [sourceKey, value] of Object.entries(canonicalDropValues)) {
+        if (!value) continue;
+        const canonical = resolveCanonicalProspectField(sourceKey);
+        if (!canonical) continue;
+        mappedDropKeys.add(sourceKey);
+        setIfEmpty(rows[idx], canonical as keyof ProspectRow, value, updatedTopLevel);
+      }
 
       // Persist any non-mapped Dropcontact keys in extra_fields (non-destructive merge)
       const dcRaw = dcResult as unknown as Record<string, unknown>;
       const extra = readExtraFields(rows[idx]);
       for (const [key, value] of Object.entries(dcRaw)) {
-        if (TOP_LEVEL_DROP_KEYS.has(key)) continue;
+        if (mappedDropKeys.has(key)) continue;
         const serialized = serializeExtraValue(value);
         if (!serialized) continue;
         if (!extra[key]) {
