@@ -27,7 +27,6 @@ import {
   FolderOpen,
   Building2,
   Bot,
-  MessageSquareText,
   ClipboardList,
   Save,
   ThumbsUp,
@@ -237,9 +236,13 @@ export default function ProspectsPage() {
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [archiving, setArchiving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [enriching, setEnriching] = useState(false);
   const [processing, setProcessing] = useState<{ label: string; message: string; current: number; total: number } | null>(null);
   const [showLinkDeal, setShowLinkDeal] = useState(false);
+  const [showEnrichMenu, setShowEnrichMenu] = useState(false);
+  const [showRateMenu, setShowRateMenu] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [allDeals, setAllDeals] = useState<{ id: number; title: string; person_name?: string; org_name?: string }[]>([]);
   const [dealSearch, setDealSearch] = useState("");
   const [showNewProspect, setShowNewProspect] = useState(false);
@@ -450,22 +453,6 @@ export default function ProspectsPage() {
     }
   };
 
-  const dedupProspects = async () => {
-    if (!confirm("Supprimer les doublons (même email) ? Les premiers occurrences sont conservées.")) return;
-    setActionMsg("Dédoublonnage en cours...");
-    try {
-      const res = await fetch("/api/prospects/dedup", { method: "POST" });
-      const json = await res.json();
-      if (json.success) {
-        setActionMsg(`${json.removed} doublons supprimés (${json.after} contacts restants)`);
-        syncProspects();
-      } else {
-        setActionMsg("Erreur: " + (json.error || "inconnue"));
-      }
-    } catch { setActionMsg("Erreur réseau"); }
-    setTimeout(() => setActionMsg(null), 5000);
-  };
-
   // Unique companies from lists for dropdown
   const knownCompanies = useMemo(() => {
     const set = new Set(lists.map((l) => l.company).filter(Boolean));
@@ -556,6 +543,35 @@ export default function ProspectsPage() {
     }
     setTimeout(() => setActionMsg(null), 3000);
     setArchiving(false);
+  };
+
+  const deleteSelectedProspects = async () => {
+    if (selected.size === 0) return;
+    setDeleting(true);
+    try {
+      const ids = Array.from(selected);
+      const res = await fetch("/api/prospects", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setActionMsg(`${json.deleted || ids.length} lead${(json.deleted || ids.length) > 1 ? "s" : ""} supprimé${(json.deleted || ids.length) > 1 ? "s" : ""}`);
+        setSelected(new Set());
+        setShowDeleteConfirm(false);
+        syncProspects();
+        fetchLists();
+      } else {
+        setActionMsg(`Erreur : ${json.error || "suppression impossible"}`);
+      }
+    } catch (err) {
+      console.error("Delete prospects error:", err);
+      setActionMsg("Erreur lors de la suppression");
+    } finally {
+      setDeleting(false);
+      setTimeout(() => setActionMsg(null), 4000);
+    }
   };
 
   const enrichProspects = async () => {
@@ -710,23 +726,6 @@ export default function ProspectsPage() {
     return runStreamingAction("/api/prospects/ai-score", "Score IA", (d) =>
       `${d.scored}/${d.total} prospects analysés par l'IA (${brand})`
     , { brand });
-  };
-
-  const aiScoreUnscoredFromSelectedList = () => {
-    if (listFilterMode !== "list" || !selectedListId) return;
-    const listProspects = prospects.filter((p) => p.list_id === selectedListId);
-    const unscoredIds = listProspects
-      .filter((p) => (parseInt(p.ai_score || "0") || 0) === 0)
-      .map((p) => p.id);
-    const selectedList = lists.find((l) => l.id === selectedListId);
-    const brand = selectedList?.company || "Metagora";
-    return runStreamingAction(
-      "/api/prospects/ai-score",
-      "Score IA (non notés)",
-      (d) => `${d.scored}/${d.total} prospects non notés analysés (${brand})`,
-      { brand },
-      unscoredIds
-    );
   };
 
   const enrichGouvProspects = () =>
@@ -1203,10 +1202,6 @@ export default function ProspectsPage() {
 
   const allFilteredSelected = filtered.length > 0 && filtered.every((p) => selected.has(p.id));
   const someFilteredSelected = filtered.some((p) => selected.has(p.id));
-  const unscoredInSelectedListCount = useMemo(() => {
-    if (listFilterMode !== "list" || !selectedListId) return 0;
-    return prospects.filter((p) => p.list_id === selectedListId && (parseInt(p.ai_score || "0") || 0) === 0).length;
-  }, [prospects, selectedListId, listFilterMode]);
   const productWordCount = countWords(scoringCardForm.product);
   const valuePropWordCount = countWords(scoringCardForm.value_proposition);
 
@@ -1407,9 +1402,6 @@ export default function ProspectsPage() {
             <Users className="w-7 h-7 text-indigo-600" />
             Prospects
           </h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {prospects.length} contacts — {enCoursCount} en cours, {perduCount} perdus, {archivedCount} archivés
-          </p>
         </div>
         <div className="flex items-center gap-2">
           {actionMsg && !processing && (
@@ -1437,124 +1429,155 @@ export default function ProspectsPage() {
                 <p className="text-[9px] text-gray-500 mt-0.5 truncate">{processing.message}</p>
               </div>
             </div>
-          ) : selected.size > 0 && (
+          ) : (
             <>
+              {selected.size > 0 && (
+                <>
+                  <div className="relative">
+                    <button
+                      onClick={openLinkDeal}
+                      disabled={linking}
+                      className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 disabled:opacity-50 cursor-pointer"
+                    >
+                      {linking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
+                      Lier ({selected.size})
+                    </button>
+                    {showLinkDeal && (
+                      <div className="absolute right-0 top-full mt-1 w-80 bg-white rounded-lg border border-gray-200 shadow-xl z-50 p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-semibold text-gray-700">Lier à une affaire existante</p>
+                          <button onClick={() => setShowLinkDeal(false)} className="p-0.5 text-gray-400 hover:text-gray-600 cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+                        </div>
+                        <div className="relative">
+                          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                          <input
+                            type="text"
+                            value={dealSearch}
+                            onChange={(e) => setDealSearch(e.target.value)}
+                            placeholder="Rechercher une affaire..."
+                            className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-300 rounded-md focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+                            autoFocus
+                          />
+                        </div>
+                        <div className="max-h-48 overflow-y-auto space-y-0.5">
+                          {filteredDeals.length === 0 ? (
+                            <p className="text-[10px] text-gray-400 py-2 text-center">Aucune affaire trouvée</p>
+                          ) : (
+                            filteredDeals.map((d) => (
+                              <button
+                                key={d.id}
+                                onClick={() => linkSelectedToDeal(d.id, d.title)}
+                                disabled={linking}
+                                className="w-full text-left px-2 py-1.5 rounded-md hover:bg-indigo-50 text-xs transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-2"
+                              >
+                                <Briefcase className="w-3 h-3 text-indigo-500 flex-shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-medium text-gray-800 truncate">{d.title}</p>
+                                  {(d.person_name || d.org_name) && (
+                                    <p className="text-[9px] text-gray-400 truncate">{[d.person_name, d.org_name].filter(Boolean).join(" · ")}</p>
+                                  )}
+                                </div>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={bulkArchive}
+                    disabled={archiving}
+                    className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 disabled:opacity-50 cursor-pointer"
+                  >
+                    {archiving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Archive className="w-3.5 h-3.5" />}
+                    Archiver ({selected.size})
+                  </button>
+                  <button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    disabled={deleting}
+                    className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50 cursor-pointer"
+                  >
+                    {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                    Supprimer ({selected.size})
+                  </button>
+                </>
+              )}
               <div className="relative">
                 <button
-                  onClick={openLinkDeal}
-                  disabled={linking}
-                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 disabled:opacity-50 cursor-pointer"
+                  onClick={() => {
+                    setShowRateMenu(false);
+                    setShowEnrichMenu((v) => !v);
+                  }}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 cursor-pointer"
                 >
-                  {linking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
-                  Lier ({selected.size})
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Enrichir
+                  <ChevronDown className="w-3 h-3" />
                 </button>
-                {showLinkDeal && (
-                  <div className="absolute right-0 top-full mt-1 w-80 bg-white rounded-lg border border-gray-200 shadow-xl z-50 p-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs font-semibold text-gray-700">Lier à une affaire existante</p>
-                      <button onClick={() => setShowLinkDeal(false)} className="p-0.5 text-gray-400 hover:text-gray-600 cursor-pointer"><X className="w-3.5 h-3.5" /></button>
-                    </div>
-                    <div className="relative">
-                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                      <input
-                        type="text"
-                        value={dealSearch}
-                        onChange={(e) => setDealSearch(e.target.value)}
-                        placeholder="Rechercher une affaire..."
-                        className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-300 rounded-md focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
-                        autoFocus
-                      />
-                    </div>
-                    <div className="max-h-48 overflow-y-auto space-y-0.5">
-                      {filteredDeals.length === 0 ? (
-                        <p className="text-[10px] text-gray-400 py-2 text-center">Aucune affaire trouvée</p>
-                      ) : (
-                        filteredDeals.map((d) => (
-                          <button
-                            key={d.id}
-                            onClick={() => linkSelectedToDeal(d.id, d.title)}
-                            disabled={linking}
-                            className="w-full text-left px-2 py-1.5 rounded-md hover:bg-indigo-50 text-xs transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-2"
-                          >
-                            <Briefcase className="w-3 h-3 text-indigo-500 flex-shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium text-gray-800 truncate">{d.title}</p>
-                              {(d.person_name || d.org_name) && (
-                                <p className="text-[9px] text-gray-400 truncate">{[d.person_name, d.org_name].filter(Boolean).join(" · ")}</p>
-                              )}
-                            </div>
-                          </button>
-                        ))
-                      )}
-                    </div>
+                {showEnrichMenu && (
+                  <div className="absolute right-0 top-full mt-1 w-44 bg-white rounded-lg border border-gray-200 shadow-xl z-50 p-1">
+                    <button
+                      onClick={() => {
+                        setShowEnrichMenu(false);
+                        enrichProspects();
+                      }}
+                      disabled={selected.size === 0 || enriching}
+                      className="w-full text-left px-2.5 py-2 text-xs rounded-md hover:bg-indigo-50 text-indigo-700 disabled:opacity-50 cursor-pointer"
+                    >
+                      Dropcontact ({selected.size})
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowEnrichMenu(false);
+                        enrichGouvProspects();
+                      }}
+                      disabled={selected.size === 0 || !!processing}
+                      className="w-full text-left px-2.5 py-2 text-xs rounded-md hover:bg-emerald-50 text-emerald-700 disabled:opacity-50 cursor-pointer"
+                    >
+                      API Gouv ({selected.size})
+                    </button>
                   </div>
                 )}
               </div>
-              <button
-                onClick={enrichProspects}
-                disabled={enriching}
-                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 disabled:opacity-50 cursor-pointer"
-                title="Enrichir via Dropcontact (email, LinkedIn, tél, poste)"
-              >
-                {enriching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                Dropcontact ({selected.size})
-              </button>
-              <button
-                onClick={enrichGouvProspects}
-                disabled={!!processing}
-                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 disabled:opacity-50 cursor-pointer"
-                title="Enrichir via API Gouv (SIREN, CA, effectifs, dirigeants — gratuit)"
-              >
-                <Building2 className="w-3.5 h-3.5" />
-                API Gouv ({selected.size})
-              </button>
-              <button
-                onClick={aiScoreProspects}
-                disabled={!!processing}
-                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 cursor-pointer"
-                title="Analyse IA : score de pertinence + commentaire + résumé entreprise"
-              >
-                <Bot className="w-3.5 h-3.5" />
-                Score IA ({selected.size})
-              </button>
-              <button
-                onClick={bulkArchive}
-                disabled={archiving}
-                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 disabled:opacity-50 cursor-pointer"
-              >
-                {archiving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Archive className="w-3.5 h-3.5" />}
-                Archiver ({selected.size})
-              </button>
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    setShowEnrichMenu(false);
+                    setShowRateMenu((v) => !v);
+                  }}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 cursor-pointer"
+                >
+                  <Bot className="w-3.5 h-3.5" />
+                  Noter
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+                {showRateMenu && (
+                  <div className="absolute right-0 top-full mt-1 w-44 bg-white rounded-lg border border-gray-200 shadow-xl z-50 p-1">
+                    <button
+                      onClick={() => {
+                        setShowRateMenu(false);
+                        setShowScoringCards(true);
+                        fetchScoringCards();
+                      }}
+                      className="w-full text-left px-2.5 py-2 text-xs rounded-md hover:bg-violet-50 text-violet-700 cursor-pointer"
+                    >
+                      Fiches entreprises
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowRateMenu(false);
+                        aiScoreProspects();
+                      }}
+                      disabled={selected.size === 0 || !!processing}
+                      className="w-full text-left px-2.5 py-2 text-xs rounded-md hover:bg-violet-50 text-violet-700 disabled:opacity-50 cursor-pointer"
+                    >
+                      Score IA ({selected.size})
+                    </button>
+                  </div>
+                )}
+              </div>
             </>
           )}
-          {listFilterMode === "list" && selectedListId && !processing && (
-            <button
-              onClick={aiScoreUnscoredFromSelectedList}
-              disabled={unscoredInSelectedListCount === 0}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-fuchsia-700 bg-fuchsia-50 border border-fuchsia-200 rounded-lg hover:bg-fuchsia-100 disabled:opacity-50 cursor-pointer"
-              title="Lancer le scoring IA uniquement sur les prospects non notés de la liste sélectionnée"
-            >
-              <Bot className="w-3.5 h-3.5" />
-              IA non notés liste ({unscoredInSelectedListCount})
-            </button>
-          )}
-          <button
-            onClick={() => { setShowScoringCards(true); fetchScoringCards(); }}
-            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 cursor-pointer"
-            title="Fiches de scoring IA par entreprise"
-          >
-            <ClipboardList className="w-3.5 h-3.5" />
-            Fiches entreprises
-          </button>
-          <button
-            onClick={dedupProspects}
-            disabled={prospects.length === 0}
-            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
-            title="Supprimer les doublons (même email)"
-          >
-            <Filter className="w-3.5 h-3.5" />
-            Dédoublonner
-          </button>
           <button
             onClick={downloadCsv}
             disabled={prospects.length === 0}
@@ -1603,13 +1626,6 @@ export default function ProspectsPage() {
             }}
             className="hidden"
           />
-          <button
-            onClick={() => setShowNewProspect(true)}
-            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 cursor-pointer shadow-sm"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Ajouter
-          </button>
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
@@ -1974,6 +1990,40 @@ export default function ProspectsPage() {
 
         </div>{/* end flex-1 min-w-0 (main content) */}
       </div>{/* end flex gap-4 (lists + table) */}
+
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => !deleting && setShowDeleteConfirm(false)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 text-red-700">
+              <Trash2 className="w-4 h-4" />
+              <h3 className="text-sm font-semibold">Suppression définitive</h3>
+            </div>
+            <p className="text-sm text-gray-700">
+              Êtes-vous sûr de vouloir supprimer ces leads ?
+            </p>
+            <p className="text-xs text-gray-500">
+              {selected.size} contact{selected.size > 1 ? "s" : ""} sélectionné{selected.size > 1 ? "s" : ""} seront supprimé{selected.size > 1 ? "s" : ""} définitivement.
+            </p>
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={deleting}
+                className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={deleteSelectedProspects}
+                disabled={deleting}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 cursor-pointer"
+              >
+                {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                Oui, supprimer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal nouveau contact */}
       {showNewProspect && (

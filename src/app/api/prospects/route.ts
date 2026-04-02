@@ -220,3 +220,32 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Erreur mise à jour groupée" }, { status: 500 });
   }
 }
+
+export async function DELETE(request: Request) {
+  const guard = await requireAuth("prospects", "DELETE");
+  if (guard.denied) return guard.denied;
+  try {
+    const body = (await request.json().catch(() => ({}))) as { ids?: string[] };
+    const ids = Array.isArray(body.ids) ? body.ids.map(String) : [];
+    if (ids.length === 0) {
+      return NextResponse.json({ error: "ids[] requis" }, { status: 400 });
+    }
+
+    let deleted = 0;
+    await withLock("prospects.json", async () => {
+      const rows = await readProspects();
+      const idSet = new Set(ids);
+      const filtered = rows.filter((row) => {
+        const toDelete = idSet.has(String(row.id));
+        if (toDelete) deleted += 1;
+        return !toDelete;
+      });
+      await writeProspects(filtered);
+    });
+
+    return NextResponse.json({ success: true, deleted });
+  } catch (error) {
+    console.error("DELETE /api/prospects error:", error);
+    return NextResponse.json({ error: "Erreur suppression groupée" }, { status: 500 });
+  }
+}
