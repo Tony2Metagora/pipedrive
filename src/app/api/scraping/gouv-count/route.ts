@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-guard";
 import { RETAIL_NAF_CODES, IDF_DEPARTEMENTS } from "@/lib/retail-naf";
-import { departementsForRegion } from "@/lib/scraping-regions";
+import { ALL_DEPARTEMENT_CODES, departementsForRegion } from "@/lib/scraping-regions";
 
 export const dynamic = "force-dynamic";
+/** Requêtes nombreuses (somme par département) — éviter timeout Vercel sur le plan gratuit. */
+export const maxDuration = 180;
 
 const GOUV_SEARCH = "https://recherche-entreprises.api.gouv.fr/search";
 
@@ -102,20 +104,26 @@ export async function POST(request: Request) {
 
     const france: Record<string, number> = {};
     const idf: Record<string, number> = {};
+    const idfSet = new Set<string>(IDF_DEPARTEMENTS);
 
+    /**
+     * Une requête France sans `departement` renvoie souvent total_results plafonné à 10 000 (NAF très denses).
+     * On somme par département (une passe : France + IDF) pour approcher le vrai volume.
+     * Appels séquentiels + pause pour rester sous la limite (~7 req/s) de l’API.
+     */
     for (const naf of nafs) {
-      france[naf] = await fetchTotalResults(naf);
-      await sleep(150);
-    }
-
-    for (const naf of nafs) {
-      let sum = 0;
-      for (const dept of IDF_DEPARTEMENTS) {
-        const t = await fetchTotalResults(naf, dept);
-        if (t >= 0) sum += t;
+      let franceSum = 0;
+      let idfSum = 0;
+      for (const d of ALL_DEPARTEMENT_CODES) {
+        const t = await fetchTotalResults(naf, d);
+        if (t >= 0) {
+          franceSum += t;
+          if (idfSet.has(d)) idfSum += t;
+        }
         await sleep(150);
       }
-      idf[naf] = sum;
+      france[naf] = franceSum;
+      idf[naf] = idfSum;
     }
 
     return NextResponse.json({
@@ -123,7 +131,7 @@ export async function POST(request: Request) {
       france,
       idf,
       note:
-        "Total IDF = somme des total_results par département (75,77,78,91,92,93,94,95). Peut différer légèrement d'un filtre régional unique selon l'API.",
+        "France et IDF = sommes des total_results par département (évite le plafond ~10 000 de l’API sur une recherche France seule). Peut prendre ~1–2 min.",
     });
   } catch (e) {
     console.error("POST /api/scraping/gouv-count", e);

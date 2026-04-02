@@ -253,7 +253,7 @@ export default function CompletionTab() {
             <div className="px-4 py-3 border-b border-gray-100">
               <p className="text-sm font-semibold text-gray-700">Codes NAF retail (ciblage)</p>
               <p className="text-[11px] text-gray-500 mt-0.5">
-                Pour chaque code : volume scrapé en Île-de-France et en France, puis totaux API (après clic sur le bouton vert).
+                Pour chaque code : volume scrapé en Île-de-France et en France, puis totaux API (bouton vert). L’API renvoie souvent un plafond d’environ 10 000 sur une recherche « France » seule ; le bouton somme par département pour un total plus fiable (appel plus long, ~1–2 min).
               </p>
             </div>
             <div className="overflow-x-auto">

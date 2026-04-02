@@ -110,6 +110,9 @@ export const REGION_BY_DEPARTMENT: Record<string, string> = {
   "988": "Nouvelle-Caledonie",
 };
 
+/** Tous les codes département / collectivité utilisés pour sommer l’API Gouv (évite le plafond ~10k sur une requête France seule). */
+export const ALL_DEPARTEMENT_CODES: string[] = Object.keys(REGION_BY_DEPARTMENT).sort();
+
 let _deptsByRegion: Map<string, string[]> | null = null;
 
 export function departementsForRegion(region: string): string[] {
