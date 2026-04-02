@@ -252,7 +252,12 @@ export default function ProspectsPage() {
   const [normalizing, setNormalizing] = useState(false);
   const [enriching, setEnriching] = useState(false);
   const [processing, setProcessing] = useState<{ label: string; message: string; current: number; total: number } | null>(null);
+  const [showLinkMenu, setShowLinkMenu] = useState(false);
   const [showLinkDeal, setShowLinkDeal] = useState(false);
+  const [showLinkList, setShowLinkList] = useState(false);
+  const [linkListTargetId, setLinkListTargetId] = useState<string>("");
+  const [linkListMode, setLinkListMode] = useState<"move" | "copy">("move");
+  const [linkingList, setLinkingList] = useState(false);
   const [showEnrichMenu, setShowEnrichMenu] = useState(false);
   const [showRateMenu, setShowRateMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -1155,6 +1160,8 @@ export default function ProspectsPage() {
   };
 
   const openLinkDeal = async () => {
+    setShowLinkMenu(false);
+    setShowLinkList(false);
     setShowLinkDeal(true);
     setDealSearch("");
     // Fetch deals if not already loaded
@@ -1193,6 +1200,51 @@ export default function ProspectsPage() {
     setLinking(false);
     setTimeout(() => setActionMsg(null), 4000);
     setTimeout(syncProspects, 2000);
+  };
+
+  const linkSelectedToList = async () => {
+    const selectedIds = Array.from(selected);
+    if (selectedIds.length === 0 || !linkListTargetId) return;
+    setLinkingList(true);
+    try {
+      const res = await fetch("/api/prospects/link-list", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ids: selectedIds,
+          targetListId: linkListTargetId,
+          mode: linkListMode,
+        }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        setActionMsg(`Erreur liaison liste: ${json.error || "inconnue"}`);
+        setTimeout(() => setActionMsg(null), 5000);
+        return;
+      }
+      const targetName = lists.find((l) => l.id === linkListTargetId)?.name || "liste";
+      if (linkListMode === "move") {
+        setActionMsg(`${json.updated || 0} contact${(json.updated || 0) > 1 ? "s" : ""} déplacé${(json.updated || 0) > 1 ? "s" : ""} vers "${targetName}"`);
+      } else {
+        setActionMsg(`${json.created || 0} contact${(json.created || 0) > 1 ? "s" : ""} copié${(json.created || 0) > 1 ? "s" : ""} vers "${targetName}"`);
+      }
+      if (json.skipped) {
+        setActionMsg((prev) => `${prev || ""} · ${json.skipped} ignoré${json.skipped > 1 ? "s" : ""}`);
+      }
+      setSelected(new Set());
+      setShowLinkList(false);
+      setShowLinkMenu(false);
+      setLinkListTargetId("");
+      syncProspects();
+      fetchLists();
+      setTimeout(() => setActionMsg(null), 5000);
+    } catch (err) {
+      console.error("Link list error:", err);
+      setActionMsg("Erreur lors de la liaison à la liste");
+      setTimeout(() => setActionMsg(null), 5000);
+    } finally {
+      setLinkingList(false);
+    }
   };
 
   const filteredDeals = useMemo(() => {
@@ -1571,18 +1623,53 @@ export default function ProspectsPage() {
                 <>
                   <div className="relative">
                     <button
-                      onClick={openLinkDeal}
+                      onClick={() => {
+                        setShowLinkMenu((v) => !v);
+                        setShowLinkDeal(false);
+                        setShowLinkList(false);
+                      }}
                       disabled={linking}
                       className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 disabled:opacity-50 cursor-pointer"
                     >
                       {linking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
                       Lier ({selected.size})
+                      <ChevronDown className="w-3 h-3" />
                     </button>
+                    {showLinkMenu && !showLinkDeal && !showLinkList && (
+                      <div className="absolute right-0 top-full mt-1 w-56 bg-white rounded-lg border border-gray-200 shadow-xl z-50 p-1">
+                        <button
+                          onClick={openLinkDeal}
+                          className="w-full text-left px-2.5 py-2 text-xs rounded-md hover:bg-green-50 text-green-700 cursor-pointer"
+                        >
+                          Lier à une affaire
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowLinkMenu(false);
+                            setShowLinkDeal(false);
+                            setShowLinkList(true);
+                            setLinkListTargetId("");
+                            setLinkListMode("move");
+                          }}
+                          className="w-full text-left px-2.5 py-2 text-xs rounded-md hover:bg-green-50 text-green-700 cursor-pointer"
+                        >
+                          Lier à une liste
+                        </button>
+                      </div>
+                    )}
                     {showLinkDeal && (
                       <div className="absolute right-0 top-full mt-1 w-80 bg-white rounded-lg border border-gray-200 shadow-xl z-50 p-3 space-y-2">
                         <div className="flex items-center justify-between">
                           <p className="text-xs font-semibold text-gray-700">Lier à une affaire existante</p>
-                          <button onClick={() => setShowLinkDeal(false)} className="p-0.5 text-gray-400 hover:text-gray-600 cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+                          <button
+                            onClick={() => {
+                              setShowLinkDeal(false);
+                              setShowLinkMenu(false);
+                            }}
+                            className="p-0.5 text-gray-400 hover:text-gray-600 cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                         <div className="relative">
                           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
@@ -1617,6 +1704,67 @@ export default function ProspectsPage() {
                             ))
                           )}
                         </div>
+                      </div>
+                    )}
+                    {showLinkList && (
+                      <div className="absolute right-0 top-full mt-1 w-80 bg-white rounded-lg border border-gray-200 shadow-xl z-50 p-3 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-semibold text-gray-700">Lier à une liste</p>
+                          <button
+                            onClick={() => {
+                              setShowLinkList(false);
+                              setShowLinkMenu(false);
+                            }}
+                            className="p-0.5 text-gray-400 hover:text-gray-600 cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] text-gray-600 mb-1">Liste cible</label>
+                          <select
+                            value={linkListTargetId}
+                            onChange={(e) => setLinkListTargetId(e.target.value)}
+                            className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded-md focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+                          >
+                            <option value="">Choisir une liste...</option>
+                            {lists.map((l) => (
+                              <option key={l.id} value={l.id}>
+                                {l.name} ({l.count})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="link-list-mode"
+                              checked={linkListMode === "move"}
+                              onChange={() => setLinkListMode("move")}
+                              className="text-indigo-600 focus:ring-indigo-500"
+                            />
+                            Option 1: supprimer de la liste actuelle
+                          </label>
+                          <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="link-list-mode"
+                              checked={linkListMode === "copy"}
+                              onChange={() => setLinkListMode("copy")}
+                              className="text-indigo-600 focus:ring-indigo-500"
+                            />
+                            Option 2: conserver aussi dans la liste actuelle
+                          </label>
+                        </div>
+                        <button
+                          onClick={linkSelectedToList}
+                          disabled={!linkListTargetId || linkingList}
+                          className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+                        >
+                          {linkingList ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <List className="w-3.5 h-3.5" />}
+                          Appliquer
+                        </button>
                       </div>
                     )}
                   </div>
