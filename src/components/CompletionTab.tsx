@@ -25,6 +25,8 @@ type CompletionPayload = {
   byNaf?: CompletionRow[];
   retail?: {
     matrix: RetailMatrixRow[];
+    gouvApiMatrix?: Record<string, Record<string, number>>;
+    gouvApiUpdatedAt?: string;
   };
 };
 
@@ -36,7 +38,7 @@ export default function CompletionTab() {
   const [data, setData] = useState<CompletionPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [apiMatrix, setApiMatrix] = useState<Record<string, Record<string, number>> | null>(null);
+  const [apiMatrix, setApiMatrix] = useState<Record<string, Record<string, number>>>({});
   const [loadingGouv, setLoadingGouv] = useState(false);
   const [gouvMsg, setGouvMsg] = useState<string | null>(null);
   const [matrixNaf, setMatrixNaf] = useState<string>(RETAIL_NAF_CODES[0].code);
@@ -67,6 +69,13 @@ export default function CompletionTab() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const m = data?.retail?.gouvApiMatrix;
+    if (m && typeof m === "object") {
+      setApiMatrix(m);
+    }
+  }, [data]);
 
   const retailMatrix = data?.retail?.matrix ?? [];
   const nafCodes = useMemo(() => RETAIL_NAF_CODES.map((x) => x.code), []);
@@ -211,8 +220,13 @@ export default function CompletionTab() {
             <div className="px-4 py-3 border-b border-gray-100">
               <p className="text-sm font-semibold text-gray-700">Régions × codes NAF (scrapé / API Gouv)</p>
               <p className="text-[11px] text-gray-500 mt-0.5">
-                Scrapé : vide si aucune entreprise en base pour cette cellule. API : « ? » tant que vous n’avez pas
-                chargé cette cellule avec le sélecteur + API Gouv.
+                Scrapé : vide si aucune entreprise en base pour cette cellule. API : « ? » si jamais chargé ; les totaux
+                API sont enregistrés côté serveur après chaque clic.
+                {data?.retail?.gouvApiUpdatedAt && (
+                  <span className="block mt-1 text-gray-400">
+                    Dernier enregistrement API : {new Date(data.retail.gouvApiUpdatedAt).toLocaleString("fr-FR")}
+                  </span>
+                )}
               </p>
             </div>
             <div className="overflow-x-auto max-h-[min(70vh,640px)] overflow-y-auto">
@@ -247,7 +261,7 @@ export default function CompletionTab() {
                       </td>
                       {nafCodes.map((code) => {
                         const scraped = row.byNaf[code] ?? 0;
-                        const api = apiMatrix?.[row.region]?.[code];
+                        const api = apiMatrix[row.region]?.[code];
                         const scrapedStr = scraped > 0 ? numberFr(scraped) : "";
                         const apiStr = api != null ? numberFr(api) : "?";
                         return (

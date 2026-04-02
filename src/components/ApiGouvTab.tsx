@@ -8,6 +8,9 @@ import {
   ArrowUp, ArrowDown, ArrowUpDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { EFFECTIF_PRESETS, INSEE_TRANCHE_OPTIONS } from "@/lib/insee-effectif-tranches";
+
+const IDF_REGION_VALUE = "__IDF__";
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -47,6 +50,7 @@ interface ScrapingList {
   filters: {
     nafCodes: string[];
     departement?: string;
+    region?: string;
     codePostal?: string;
     trancheEffectif?: string[];
   };
@@ -94,18 +98,9 @@ const NAF_OPTIONS = [
   { code: "47.77Z", label: "Horlogerie & bijouterie" },
 ];
 
-const TRANCHE_OPTIONS = [
-  { code: "00", label: "0 salarié" },
-  { code: "01", label: "1-2 salariés" },
-  { code: "02", label: "3-5 salariés" },
-  { code: "03", label: "6-9 salariés" },
-  { code: "11", label: "10-19 salariés" },
-  { code: "12", label: "20-49 salariés" },
-  { code: "21", label: "50-99 salariés" },
-];
-
 const DEPARTEMENTS = [
-  { code: "", label: "Tous" },
+  { code: "", label: "France (tous départements)" },
+  { code: IDF_REGION_VALUE, label: "Île-de-France (8 départements)" },
   { code: "75", label: "75 — Paris" },
   { code: "92", label: "92 — Hauts-de-Seine" },
   { code: "93", label: "93 — Seine-Saint-Denis" },
@@ -161,7 +156,9 @@ export default function ApiGouvTab() {
   const [selectedNaf, setSelectedNaf] = useState<Set<string>>(new Set(["47.71Z"]));
   const [departement, setDepartement] = useState("");
   const [codePostal, setCodePostal] = useState("");
-  const [selectedTranches, setSelectedTranches] = useState<Set<string>>(new Set(["01", "02", "03", "11"]));
+  const [selectedTranches, setSelectedTranches] = useState<Set<string>>(
+    new Set(["00", "01", "02", "03", "11"])
+  );
   const [maxResults, setMaxResults] = useState(100);
   const [showFilters, setShowFilters] = useState(true);
 
@@ -301,12 +298,15 @@ export default function ApiGouvTab() {
     if (selectedNaf.size === 0) { setError("Sélectionnez au moins un code NAF"); return; }
     setSearching(true); setError(null); setSearchDone(false); setResults([]); setSelectedListId(null); setExcludedCount(0);
     try {
+      const isIdf = departement === IDF_REGION_VALUE;
       const res = await fetch("/api/scraping", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           nafCodes: [...selectedNaf],
-          departement: departement || undefined,
+          ...(isIdf
+            ? { region: "Ile-de-France" }
+            : { departement: departement || undefined }),
           codePostal: codePostal || undefined,
           trancheEffectif: selectedTranches.size > 0 ? [...selectedTranches] : undefined,
           maxResults,
@@ -338,7 +338,9 @@ export default function ApiGouvTab() {
           companies: results,
           filters: {
             nafCodes: [...selectedNaf],
-            departement: departement || undefined,
+            ...(departement === IDF_REGION_VALUE
+              ? { region: "Ile-de-France" as const }
+              : { departement: departement || undefined }),
             codePostal: codePostal || undefined,
             trancheEffectif: selectedTranches.size > 0 ? [...selectedTranches] : undefined,
           },
@@ -525,7 +527,9 @@ export default function ApiGouvTab() {
                   <>
                     <span className="font-medium truncate max-w-[150px]">{l.name}</span>
                     <span className="text-gray-400">({l.count})</span>
-                    <span className="text-gray-400 flex items-center gap-0.5"><MapPin className="w-3 h-3" />{l.filters.departement || "FR"}</span>
+                    <span className="text-gray-400 flex items-center gap-0.5"><MapPin className="w-3 h-3" />
+                      {l.filters.region === "Ile-de-France" ? "Île-de-France" : l.filters.departement || "FR"}
+                    </span>
                     <div className="hidden group-hover:flex items-center gap-0.5 ml-1" onClick={(e) => e.stopPropagation()}>
                       <button onClick={() => startEditing(l)} className="p-0.5 text-gray-400 hover:text-gray-600 cursor-pointer"><Edit3 className="w-3 h-3" /></button>
                       <button onClick={() => deleteList(l.id)} className="p-0.5 text-gray-400 hover:text-red-500 cursor-pointer"><Trash2 className="w-3 h-3" /></button>
@@ -574,23 +578,45 @@ export default function ApiGouvTab() {
               </div>
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-500 mb-2 block">Tranche d&apos;effectif</label>
-              <div className="flex flex-wrap gap-2">
-                {TRANCHE_OPTIONS.map((t) => (
-                  <button key={t.code} onClick={() => toggle(setSelectedTranches, t.code)}
+              <label className="text-xs font-medium text-gray-500 mb-2 block">Tranche d&apos;effectif (codes INSEE)</label>
+              <div className="flex flex-wrap gap-2 mb-2">
+                {EFFECTIF_PRESETS.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() =>
+                      setSelectedTranches((prev) => {
+                        const n = new Set(prev);
+                        const allOn = p.codes.every((c) => n.has(c));
+                        if (allOn) for (const c of p.codes) n.delete(c);
+                        else for (const c of p.codes) n.add(c);
+                        return n;
+                      })
+                    }
+                    className="px-2.5 py-1 text-[11px] rounded-md border border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100 cursor-pointer"
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto pr-1">
+                {INSEE_TRANCHE_OPTIONS.map((t) => (
+                  <button key={t.code} type="button" onClick={() => toggle(setSelectedTranches, t.code)}
                     className={cn("px-3 py-1.5 text-xs rounded-lg border transition-colors cursor-pointer",
                       selectedTranches.has(t.code) ? "bg-emerald-50 border-emerald-300 text-emerald-700 font-medium" : "bg-white border-gray-200 text-gray-600 hover:border-gray-300")}>
-                    {t.label}
+                    {t.code} — {t.label}
                   </button>
                 ))}
               </div>
             </div>
-            <div className="flex items-end gap-3">
-              <div className="w-32">
+            <div className="flex items-end gap-3 flex-wrap">
+              <div className="w-44">
                 <label className="text-xs font-medium text-gray-500 mb-1 block">Max résultats</label>
                 <select value={maxResults} onChange={(e) => setMaxResults(Number(e.target.value))}
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400 outline-none">
-                  {[50, 100, 200, 300, 500].map((v) => <option key={v} value={v}>{v}</option>)}
+                  {[50, 100, 200, 300, 500, 1000, 2500, 5000, 50000].map((v) => (
+                    <option key={v} value={v}>{v === 50000 ? `${v} (plafond serveur)` : v}</option>
+                  ))}
                 </select>
               </div>
               <button onClick={handleSearch} disabled={searching || selectedNaf.size === 0}

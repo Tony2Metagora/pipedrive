@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-guard";
+import { mergeGouvCompletionMatrix } from "@/lib/scraping-gouv-cache";
 import { RETAIL_NAF_CODES, IDF_DEPARTEMENTS } from "@/lib/retail-naf";
 import { ALL_DEPARTEMENT_CODES, departementsForRegion } from "@/lib/scraping-regions";
 
@@ -93,12 +94,18 @@ export async function POST(request: Request) {
         [regionRaw]: { [nafRaw]: sum },
       };
 
+      try {
+        await mergeGouvCompletionMatrix(matrix);
+      } catch (e) {
+        console.error("mergeGouvCompletionMatrix", e);
+      }
+
       return NextResponse.json({
         success: true,
         matrix,
         region: regionRaw,
         naf: nafRaw,
-        note: "Un seul couple région × NAF : somme des total_results API par département de la région.",
+        note: "Un seul couple région × NAF : somme des total_results API par département de la région. Totaux enregistrés pour la persistance.",
       });
     }
 

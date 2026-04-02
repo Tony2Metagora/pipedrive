@@ -7,8 +7,13 @@
 import { NextResponse } from "next/server";
 import { getScrapingIndex } from "@/lib/scraping-store";
 import { requireAuth } from "@/lib/api-guard";
+import { departementsForRegion } from "@/lib/scraping-regions";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
+
+const SERVER_MAX_RESULTS = 50_000;
+const PER_PAGE = 25;
 
 // Tranche effectif codes → human labels
 const TRANCHE_LABELS: Record<string, string> = {
@@ -81,6 +86,75 @@ interface GouvResult {
   }>;
 }
 
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Paginate jusqu’à total_pages (plafond résultats global respecté). */
+async function fetchGouvPagesForNafDept(
+  naf: string,
+  departement: string | undefined,
+  codePostal: string | undefined,
+  trancheEffectif: string[] | undefined,
+  maxToCollect: number
+): Promise<GouvResult[]> {
+  const out: GouvResult[] = [];
+  let page = 1;
+
+  while (out.length < maxToCollect) {
+    const params = new URLSearchParams({
+      activite_principale: naf,
+      etat_administratif: "A",
+      per_page: String(PER_PAGE),
+      page: String(page),
+    });
+
+    if (departement) params.set("departement", departement);
+    if (codePostal?.trim()) params.set("code_postal", codePostal.trim());
+    if (trancheEffectif?.length) {
+      params.set("tranche_effectif_salarie", trancheEffectif.join(","));
+    }
+
+    const url = `https://recherche-entreprises.api.gouv.fr/search?${params}`;
+
+    const res = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "Metagora-Prospection/1.0",
+      },
+    });
+
+    if (res.status === 429) {
+      await sleep(2000);
+      continue;
+    }
+
+    if (!res.ok) {
+      console.error(`API gouv error: ${res.status} for NAF ${naf} page ${page} dept=${departement || ""}`);
+      break;
+    }
+
+    const data = (await res.json()) as {
+      results: GouvResult[];
+      total_results: number;
+      total_pages: number;
+    };
+
+    if (!data.results?.length) break;
+
+    const remaining = maxToCollect - out.length;
+    out.push(...data.results.slice(0, remaining));
+
+    const totalPages = typeof data.total_pages === "number" ? data.total_pages : page;
+    if (page >= totalPages) break;
+
+    page += 1;
+    await sleep(200);
+  }
+
+  return out;
+}
+
 export async function GET() {
   const guard = await requireAuth("scrapping", "GET");
   if (guard.denied) return guard.denied;
@@ -101,75 +175,62 @@ export async function POST(request: Request) {
     const {
       nafCodes = ["47.71Z"],
       departement,
+      region,
       codePostal,
       trancheEffectif,
       maxResults = 100,
     } = body as {
       nafCodes?: string[];
       departement?: string;
+      region?: string;
       codePostal?: string;
       trancheEffectif?: string[];
       maxResults?: number;
     };
 
+    const rawMax = Number(maxResults);
+    const effectiveCap =
+      !Number.isFinite(rawMax) || rawMax <= 0 || rawMax >= SERVER_MAX_RESULTS
+        ? SERVER_MAX_RESULTS
+        : Math.min(Math.floor(rawMax), SERVER_MAX_RESULTS);
+
+    /** Une requête par département (ou une sans filtre département). */
+    let departmentPasses: (string | undefined)[];
+
+    if (codePostal?.trim()) {
+      departmentPasses = [departement?.trim() || undefined];
+    } else if (typeof region === "string" && region.trim()) {
+      const depts = departementsForRegion(region.trim());
+      if (depts.length === 0) {
+        return NextResponse.json({ error: `Région inconnue : ${region.trim()}` }, { status: 400 });
+      }
+      departmentPasses = depts;
+    } else if (departement?.trim()) {
+      departmentPasses = [departement.trim()];
+    } else {
+      departmentPasses = [undefined];
+    }
+
     const allResults: GouvResult[] = [];
-    const perPage = 25; // API max
-    const maxPages = Math.ceil(Math.min(maxResults, 500) / perPage);
 
-    // Query for each NAF code
     for (const naf of nafCodes) {
-      if (allResults.length >= maxResults) break;
+      if (allResults.length >= effectiveCap) break;
 
-      for (let page = 1; page <= maxPages; page++) {
-        if (allResults.length >= maxResults) break;
+      for (const dept of departmentPasses) {
+        if (allResults.length >= effectiveCap) break;
 
-        const params = new URLSearchParams({
-          activite_principale: naf,
-          etat_administratif: "A",
-          per_page: String(perPage),
-          page: String(page),
-        });
-
-        if (departement) params.set("departement", departement);
-        if (codePostal) params.set("code_postal", codePostal);
-        if (trancheEffectif?.length) {
-          params.set("tranche_effectif_salarie", trancheEffectif.join(","));
-        }
-
-        const url = `https://recherche-entreprises.api.gouv.fr/search?${params}`;
-
-        const res = await fetch(url, {
-          headers: {
-            Accept: "application/json",
-            "User-Agent": "Metagora-Prospection/1.0",
-          },
-        });
-
-        if (res.status === 429) {
-          // Rate limited — wait and retry once
-          await new Promise((r) => setTimeout(r, 2000));
-          continue;
-        }
-
-        if (!res.ok) {
-          console.error(`API gouv error: ${res.status} for NAF ${naf} page ${page}`);
-          break;
-        }
-
-        const data = (await res.json()) as { results: GouvResult[]; total_results: number; total_pages: number };
-
-        if (!data.results?.length) break;
-
-        allResults.push(...data.results);
-
-        if (page >= data.total_pages) break;
-
-        // Rate limit: max 7 req/s, be conservative
-        await new Promise((r) => setTimeout(r, 200));
+        const remainingBudget = effectiveCap - allResults.length;
+        const batch = await fetchGouvPagesForNafDept(
+          naf,
+          dept,
+          codePostal?.trim() ? codePostal : undefined,
+          trancheEffectif,
+          remainingBudget
+        );
+        allResults.push(...batch);
       }
     }
 
-    // Deduplicate by SIREN
     const seen = new Set<string>();
     const unique = allResults.filter((r) => {
       if (seen.has(r.siren)) return false;
@@ -177,10 +238,7 @@ export async function POST(request: Request) {
       return true;
     });
 
-    // Map to flat structure
-    const companies = unique.slice(0, maxResults).map((r) => {
-      // Collect all PP dirigeants — deduplicate by nom+prenom, skip empty names
-      // Separate CAC (commissaires aux comptes) and "Autre" from real dirigeants
+    const companies = unique.slice(0, effectiveCap).map((r) => {
       const allPP = (r.dirigeants || []).filter((d) => d.type_dirigeant === "personne physique");
       const seenDir = new Set<string>();
       const allDirigeants: Array<{ prenom: string; nom: string; role: string }> = [];
@@ -191,7 +249,6 @@ export async function POST(request: Request) {
         if (!nom && !prenom) continue;
         const role = (d.qualite || "").trim();
         const roleLower = role.toLowerCase();
-        // Exclude commissaires aux comptes and "Autre"
         if (roleLower.includes("commissaire aux comptes") || roleLower === "autre") {
           if (roleLower.includes("commissaire aux comptes")) {
             cacNames.push(`${prenom} ${nom}`.trim());
@@ -204,12 +261,10 @@ export async function POST(request: Request) {
         allDirigeants.push({ prenom, nom, role });
       }
       const cacLabel = cacNames.length > 0 ? cacNames.join(", ") : "";
-      // Primary dirigeant = first PP
       const dirigeantPrenom = allDirigeants[0]?.prenom || "";
       const dirigeantNom = allDirigeants[0]?.nom || "";
-      const dirigeantName = dirigeantPrenom || dirigeantNom
-        ? `${dirigeantPrenom} ${dirigeantNom}`.trim()
-        : "ND";
+      const dirigeantName =
+        dirigeantPrenom || dirigeantNom ? `${dirigeantPrenom} ${dirigeantNom}`.trim() : "ND";
       const dirigeantRole = allDirigeants[0]?.role || "";
 
       const siege = r.siege;
@@ -247,7 +302,14 @@ export async function POST(request: Request) {
       data: companies,
       total: companies.length,
       nafCodes,
-      filters: { departement, codePostal, trancheEffectif },
+      filters: {
+        departement,
+        region: typeof region === "string" ? region.trim() : undefined,
+        codePostal,
+        trancheEffectif,
+        effectiveCap,
+        departmentPasses: departmentPasses.length,
+      },
     });
   } catch (error) {
     console.error("POST /api/scraping error:", error);
@@ -257,10 +319,22 @@ export async function POST(request: Request) {
 
 function estimateEffectif(code: string): string {
   const map: Record<string, string> = {
-    "NN": "?", "00": "0", "01": "~1", "02": "~4", "03": "~7",
-    "11": "~15", "12": "~35", "21": "~75", "22": "~150",
-    "31": "~225", "32": "~375", "41": "~750", "42": "~1500",
-    "51": "~3500", "52": "~7500", "53": "10000+",
+    NN: "?",
+    "00": "0",
+    "01": "~1",
+    "02": "~4",
+    "03": "~7",
+    "11": "~15",
+    "12": "~35",
+    "21": "~75",
+    "22": "~150",
+    "31": "~225",
+    "32": "~375",
+    "41": "~750",
+    "42": "~1500",
+    "51": "~3500",
+    "52": "~7500",
+    "53": "10000+",
   };
   return map[code] || "?";
 }

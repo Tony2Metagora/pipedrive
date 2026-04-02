@@ -43,6 +43,7 @@ export interface ScrapingList {
   filters: {
     nafCodes: string[];
     departement?: string;
+    region?: string;
     codePostal?: string;
     trancheEffectif?: string[];
   };

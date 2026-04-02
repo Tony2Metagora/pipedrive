@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-guard";
+import { getGouvCompletionCache } from "@/lib/scraping-gouv-cache";
 import { getScrapingCompanies, getScrapingIndex, type ScrapingCompany } from "@/lib/scraping-store";
 import { RETAIL_NAF_CODES, RETAIL_NAF_CODE_SET, GRANDES_REGIONS_ORDER } from "@/lib/retail-naf";
 import { REGION_BY_DEPARTMENT } from "@/lib/scraping-regions";
@@ -102,6 +103,8 @@ export async function GET() {
       return { region, byNaf };
     });
 
+    const gouvCache = await getGouvCompletionCache();
+
     return NextResponse.json({
       meta: {
         listsCount: lists.length,
@@ -112,6 +115,8 @@ export async function GET() {
       byNaf: toSortedRows(byNaf, unique.length),
       retail: {
         matrix: retailMatrix,
+        gouvApiMatrix: gouvCache.matrix,
+        gouvApiUpdatedAt: gouvCache.updatedAt,
       },
     });
   } catch (error) {
