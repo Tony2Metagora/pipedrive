@@ -32,6 +32,10 @@ interface ProspectRow {
   linkedin: string;
   naf_code: string;
   effectifs: string;
+  siren?: string;
+  siret?: string;
+  adresse_siege?: string;
+  extra_fields?: string;
 }
 
 async function readProspects(): Promise<ProspectRow[]> {
@@ -92,8 +96,91 @@ export async function POST(request: Request) {
 /**
  * Apply Dropcontact results to prospect rows
  */
+interface EnrichApplyResult {
+  id: string;
+  name: string;
+  status: string;
+  fields: string[];
+  topLevelFields: string[];
+  extraFields: string[];
+  debug?: string;
+  raw?: Record<string, unknown>;
+}
+
+const TOP_LEVEL_DROP_KEYS = new Set([
+  "email",
+  "mobile_phone",
+  "phone",
+  "job",
+  "linkedin",
+  "first_name",
+  "last_name",
+  "company",
+  "naf5_code",
+  "naf5_des",
+  "nb_employees",
+  "siren",
+  "siret",
+  "siret_address",
+]);
+
+function cleanString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function ensureHttpsUrl(value: string): string {
+  const v = value.trim();
+  if (!v) return "";
+  if (/^https?:\/\//i.test(v)) return v;
+  return `https://${v}`;
+}
+
+function pickBestEmail(dcResult: DropcontactResult): string {
+  const list = Array.isArray(dcResult.email) ? dcResult.email : [];
+  const professional = list.find((e) => cleanString(e?.qualification).toLowerCase() === "professional");
+  return cleanString(professional?.email || list[0]?.email || "");
+}
+
+function readExtraFields(row: ProspectRow): Record<string, string> {
+  if (!row.extra_fields) return {};
+  try {
+    const parsed = JSON.parse(row.extra_fields) as Record<string, unknown>;
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed || {})) {
+      const val = typeof v === "string" ? v.trim() : "";
+      if (val) out[k] = val;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function serializeExtraValue(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value) || (value && typeof value === "object")) {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
+function setIfEmpty(row: ProspectRow, field: keyof ProspectRow, nextValue: string, updated: string[]) {
+  const value = nextValue.trim();
+  if (!value) return;
+  const current = cleanString(row[field]);
+  if (!current) {
+    row[field] = value;
+    updated.push(String(field));
+  }
+}
+
 function applyResults(rows: ProspectRow[], prospectIds: string[], dcResults: DropcontactResult[]) {
-  const results: { id: string; name: string; status: string; fields: string[]; debug?: string; raw?: Record<string, unknown> }[] = [];
+  const results: EnrichApplyResult[] = [];
 
   console.log(`[applyResults] prospectIds=${JSON.stringify(prospectIds)}, dcResults count=${dcResults.length}`);
 
@@ -105,75 +192,57 @@ function applyResults(rows: ProspectRow[], prospectIds: string[], dcResults: Dro
     console.log(`[applyResults] i=${i} pid=${pid} idx=${idx} dcResult=${JSON.stringify(dcResult).slice(0, 300)}`);
 
     if (idx === -1) {
-      results.push({ id: pid, name: "?", status: "no_result", fields: [], debug: "prospect not found in rows" });
+      results.push({
+        id: pid,
+        name: "?",
+        status: "no_result",
+        fields: [],
+        topLevelFields: [],
+        extraFields: [],
+        debug: "prospect not found in rows",
+      });
       continue;
     }
 
-    const updatedFields: string[] = [];
+    const updatedTopLevel: string[] = [];
+    const addedExtraFields: string[] = [];
 
     if (dcResult) {
-      // Email — fill if empty
-      const bestEmail = dcResult.email?.find((e) => e.qualification === "professional")?.email
-        || dcResult.email?.[0]?.email;
-      if (bestEmail) {
-        if (!rows[idx].email) {
-          rows[idx].email = bestEmail;
-          updatedFields.push("email");
+      // Top-level mapping (strict fill-empty-only)
+      setIfEmpty(rows[idx], "email", pickBestEmail(dcResult), updatedTopLevel);
+      setIfEmpty(rows[idx], "telephone", cleanString(dcResult.mobile_phone || dcResult.phone), updatedTopLevel);
+      setIfEmpty(rows[idx], "poste", cleanString(dcResult.job), updatedTopLevel);
+      setIfEmpty(rows[idx], "linkedin", ensureHttpsUrl(cleanString(dcResult.linkedin)), updatedTopLevel);
+      setIfEmpty(rows[idx], "prenom", cleanString(dcResult.first_name), updatedTopLevel);
+      setIfEmpty(rows[idx], "nom", cleanString(dcResult.last_name), updatedTopLevel);
+      setIfEmpty(rows[idx], "entreprise", cleanString(dcResult.company), updatedTopLevel);
+      setIfEmpty(
+        rows[idx],
+        "naf_code",
+        cleanString(dcResult.naf5_code)
+          ? `${cleanString(dcResult.naf5_code)}${cleanString(dcResult.naf5_des) ? ` — ${cleanString(dcResult.naf5_des)}` : ""}`
+          : "",
+        updatedTopLevel
+      );
+      setIfEmpty(rows[idx], "effectifs", cleanString(dcResult.nb_employees), updatedTopLevel);
+      setIfEmpty(rows[idx], "siren", cleanString(dcResult.siren), updatedTopLevel);
+      setIfEmpty(rows[idx], "siret", cleanString(dcResult.siret), updatedTopLevel);
+      setIfEmpty(rows[idx], "adresse_siege", cleanString(dcResult.siret_address), updatedTopLevel);
+
+      // Persist any non-mapped Dropcontact keys in extra_fields (non-destructive merge)
+      const dcRaw = dcResult as unknown as Record<string, unknown>;
+      const extra = readExtraFields(rows[idx]);
+      for (const [key, value] of Object.entries(dcRaw)) {
+        if (TOP_LEVEL_DROP_KEYS.has(key)) continue;
+        const serialized = serializeExtraValue(value);
+        if (!serialized) continue;
+        if (!extra[key]) {
+          extra[key] = serialized;
+          addedExtraFields.push(key);
         }
       }
-
-      // Phone — fill if empty
-      const phone = dcResult.mobile_phone || dcResult.phone;
-      if (phone) {
-        if (!rows[idx].telephone) {
-          rows[idx].telephone = phone;
-          updatedFields.push("telephone");
-        }
-      }
-
-      // Job — always overwrite
-      if (dcResult.job) {
-        rows[idx].poste = dcResult.job;
-        updatedFields.push("poste");
-      }
-
-      // LinkedIn — always overwrite, ensure full URL
-      if (dcResult.linkedin) {
-        let url = dcResult.linkedin;
-        if (url && !url.startsWith("http")) {
-          url = `https://${url}`;
-        }
-        rows[idx].linkedin = url;
-        updatedFields.push("linkedin");
-      }
-
-      // Name — fill if empty
-      if (dcResult.first_name && !rows[idx].prenom) {
-        rows[idx].prenom = dcResult.first_name;
-        updatedFields.push("prenom");
-      }
-      if (dcResult.last_name && !rows[idx].nom) {
-        rows[idx].nom = dcResult.last_name;
-        updatedFields.push("nom");
-      }
-
-      // Entreprise — fill if empty
-      if (dcResult.company && !rows[idx].entreprise) {
-        rows[idx].entreprise = dcResult.company;
-        updatedFields.push("entreprise");
-      }
-
-      // NAF — always overwrite
-      if (dcResult.naf5_code) {
-        const nafLabel = dcResult.naf5_des ? `${dcResult.naf5_code} — ${dcResult.naf5_des}` : dcResult.naf5_code;
-        rows[idx].naf_code = nafLabel;
-        updatedFields.push("naf_code");
-      }
-
-      // Effectifs — always overwrite
-      if (dcResult.nb_employees) {
-        rows[idx].effectifs = dcResult.nb_employees;
-        updatedFields.push("effectifs");
+      if (Object.keys(extra).length > 0) {
+        rows[idx].extra_fields = JSON.stringify(extra);
       }
     } else {
       console.log(`[applyResults] No dcResult for index ${i}`);
@@ -182,8 +251,10 @@ function applyResults(rows: ProspectRow[], prospectIds: string[], dcResults: Dro
     results.push({
       id: pid,
       name: `${rows[idx].prenom} ${rows[idx].nom}`,
-      status: updatedFields.length > 0 ? "enriched" : "no_result",
-      fields: updatedFields,
+      status: updatedTopLevel.length > 0 || addedExtraFields.length > 0 ? "enriched" : "no_result",
+      fields: [...updatedTopLevel, ...addedExtraFields.map((k) => `extra:${k}`)],
+      topLevelFields: updatedTopLevel,
+      extraFields: addedExtraFields,
       raw: dcResult ? (dcResult as unknown as Record<string, unknown>) : undefined,
     });
   }
@@ -223,7 +294,7 @@ export async function GET(request: Request) {
     console.log(`[GET enrich] Raw DC data: ${JSON.stringify(pollResult.data).slice(0, 1500)}`);
 
     // Apply results to prospects (locked to prevent race conditions)
-    let results: { id: string; name: string; status: string; fields: string[]; debug?: string; raw?: Record<string, unknown> }[] = [];
+    let results: EnrichApplyResult[] = [];
     await withLock("prospects.json", async () => {
       const rows = await readProspects();
       console.log(`[GET enrich] Read ${rows.length} prospects from blob`);
