@@ -1,12 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-guard";
 import { getScrapingCompanies, getScrapingIndex, type ScrapingCompany } from "@/lib/scraping-store";
-import {
-  RETAIL_NAF_CODES,
-  RETAIL_NAF_CODE_SET,
-  GRANDES_REGIONS_ORDER,
-  isIdfDepartement,
-} from "@/lib/retail-naf";
+import { RETAIL_NAF_CODES, RETAIL_NAF_CODE_SET, GRANDES_REGIONS_ORDER } from "@/lib/retail-naf";
 import { REGION_BY_DEPARTMENT } from "@/lib/scraping-regions";
 
 export const dynamic = "force-dynamic";
@@ -33,13 +28,6 @@ function resolveRegion(company: ScrapingCompany): string {
   const cpDept = normalizeDept(cp);
   if (cpDept && REGION_BY_DEPARTMENT[cpDept]) return REGION_BY_DEPARTMENT[cpDept];
   return "Inconnue";
-}
-
-function isCompanyIdf(c: ScrapingCompany): boolean {
-  const d1 = normalizeDept(c.departement);
-  if (d1 && isIdfDepartement(d1)) return true;
-  const d2 = normalizeDept(c.code_postal);
-  return isIdfDepartement(d2);
 }
 
 function uniqueCompanyKey(company: ScrapingCompany): string {
@@ -88,41 +76,22 @@ export async function GET() {
       byNaf.set(naf, (byNaf.get(naf) || 0) + 1);
     }
 
-    const retailByNafIdf = new Map<string, number>();
-    const retailByNafFrance = new Map<string, number>();
     const retailRegionNaf = new Map<string, Map<string, number>>();
-    for (const { code } of RETAIL_NAF_CODES) {
-      retailByNafIdf.set(code, 0);
-      retailByNafFrance.set(code, 0);
-    }
 
     for (const company of unique) {
       const nafRaw = String(company.code_naf || "").trim().toUpperCase();
       if (!RETAIL_NAF_CODE_SET.has(nafRaw)) continue;
       const region = resolveRegion(company);
-      retailByNafFrance.set(nafRaw, (retailByNafFrance.get(nafRaw) || 0) + 1);
-      if (isCompanyIdf(company)) {
-        retailByNafIdf.set(nafRaw, (retailByNafIdf.get(nafRaw) || 0) + 1);
-      }
       if (!retailRegionNaf.has(region)) retailRegionNaf.set(region, new Map());
       const rm = retailRegionNaf.get(region)!;
       rm.set(nafRaw, (rm.get(nafRaw) || 0) + 1);
     }
 
-    const retailRows = RETAIL_NAF_CODES.map(({ code, label }) => ({
-      code,
-      label,
-      scrapedIdf: retailByNafIdf.get(code) ?? 0,
-      scrapedFrance: retailByNafFrance.get(code) ?? 0,
-    }));
-
     const seenRetailRegions = new Set(retailRegionNaf.keys());
-    const matrixRegions = [
-      ...GRANDES_REGIONS_ORDER.filter((r) => seenRetailRegions.has(r)),
-      ...[...seenRetailRegions]
-        .filter((r) => !GRANDES_REGIONS_ORDER.includes(r))
-        .sort((a, b) => a.localeCompare(b, "fr")),
-    ];
+    const extras = [...seenRetailRegions]
+      .filter((r) => !GRANDES_REGIONS_ORDER.includes(r))
+      .sort((a, b) => a.localeCompare(b, "fr"));
+    const matrixRegions = [...GRANDES_REGIONS_ORDER, ...extras];
 
     const retailMatrix = matrixRegions.map((region) => {
       const m = retailRegionNaf.get(region) || new Map<string, number>();
@@ -142,7 +111,6 @@ export async function GET() {
       byRegion: toSortedRows(byRegion, unique.length),
       byNaf: toSortedRows(byNaf, unique.length),
       retail: {
-        rows: retailRows,
         matrix: retailMatrix,
       },
     });
