@@ -121,6 +121,22 @@ interface ScoringCard {
   validated: boolean;
 }
 
+interface EnrichDetailRow {
+  id: string;
+  name: string;
+  outcome: "standard" | "extra_only" | "no_change";
+  topLevelFields: string[];
+  extraFields: string[];
+  note: string;
+}
+
+interface EnrichReport {
+  generatedAt: string;
+  selectedCount: number;
+  enrichedCount: number;
+  rows: EnrichDetailRow[];
+}
+
 type StatusKey = "en cours" | "perdu" | "archivé";
 type ListFilterMode = "all" | "list" | "orphans";
 
@@ -244,6 +260,8 @@ export default function ProspectsPage() {
   const [showEnrichMenu, setShowEnrichMenu] = useState(false);
   const [showRateMenu, setShowRateMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [enrichReport, setEnrichReport] = useState<EnrichReport | null>(null);
+  const [showEnrichReport, setShowEnrichReport] = useState(true);
   const [allDeals, setAllDeals] = useState<{ id: number; title: string; person_name?: string; org_name?: string }[]>([]);
   const [dealSearch, setDealSearch] = useState("");
   const [showNewProspect, setShowNewProspect] = useState(false);
@@ -640,6 +658,8 @@ export default function ProspectsPage() {
     if (!confirm(`Enrichir ${selected.size} contact${selected.size > 1 ? "s" : ""} via Dropcontact ?\nCela consommera des crédits API.`)) return;
     setEnriching(true);
     setActionMsg("Envoi à Dropcontact...");
+    setEnrichReport(null);
+    setShowEnrichReport(true);
     try {
       const selectedIds = Array.from(selected);
       const BATCH_SIZE = 25;
@@ -647,6 +667,7 @@ export default function ProspectsPage() {
       let totalEnriched = 0;
       let totalExtraUpdated = 0;
       const updatedStandardFields = new Set<string>();
+      const detailRows: EnrichDetailRow[] = [];
 
       for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
         const start = batchIndex * BATCH_SIZE;
@@ -693,12 +714,33 @@ export default function ProspectsPage() {
 
           const results = Array.isArray(pollJson.results) ? pollJson.results : [];
           for (const row of results) {
-            const topLevelFields = Array.isArray(row?.topLevelFields) ? row.topLevelFields : [];
-            const extraFields = Array.isArray(row?.extraFields) ? row.extraFields : [];
+            const topLevelFields = Array.isArray(row?.topLevelFields)
+              ? row.topLevelFields.filter((v: unknown) => typeof v === "string" && v) as string[]
+              : [];
+            const extraFields = Array.isArray(row?.extraFields)
+              ? row.extraFields.filter((v: unknown) => typeof v === "string" && v) as string[]
+              : [];
             for (const field of topLevelFields) {
               if (typeof field === "string" && field) updatedStandardFields.add(field);
             }
             totalExtraUpdated += extraFields.length;
+
+            const outcome: EnrichDetailRow["outcome"] =
+              topLevelFields.length > 0 ? "standard" : extraFields.length > 0 ? "extra_only" : "no_change";
+            const note =
+              outcome === "no_change"
+                ? "Aucun champ vide compatible (ou aucune donnée exploitable)"
+                : outcome === "extra_only"
+                  ? "Données stockées en extra_fields"
+                  : "Champs standards enrichis";
+            detailRows.push({
+              id: String((row as Record<string, unknown>)?.id || ""),
+              name: String((row as Record<string, unknown>)?.name || "Contact"),
+              outcome,
+              topLevelFields,
+              extraFields,
+              note,
+            });
           }
 
           totalEnriched += Number(pollJson.enriched || 0);
@@ -726,6 +768,17 @@ export default function ProspectsPage() {
             if (knownKeys.has(key)) next.add(key);
           }
           return next;
+        });
+      }
+
+      if (detailRows.length > 0) {
+        const uniqueById = new Map<string, EnrichDetailRow>();
+        for (const row of detailRows) uniqueById.set(row.id || `${row.name}-${Math.random()}`, row);
+        setEnrichReport({
+          generatedAt: new Date().toISOString(),
+          selectedCount: selectedIds.length,
+          enrichedCount: totalEnriched,
+          rows: Array.from(uniqueById.values()),
         });
       }
 
@@ -1736,6 +1789,56 @@ export default function ProspectsPage() {
           </button>
         </div>
       </div>
+
+      {enrichReport && showEnrichReport && (
+        <div className="bg-white rounded-lg border border-indigo-200 p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-indigo-700">Détails enrichissement Dropcontact</p>
+              <p className="text-[10px] text-gray-500">
+                {enrichReport.enrichedCount}/{enrichReport.selectedCount} enrichis · {new Date(enrichReport.generatedAt).toLocaleTimeString("fr-FR")}
+              </p>
+            </div>
+            <button
+              onClick={() => setShowEnrichReport(false)}
+              className="text-[11px] text-gray-400 hover:text-gray-600 cursor-pointer"
+              title="Masquer ce panneau"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="max-h-44 overflow-y-auto space-y-1.5">
+            {enrichReport.rows.map((row) => (
+              <div key={`${row.id}-${row.name}`} className="rounded-md border border-gray-200 px-2 py-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] font-medium text-gray-800 truncate">{row.name}</p>
+                  <span
+                    className={cn(
+                      "text-[9px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap",
+                      row.outcome === "standard"
+                        ? "bg-green-100 text-green-700"
+                        : row.outcome === "extra_only"
+                          ? "bg-amber-100 text-amber-700"
+                          : "bg-gray-100 text-gray-600"
+                    )}
+                  >
+                    {row.outcome === "standard" ? "Standard" : row.outcome === "extra_only" ? "Extra only" : "Aucun changement"}
+                  </span>
+                </div>
+                {row.topLevelFields.length > 0 && (
+                  <p className="text-[10px] text-green-700 mt-0.5 truncate">Standard: {row.topLevelFields.join(", ")}</p>
+                )}
+                {row.extraFields.length > 0 && (
+                  <p className="text-[10px] text-amber-700 mt-0.5 truncate">Extra: {row.extraFields.join(", ")}</p>
+                )}
+                {row.topLevelFields.length === 0 && row.extraFields.length === 0 && (
+                  <p className="text-[10px] text-gray-500 mt-0.5">{row.note}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex items-center gap-3 bg-white rounded-lg border border-gray-200 p-3">
