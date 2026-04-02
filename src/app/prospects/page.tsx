@@ -237,6 +237,7 @@ export default function ProspectsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [archiving, setArchiving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [normalizing, setNormalizing] = useState(false);
   const [enriching, setEnriching] = useState(false);
   const [processing, setProcessing] = useState<{ label: string; message: string; current: number; total: number } | null>(null);
   const [showLinkDeal, setShowLinkDeal] = useState(false);
@@ -574,6 +575,66 @@ export default function ProspectsPage() {
     }
   };
 
+  const normalizeProspectColumns = async () => {
+    setNormalizing(true);
+    try {
+      const previewRes = await fetch("/api/prospects/normalize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dryRun: true }),
+      });
+      const previewJson = await previewRes.json();
+      if (!previewJson.success) {
+        setActionMsg(`Erreur normalisation: ${previewJson.error || "inconnue"}`);
+        setTimeout(() => setActionMsg(null), 5000);
+        return;
+      }
+
+      const preview = previewJson.stats || {};
+      const toCopy = Number(preview.copiedFields || 0);
+      const touched = Number(preview.touchedProspects || 0);
+      if (toCopy === 0) {
+        setActionMsg("Normalisation: aucun champ à copier (déjà harmonisé)");
+        setTimeout(() => setActionMsg(null), 5000);
+        return;
+      }
+
+      const ok = confirm(
+        `Normalisation proposée:\n- ${toCopy} champs à copier\n- ${touched} prospects impactés\n\nConfirmer l'application ?`
+      );
+      if (!ok) {
+        setActionMsg("Normalisation annulée");
+        setTimeout(() => setActionMsg(null), 3000);
+        return;
+      }
+
+      const applyRes = await fetch("/api/prospects/normalize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dryRun: false }),
+      });
+      const applyJson = await applyRes.json();
+      if (!applyJson.success) {
+        setActionMsg(`Erreur normalisation: ${applyJson.error || "inconnue"}`);
+        setTimeout(() => setActionMsg(null), 5000);
+        return;
+      }
+
+      const stats = applyJson.stats || {};
+      setActionMsg(
+        `Normalisation OK: ${stats.copiedFields || 0} champs copiés sur ${stats.touchedProspects || 0} prospects`
+      );
+      syncProspects();
+      setTimeout(() => setActionMsg(null), 7000);
+    } catch (err) {
+      console.error("Normalize prospects error:", err);
+      setActionMsg("Erreur lors de la normalisation");
+      setTimeout(() => setActionMsg(null), 5000);
+    } finally {
+      setNormalizing(false);
+    }
+  };
+
   const enrichProspects = async () => {
     if (selected.size === 0) return;
     if (!confirm(`Enrichir ${selected.size} contact${selected.size > 1 ? "s" : ""} via Dropcontact ?\nCela consommera des crédits API.`)) return;
@@ -584,6 +645,8 @@ export default function ProspectsPage() {
       const BATCH_SIZE = 25;
       const totalBatches = Math.ceil(selectedIds.length / BATCH_SIZE);
       let totalEnriched = 0;
+      let totalExtraUpdated = 0;
+      const updatedStandardFields = new Set<string>();
 
       for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
         const start = batchIndex * BATCH_SIZE;
@@ -628,6 +691,16 @@ export default function ProspectsPage() {
             return;
           }
 
+          const results = Array.isArray(pollJson.results) ? pollJson.results : [];
+          for (const row of results) {
+            const topLevelFields = Array.isArray(row?.topLevelFields) ? row.topLevelFields : [];
+            const extraFields = Array.isArray(row?.extraFields) ? row.extraFields : [];
+            for (const field of topLevelFields) {
+              if (typeof field === "string" && field) updatedStandardFields.add(field);
+            }
+            totalExtraUpdated += extraFields.length;
+          }
+
           totalEnriched += Number(pollJson.enriched || 0);
           const totalTarget = selectedIds.length;
           setActionMsg(
@@ -645,9 +718,23 @@ export default function ProspectsPage() {
         }
       }
 
-      setActionMsg(
-        `${totalEnriched}/${selectedIds.length} contact${selectedIds.length > 1 ? "s" : ""} enrichi${totalEnriched > 1 ? "s" : ""}`
-      );
+      if (updatedStandardFields.size > 0) {
+        setVisibleCols((prev) => {
+          const next = new Set(prev);
+          const knownKeys = new Set(PROSPECT_COLUMNS.map((c) => c.key));
+          for (const key of updatedStandardFields) {
+            if (knownKeys.has(key)) next.add(key);
+          }
+          return next;
+        });
+      }
+
+      const enrichedMsg = `${totalEnriched}/${selectedIds.length} contact${selectedIds.length > 1 ? "s" : ""} enrichi${totalEnriched > 1 ? "s" : ""}`;
+      if (updatedStandardFields.size === 0 && totalExtraUpdated > 0) {
+        setActionMsg(`${enrichedMsg} · 0 champ standard rempli (fill-empty) · ${totalExtraUpdated} extra`);
+      } else {
+        setActionMsg(`${enrichedMsg} · ${updatedStandardFields.size} colonne${updatedStandardFields.size > 1 ? "s" : ""} standard mise${updatedStandardFields.size > 1 ? "s" : ""} à jour`);
+      }
       setSelected(new Set());
       syncProspects();
       setTimeout(() => setActionMsg(null), 8000);
@@ -1586,6 +1673,15 @@ export default function ProspectsPage() {
           >
             <Download className="w-3.5 h-3.5" />
             {selected.size > 0 ? `Export (${selected.size})` : filtered.length < prospects.length ? `Export (${filtered.length})` : "Export CSV"}
+          </button>
+          <button
+            onClick={normalizeProspectColumns}
+            disabled={normalizing || !!processing}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
+            title="Harmoniser les champs extra vers les champs standards (sans écraser les valeurs existantes)"
+          >
+            {normalizing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            {normalizing ? "Normalisation..." : "Normer colonnes"}
           </button>
           <input
             ref={fileInputRef}
