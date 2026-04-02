@@ -34,6 +34,8 @@ interface ProspectRow {
   duree_poste?: string;
   duree_entreprise?: string;
   resume_entreprise?: string;
+  ai_score?: string;
+  ai_comment?: string;
   extra_fields?: string;
 }
 
@@ -208,18 +210,16 @@ const KNOWN_FIELDS = new Set<string>(CANONICAL_PROSPECT_FIELDS);
 
 /**
  * column_mapping JSON format (sent by client after parse-headers step):
- * [{ index: number, selected: boolean, label: string, knownField: string | null }]
+ * [{ index: number, targetField: string | null, knownField?: string | null }]
  *
  * - index: column index in the CSV/Excel
- * - selected: whether user checked this column for import
- * - label: user-chosen display label (for extra_fields key)
- * - knownField: mapped to a known ProspectRow field, or null (→ extra_fields)
+ * - targetField: selected SaaS field for this source column, or null
+ * - knownField: backward compatibility with previous client payload
  */
 interface ColumnMapping {
   index: number;
-  selected: boolean;
-  label: string;
-  knownField: string | null;
+  targetField?: string | null;
+  knownField?: string | null;
 }
 
 export async function POST(request: Request) {
@@ -245,34 +245,17 @@ export async function POST(request: Request) {
       try { userMapping = JSON.parse(columnMappingRaw); } catch { /* ignore */ }
     }
 
-    // Build header mapping: for each column index, what field does it map to?
-    // Also track extra fields (selected but not a known field)
+    // Build header mapping: for each column index, what SaaS field does it map to?
     const headerMapping: (keyof ProspectRow | null)[] = [];
-    const extraFieldMapping: (string | null)[] = []; // label for extra_fields
 
     if (userMapping && Array.isArray(userMapping)) {
       for (let i = 0; i < rawHeaders.length; i++) {
         const colDef = userMapping.find((m) => m.index === i);
-        if (!colDef || !colDef.selected) {
-          headerMapping.push(null);
-          extraFieldMapping.push(null);
-        } else if (colDef.knownField && KNOWN_FIELDS.has(colDef.knownField)) {
-          headerMapping.push(colDef.knownField as keyof ProspectRow);
-          extraFieldMapping.push(null);
-        } else if (colDef.label) {
-          const resolved = resolveCanonicalProspectField(colDef.label);
-          if (resolved) {
-            headerMapping.push(resolved as keyof ProspectRow);
-            extraFieldMapping.push(null);
-          } else {
-            // Extra field — store under the user's label
-            headerMapping.push(null);
-            extraFieldMapping.push(colDef.label || rawHeaders[i]);
-          }
+        const targetField = colDef?.targetField || colDef?.knownField || null;
+        if (targetField && KNOWN_FIELDS.has(targetField)) {
+          headerMapping.push(targetField as keyof ProspectRow);
         } else {
-          // Extra field — store under the user's label
           headerMapping.push(null);
-          extraFieldMapping.push(colDef.label || rawHeaders[i]);
         }
       }
     } else {
@@ -283,11 +266,10 @@ export async function POST(request: Request) {
         const fallback = COLUMN_MAP[clean] || null;
         const candidate = (canonical as keyof ProspectRow | null) || fallback;
         headerMapping.push(candidate && KNOWN_FIELDS.has(String(candidate)) ? candidate : null);
-        extraFieldMapping.push(null);
       }
     }
 
-    const hasMapped = headerMapping.some((m) => m !== null) || extraFieldMapping.some((m) => m !== null);
+    const hasMapped = headerMapping.some((m) => m !== null);
     if (!hasMapped) {
       const detected = rawHeaders.slice(0, 5).join(", ");
       return NextResponse.json({
@@ -303,9 +285,6 @@ export async function POST(request: Request) {
     if (!finalListId && listName && listCompany) {
       finalListId = `lst_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     }
-
-    // Collect extra field labels for list metadata
-    const extraLabels = extraFieldMapping.filter(Boolean) as string[];
 
     const newRows: ProspectRow[] = [];
     for (let i = 0; i < dataRows.length; i++) {
@@ -330,9 +309,9 @@ export async function POST(request: Request) {
         duree_poste: "",
         duree_entreprise: "",
         resume_entreprise: "",
+        ai_score: "",
+        ai_comment: "",
       };
-
-      const extra: Record<string, string> = {};
 
       for (let j = 0; j < rawHeaders.length; j++) {
         const val = values[j] ? String(values[j]).trim() : "";
@@ -342,20 +321,6 @@ export async function POST(request: Request) {
         if (field) {
           row[field] = val;
         }
-        const extraLabel = extraFieldMapping[j];
-        if (extraLabel) {
-          const canonicalFromLabel = resolveCanonicalProspectField(extraLabel);
-          if (canonicalFromLabel) {
-            if (!row[canonicalFromLabel]) row[canonicalFromLabel] = val;
-          } else {
-            extra[extraLabel] = val;
-          }
-        }
-      }
-
-      // Store extra fields as JSON
-      if (Object.keys(extra).length > 0) {
-        row.extra_fields = JSON.stringify(extra);
       }
 
       if (hasNom && !hasPrenom && row.nom) {
@@ -421,18 +386,13 @@ export async function POST(request: Request) {
       await writeBlob("prospects.json", [...existing, ...deduped]);
     });
 
-    // Create or update list metadata (include extra column labels)
+    // Create or update list metadata
     if (finalListId) {
       await withLock("prospect-lists.json", async () => {
         const lists = await readBlob<ProspectList>("prospect-lists.json");
         const existing = lists.find((l) => l.id === finalListId);
         if (existing) {
           existing.count += newRows.length;
-          // Merge extra columns if any
-          if (extraLabels.length > 0) {
-            const prev = existing.extra_columns || [];
-            existing.extra_columns = [...new Set([...prev, ...extraLabels])];
-          }
         } else if (listName && listCompany) {
           const newList: ProspectList = {
             id: finalListId,
@@ -441,7 +401,6 @@ export async function POST(request: Request) {
             created_at: new Date().toISOString(),
             count: newRows.length,
           };
-          if (extraLabels.length > 0) newList.extra_columns = extraLabels;
           lists.push(newList);
         }
         await writeBlob("prospect-lists.json", lists);
@@ -456,7 +415,7 @@ export async function POST(request: Request) {
       dupWithExisting,
       totalRows: newRows.length + dupInFile + dupWithExisting,
       list_id: finalListId || null,
-      extraColumns: extraLabels,
+      extraColumns: [],
     });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);

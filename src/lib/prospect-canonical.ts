@@ -13,6 +13,8 @@ export const CANONICAL_PROSPECT_FIELDS = [
   "duree_entreprise",
   "linkedin_entreprise",
   "resume_entreprise",
+  "ai_score",
+  "ai_comment",
 ] as const;
 
 export type CanonicalProspectField = (typeof CANONICAL_PROSPECT_FIELDS)[number];
@@ -84,6 +86,17 @@ const ALIASES: Record<string, CanonicalProspectField> = {
 
   resumeentreprise: "resume_entreprise",
   resume_entreprise: "resume_entreprise",
+  "score ia": "ai_score",
+  scoreia: "ai_score",
+  ai_score: "ai_score",
+  score: "ai_score",
+  "analyse ia": "ai_comment",
+  analyseia: "ai_comment",
+  "descriptif ia": "ai_comment",
+  descriptifia: "ai_comment",
+  "commentaire ia": "ai_comment",
+  commentaireia: "ai_comment",
+  ai_comment: "ai_comment",
 
   ville: "ville",
   city: "ville",

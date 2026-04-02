@@ -1,0 +1,16 @@
+---
+description: Auto commit and push after coding changes
+alwaysApply: true
+---
+
+# Auto Commit + Push
+
+User preference for this repository:
+
+- After implementing requested code changes, create a git commit and push to `origin` directly.
+- Do not ask for extra confirmation before commit/push, unless there is a safety risk.
+- Stage only relevant source/config changes for the task.
+- Do not include local test data exports (csv/xlsx/logs/tmp) unless explicitly requested.
+- Keep commit messages concise and aligned with existing project style.
+- If push fails (auth/network/conflict), report exact next action needed.
+

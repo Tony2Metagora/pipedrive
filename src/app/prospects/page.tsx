@@ -86,9 +86,7 @@ interface ColumnInfo {
 
 interface ColMapping {
   index: number;
-  selected: boolean;
-  label: string;
-  knownField: string | null;
+  targetField: string | null;
 }
 
 interface ProspectList {
@@ -158,8 +156,29 @@ const PROSPECT_COLUMNS = [
   { key: "ville", label: "Ville", defaultVisible: true, defaultWidth: 90, minWidth: 50 },
   { key: "duree_poste", label: "Durée poste", defaultVisible: false, defaultWidth: 90, minWidth: 60 },
   { key: "duree_entreprise", label: "Durée entreprise", defaultVisible: false, defaultWidth: 110, minWidth: 70 },
+  { key: "ai_score", label: "Score IA", defaultVisible: true, defaultWidth: 70, minWidth: 50 },
+  { key: "ai_comment", label: "Descriptif IA", defaultVisible: true, defaultWidth: 180, minWidth: 90 },
   { key: "resume_entreprise", label: "Résumé Ent.", defaultVisible: true, defaultWidth: 160, minWidth: 80 },
 ] as { key: string; label: string; defaultVisible: boolean; defaultWidth: number; minWidth: number }[];
+
+const IMPORT_TARGET_FIELDS = [
+  { key: "prenom", label: "Prénom" },
+  { key: "nom", label: "Nom" },
+  { key: "email", label: "Email" },
+  { key: "telephone", label: "Téléphone" },
+  { key: "poste", label: "Poste" },
+  { key: "entreprise", label: "Entreprise" },
+  { key: "linkedin", label: "LinkedIn" },
+  { key: "linkedin_entreprise", label: "LinkedIn entreprise" },
+  { key: "naf_code", label: "Code NAF" },
+  { key: "effectifs", label: "Effectifs" },
+  { key: "ville", label: "Ville" },
+  { key: "duree_poste", label: "Durée poste" },
+  { key: "duree_entreprise", label: "Durée entreprise" },
+  { key: "ai_score", label: "Score IA" },
+  { key: "ai_comment", label: "Descriptif IA" },
+  { key: "resume_entreprise", label: "Résumé entreprise" },
+];
 
 const SCORING_TEXT_MAX_WORDS = 200;
 
@@ -421,7 +440,7 @@ export default function ProspectsPage() {
       formData.append("list_name", uploadListName.trim());
       formData.append("list_company", uploadListCompany.trim());
       // Send column mapping
-      const selectedMapping = colMapping.filter((m) => m.selected);
+      const selectedMapping = colMapping.filter((m) => !!m.targetField);
       if (selectedMapping.length > 0) {
         formData.append("column_mapping", JSON.stringify(colMapping));
       }
@@ -431,7 +450,6 @@ export default function ProspectsPage() {
         const parts: string[] = [`✓ ${json.count} contacts importés dans "${uploadListName.trim()}"`];
         if (json.dupInFile > 0) parts.push(`${json.dupInFile} doublons dans le fichier source`);
         if (json.dupWithExisting > 0) parts.push(`${json.dupWithExisting} doublons déjà présents en base`);
-        if (json.extraColumns?.length) parts.push(`${json.extraColumns.length} colonnes supplémentaires`);
         if (json.totalRows && (json.dupInFile > 0 || json.dupWithExisting > 0)) {
           parts.push(`(${json.totalRows} lignes lues → ${json.count} uniques)`);
         }
@@ -1901,9 +1919,7 @@ export default function ProspectsPage() {
                   setParsedTotalRows(json.totalRows || 0);
                   setColMapping(json.columns.map((c: ColumnInfo) => ({
                     index: c.index,
-                    selected: c.autoSelected,
-                    label: c.suggestedLabel,
-                    knownField: c.knownField,
+                    targetField: c.knownField,
                   })));
                 } else {
                   alert("Erreur parsing: " + (json.error || "inconnue"));
@@ -2435,28 +2451,16 @@ export default function ProspectsPage() {
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <p className="text-xs text-gray-600">
-                      <strong>{parsedColumns.length}</strong> colonnes détectées — cochez celles à importer et renommez si besoin.
+                      <strong>{parsedColumns.length}</strong> colonnes détectées — associez chaque colonne du fichier a une colonne SaaS.
                     </p>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setColMapping((prev) => prev.map((m) => ({ ...m, selected: true })))}
-                        className="text-[10px] text-indigo-600 hover:text-indigo-800 font-medium cursor-pointer"
-                      >Tout cocher</button>
-                      <button
-                        onClick={() => setColMapping((prev) => prev.map((m) => ({ ...m, selected: false })))}
-                        className="text-[10px] text-gray-500 hover:text-gray-700 font-medium cursor-pointer"
-                      >Tout décocher</button>
-                    </div>
                   </div>
                   <div className="border border-gray-200 rounded-lg overflow-hidden">
                     <table className="w-full text-xs">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th className="w-8 px-2 py-2 text-center"></th>
                           <th className="px-2 py-2 text-left text-gray-600 font-semibold">Colonne fichier</th>
-                          <th className="px-2 py-2 text-left text-gray-600 font-semibold">Titre affiché</th>
-                          <th className="px-2 py-2 text-left text-gray-600 font-semibold">Champ connu</th>
-                          <th className="px-2 py-2 text-left text-gray-600 font-semibold">Exemple</th>
+                          <th className="px-2 py-2 text-left text-gray-600 font-semibold">Colonne SaaS</th>
+                          <th className="px-2 py-2 text-left text-gray-600 font-semibold">Exemples</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
@@ -2464,33 +2468,24 @@ export default function ProspectsPage() {
                           const mapping = colMapping.find((m) => m.index === col.index);
                           if (!mapping) return null;
                           return (
-                            <tr key={col.index} className={cn("transition-colors", mapping.selected ? "bg-indigo-50/40" : "opacity-60")}>
-                              <td className="px-2 py-1.5 text-center">
-                                <input
-                                  type="checkbox"
-                                  checked={mapping.selected}
-                                  onChange={() => setColMapping((prev) => prev.map((m) => m.index === col.index ? { ...m, selected: !m.selected } : m))}
-                                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                                />
-                              </td>
+                            <tr key={col.index} className={cn("transition-colors", mapping.targetField ? "bg-indigo-50/40" : "opacity-70")}>
                               <td className="px-2 py-1.5">
                                 <span className="font-mono text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{col.original}</span>
                               </td>
                               <td className="px-2 py-1.5">
-                                <input
-                                  type="text"
-                                  value={mapping.label}
-                                  onChange={(e) => setColMapping((prev) => prev.map((m) => m.index === col.index ? { ...m, label: e.target.value } : m))}
-                                  disabled={!mapping.selected}
-                                  className="w-full px-1.5 py-0.5 text-[11px] border border-gray-200 rounded focus:ring-1 focus:ring-indigo-400 outline-none disabled:bg-gray-50 disabled:text-gray-400"
-                                />
-                              </td>
-                              <td className="px-2 py-1.5">
-                                {col.knownField ? (
-                                  <span className="text-[10px] font-medium text-green-700 bg-green-50 px-1.5 py-0.5 rounded">{col.knownField}</span>
-                                ) : (
-                                  <span className="text-[10px] text-gray-400">extra</span>
-                                )}
+                                <select
+                                  value={mapping.targetField || ""}
+                                  onChange={(e) => {
+                                    const next = e.target.value || null;
+                                    setColMapping((prev) => prev.map((m) => m.index === col.index ? { ...m, targetField: next } : m));
+                                  }}
+                                  className="w-full px-1.5 py-0.5 text-[11px] border border-gray-200 rounded focus:ring-1 focus:ring-indigo-400 outline-none bg-white"
+                                >
+                                  <option value="">Ne pas importer</option>
+                                  {IMPORT_TARGET_FIELDS.map((field) => (
+                                    <option key={field.key} value={field.key}>{field.label}</option>
+                                  ))}
+                                </select>
                               </td>
                               <td className="px-2 py-1.5 max-w-[260px]">
                                 {col.samples.length > 0 ? (
@@ -2512,9 +2507,7 @@ export default function ProspectsPage() {
                     </table>
                   </div>
                   <p className="text-[10px] text-gray-400">
-                    Les colonnes avec un &quot;champ connu&quot; seront mappées aux champs standard (Prénom, Nom, Email...).
-                    Les autres seront importées en colonnes supplémentaires.
-                    <strong className="text-indigo-600"> Score IA</strong> et <strong className="text-indigo-600">Analyse IA</strong> seront toujours ajoutés.
+                    Seules les colonnes SaaS existantes peuvent etre selectionnees. Aucun nouveau nom de colonne n&apos;est cree a l&apos;import.
                   </p>
                 </div>
               ) : (
@@ -2568,7 +2561,7 @@ export default function ProspectsPage() {
                     )}
                   </div>
                   <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 text-xs text-indigo-700">
-                    <strong>{colMapping.filter((m) => m.selected).length}</strong> colonnes sélectionnées sur {parsedColumns.length} — <strong>{parsedTotalRows}</strong> lignes à importer
+                    <strong>{colMapping.filter((m) => !!m.targetField).length}</strong> colonnes associees sur {parsedColumns.length} — <strong>{parsedTotalRows}</strong> lignes a importer
                   </div>
                 </div>
               )}
@@ -2585,7 +2578,7 @@ export default function ProspectsPage() {
               {uploadStep === 1 ? (
                 <button
                   onClick={() => setUploadStep(2)}
-                  disabled={colMapping.filter((m) => m.selected).length === 0}
+                  disabled={colMapping.filter((m) => !!m.targetField).length === 0}
                   className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
                 >
                   Suivant <ChevronDown className="w-4 h-4 -rotate-90" />
