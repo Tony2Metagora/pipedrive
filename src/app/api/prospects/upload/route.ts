@@ -26,13 +26,13 @@ interface ProspectRow {
   pipelines: string;
   notes: string;
   list_id?: string;
-  score_entreprise?: string;
-  score_job?: string;
   linkedin?: string;
+  linkedin_entreprise?: string;
   naf_code?: string;
   effectifs?: string;
-  ai_score?: string;
-  ai_comment?: string;
+  ville?: string;
+  duree_poste?: string;
+  duree_entreprise?: string;
   resume_entreprise?: string;
   extra_fields?: string;
 }
@@ -280,7 +280,9 @@ export async function POST(request: Request) {
       for (const h of rawHeaders) {
         const clean = h.trim().toLowerCase().replace(/[\u201c\u201d]/g, "");
         const canonical = resolveCanonicalProspectField(clean);
-        headerMapping.push((canonical as keyof ProspectRow) || COLUMN_MAP[clean] || null);
+        const fallback = COLUMN_MAP[clean] || null;
+        const candidate = (canonical as keyof ProspectRow | null) || fallback;
+        headerMapping.push(candidate && KNOWN_FIELDS.has(String(candidate)) ? candidate : null);
         extraFieldMapping.push(null);
       }
     }
@@ -320,13 +322,13 @@ export async function POST(request: Request) {
         pipelines: "",
         notes: "",
         list_id: finalListId || undefined,
-        score_entreprise: "",
-        score_job: "",
         linkedin: "",
+        linkedin_entreprise: "",
         naf_code: "",
         effectifs: "",
-        ai_score: "",
-        ai_comment: "",
+        ville: "",
+        duree_poste: "",
+        duree_entreprise: "",
         resume_entreprise: "",
       };
 

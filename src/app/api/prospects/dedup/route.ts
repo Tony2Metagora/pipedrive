@@ -1,12 +1,13 @@
 /**
  * API Route — Deduplicate prospects
- * POST : remove duplicate prospects (keeps first occurrence)
- * 
- * Dedup rules (in order):
- * 1. Same email (case-insensitive) → duplicate
- * 2. No email → same nom + prenom + entreprise (case-insensitive) → duplicate
- * 
- * Also recalculates list counts in prospect-lists.json
+ * POST : merge/remove duplicate prospects with rule R2
+ *
+ * Dedup rule:
+ * - duplicate if same email OR same LinkedIn
+ * - keep the most complete row
+ * - merge fill-empty values from other duplicates
+ *
+ * Also recalculates list counts in prospect-lists.json.
  */
 
 import { NextResponse } from "next/server";
@@ -15,12 +16,10 @@ import { requireAuth } from "@/lib/api-guard";
 
 interface ProspectRow {
   id: string;
-  email: string;
-  nom: string;
-  prenom: string;
-  entreprise: string;
+  email?: string;
+  linkedin?: string;
   list_id?: string;
-  [key: string]: unknown;
+  [key: string]: string | undefined;
 }
 
 interface ProspectList {
@@ -31,11 +30,50 @@ interface ProspectList {
   count: number;
 }
 
-function nameKey(r: ProspectRow): string {
-  const nom = (r.nom || "").toLowerCase().trim();
-  const prenom = (r.prenom || "").toLowerCase().trim();
-  const entreprise = (r.entreprise || "").toLowerCase().trim();
-  return `${nom}||${prenom}||${entreprise}`;
+const FILL_KEYS = [
+  "nom",
+  "prenom",
+  "email",
+  "telephone",
+  "linkedin",
+  "poste",
+  "entreprise",
+  "naf_code",
+  "effectifs",
+  "ville",
+  "duree_poste",
+  "duree_entreprise",
+  "linkedin_entreprise",
+  "resume_entreprise",
+] as const;
+
+function clean(v: unknown): string {
+  return typeof v === "string" ? v.trim() : "";
+}
+
+function normalizeEmail(v: string): string {
+  return v.trim().toLowerCase();
+}
+
+function normalizeLinkedin(v: string): string {
+  const normalized = v.trim().toLowerCase();
+  const withProtocol = /^https?:\/\//.test(normalized) ? normalized : `https://${normalized}`;
+  return withProtocol.replace(/^https?:\/\/(www\.)?/, "").replace(/\/+$/, "");
+}
+
+function completenessScore(row: ProspectRow): number {
+  let score = 0;
+  for (const key of FILL_KEYS) {
+    if (clean(row[key])) score += 1;
+  }
+  return score;
+}
+
+function mergeFillEmpty(target: ProspectRow, donor: ProspectRow) {
+  for (const key of FILL_KEYS) {
+    if (!clean(target[key]) && clean(donor[key])) target[key] = donor[key];
+  }
+  if (!clean(target.list_id) && clean(donor.list_id)) target.list_id = donor.list_id;
 }
 
 export async function POST() {
@@ -51,23 +89,49 @@ export async function POST() {
       const rows = await readBlob<ProspectRow>("prospects.json");
       beforeCount = rows.length;
 
-      const seenEmails = new Set<string>();
-      const seenNames = new Set<string>();
-      deduped = [];
+      const survivors: ProspectRow[] = [];
+      const dead = new Set<ProspectRow>();
+      const emailToRow = new Map<string, ProspectRow>();
+      const linkedinToRow = new Map<string, ProspectRow>();
 
-      for (const r of rows) {
-        const email = r.email?.toLowerCase().trim();
-        if (email) {
-          if (seenEmails.has(email)) continue;
-          seenEmails.add(email);
-        } else {
-          const nk = nameKey(r);
-          if (nk !== "||||" && seenNames.has(nk)) continue;
-          if (nk !== "||||") seenNames.add(nk);
+      for (const src of rows) {
+        const current: ProspectRow = { ...src };
+        const emailKey = clean(current.email) ? normalizeEmail(clean(current.email)) : "";
+        const linkedinKey = clean(current.linkedin) ? normalizeLinkedin(clean(current.linkedin)) : "";
+
+        const matched = new Set<ProspectRow>();
+        if (emailKey && emailToRow.has(emailKey)) matched.add(emailToRow.get(emailKey)!);
+        if (linkedinKey && linkedinToRow.has(linkedinKey)) matched.add(linkedinToRow.get(linkedinKey)!);
+
+        if (matched.size === 0) {
+          survivors.push(current);
+          if (emailKey) emailToRow.set(emailKey, current);
+          if (linkedinKey) linkedinToRow.set(linkedinKey, current);
+          continue;
         }
-        deduped.push(r);
+
+        const candidates = [...matched, current];
+        let winner = candidates[0];
+        for (const candidate of candidates) {
+          if (completenessScore(candidate) > completenessScore(winner)) winner = candidate;
+        }
+
+        if (!survivors.includes(winner)) survivors.push(winner);
+        for (const candidate of candidates) {
+          if (candidate === winner) continue;
+          mergeFillEmpty(winner, candidate);
+          if (survivors.includes(candidate)) dead.add(candidate);
+        }
+
+        for (const candidate of candidates) {
+          const e = clean(candidate.email) ? normalizeEmail(clean(candidate.email)) : "";
+          const li = clean(candidate.linkedin) ? normalizeLinkedin(clean(candidate.linkedin)) : "";
+          if (e) emailToRow.set(e, winner);
+          if (li) linkedinToRow.set(li, winner);
+        }
       }
 
+      deduped = survivors.filter((r) => !dead.has(r));
       afterCount = deduped.length;
       await writeBlob("prospects.json", deduped);
     });

@@ -31,11 +31,13 @@ interface ProspectRow {
   score_entreprise: string;
   score_job: string;
   linkedin: string;
+  linkedin_entreprise?: string;
   naf_code: string;
   effectifs: string;
-  siren?: string;
-  siret?: string;
-  adresse_siege?: string;
+  ville?: string;
+  duree_poste?: string;
+  duree_entreprise?: string;
+  resume_entreprise?: string;
   extra_fields?: string;
 }
 
@@ -134,43 +136,13 @@ function getCanonicalDropValues(dcResult: DropcontactResult): Record<string, str
     phone: cleanString(dcResult.phone),
     job: cleanString(dcResult.job),
     linkedin: ensureHttpsUrl(cleanString(dcResult.linkedin)),
+    company_linkedin: ensureHttpsUrl(cleanString(dcResult.company_linkedin)),
     first_name: cleanString(dcResult.first_name),
     last_name: cleanString(dcResult.last_name),
     company: cleanString(dcResult.company),
     naf5_code: nafCode ? `${nafCode}${nafDes ? ` — ${nafDes}` : ""}` : "",
     nb_employees: cleanString(dcResult.nb_employees),
-    siren: cleanString(dcResult.siren),
-    siret: cleanString(dcResult.siret),
-    siret_address: cleanString(dcResult.siret_address),
   };
-}
-
-function readExtraFields(row: ProspectRow): Record<string, string> {
-  if (!row.extra_fields) return {};
-  try {
-    const parsed = JSON.parse(row.extra_fields) as Record<string, unknown>;
-    const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(parsed || {})) {
-      const val = typeof v === "string" ? v.trim() : "";
-      if (val) out[k] = val;
-    }
-    return out;
-  } catch {
-    return {};
-  }
-}
-
-function serializeExtraValue(value: unknown): string {
-  if (typeof value === "string") return value.trim();
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value) || (value && typeof value === "object")) {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return "";
-    }
-  }
-  return "";
 }
 
 function setIfEmpty(row: ProspectRow, field: keyof ProspectRow, nextValue: string, updated: string[]) {
@@ -222,20 +194,12 @@ function applyResults(rows: ProspectRow[], prospectIds: string[], dcResults: Dro
         setIfEmpty(rows[idx], canonical as keyof ProspectRow, value, updatedTopLevel);
       }
 
-      // Persist any non-mapped Dropcontact keys in extra_fields (non-destructive merge)
+      // Report non-mapped Dropcontact keys without persisting them to keep a strict schema.
       const dcRaw = dcResult as unknown as Record<string, unknown>;
-      const extra = readExtraFields(rows[idx]);
       for (const [key, value] of Object.entries(dcRaw)) {
         if (mappedDropKeys.has(key)) continue;
-        const serialized = serializeExtraValue(value);
-        if (!serialized) continue;
-        if (!extra[key]) {
-          extra[key] = serialized;
-          addedExtraFields.push(key);
-        }
-      }
-      if (Object.keys(extra).length > 0) {
-        rows[idx].extra_fields = JSON.stringify(extra);
+        if (value === null || value === undefined || value === "") continue;
+        addedExtraFields.push(key);
       }
     } else {
       console.log(`[applyResults] No dcResult for index ${i}`);

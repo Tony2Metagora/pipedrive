@@ -19,11 +19,13 @@ interface ProspectRow {
   statut: string;
   pipelines: string;
   notes: string;
-  score_entreprise: string;
-  score_job: string;
   linkedin: string;
+  linkedin_entreprise?: string;
   naf_code: string;
   effectifs: string;
+  ville?: string;
+  duree_poste?: string;
+  duree_entreprise?: string;
   list_id?: string;
   ai_score?: string;
   ai_comment?: string;
@@ -141,11 +143,13 @@ export async function POST(request: Request) {
         statut: "en cours",
         pipelines: "",
         notes: notes || "",
-        score_entreprise: "",
-        score_job: "",
         linkedin: linkedin || "",
+        linkedin_entreprise: "",
         naf_code: "",
         effectifs: "",
+        ville: "",
+        duree_poste: "",
+        duree_entreprise: "",
       };
       rows.push(newProspect);
       await writeProspects(rows);
@@ -172,7 +176,28 @@ export async function PUT(request: Request) {
       const idx = rows.findIndex((r) => String(r.id) === String(id));
       if (idx === -1) return;
 
-      const allowedKeys = ["nom", "prenom", "email", "telephone", "poste", "entreprise", "statut", "pipelines", "notes", "score_entreprise", "score_job", "linkedin", "naf_code", "effectifs", "list_id", "ai_score", "ai_comment", "resume_entreprise", "siren", "siret", "adresse_siege", "categorie_entreprise", "chiffre_affaires", "resultat_net", "date_creation_entreprise", "dirigeants", "ville"];
+      const allowedKeys = [
+        "nom",
+        "prenom",
+        "email",
+        "telephone",
+        "poste",
+        "entreprise",
+        "linkedin",
+        "linkedin_entreprise",
+        "naf_code",
+        "effectifs",
+        "ville",
+        "duree_poste",
+        "duree_entreprise",
+        "resume_entreprise",
+        "statut",
+        "pipelines",
+        "notes",
+        "list_id",
+        "ai_score",
+        "ai_comment",
+      ];
       for (const [key, value] of Object.entries(updates)) {
         if (allowedKeys.includes(key)) {
           (rows[idx] as unknown as Record<string, string>)[key] = String(value);

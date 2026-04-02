@@ -49,8 +49,11 @@ interface Prospect {
   pipelines: string;
   notes: string;
   linkedin: string;
+  linkedin_entreprise?: string;
   naf_code: string;
   effectifs: string;
+  duree_poste?: string;
+  duree_entreprise?: string;
   list_id?: string;
   ai_score?: string;
   ai_comment?: string;
@@ -144,25 +147,18 @@ type ListFilterMode = "all" | "list" | "orphans";
 const PROSPECT_COLUMNS = [
   { key: "prenom", label: "Prénom", defaultVisible: true, defaultWidth: 90, minWidth: 50 },
   { key: "nom", label: "Nom", defaultVisible: true, defaultWidth: 90, minWidth: 50 },
-  { key: "email", label: "Email", defaultVisible: true, defaultWidth: 180, minWidth: 80 },
-  { key: "telephone", label: "Tél.", defaultVisible: false, defaultWidth: 100, minWidth: 50 },
+  { key: "email", label: "Mail", defaultVisible: true, defaultWidth: 180, minWidth: 80 },
+  { key: "telephone", label: "Tel", defaultVisible: true, defaultWidth: 100, minWidth: 50 },
   { key: "poste", label: "Poste", defaultVisible: true, defaultWidth: 110, minWidth: 50 },
   { key: "entreprise", label: "Entreprise", defaultVisible: true, defaultWidth: 120, minWidth: 60 },
-  { key: "statut", label: "Statut", defaultVisible: false, defaultWidth: 70, minWidth: 50 },
-  { key: "affaire", label: "Affaire", defaultVisible: false, defaultWidth: 130, minWidth: 60 },
-  { key: "linkedin", label: "LinkedIn", defaultVisible: false, defaultWidth: 36, minWidth: 30 },
-  { key: "naf_code", label: "NAF", defaultVisible: false, defaultWidth: 65, minWidth: 35 },
-  { key: "effectifs", label: "Eff.", defaultVisible: false, defaultWidth: 55, minWidth: 35 },
-  { key: "ville", label: "Ville", defaultVisible: false, defaultWidth: 90, minWidth: 50 },
-  { key: "siren", label: "SIREN", defaultVisible: false, defaultWidth: 85, minWidth: 60 },
-  { key: "categorie_entreprise", label: "Cat.", defaultVisible: false, defaultWidth: 55, minWidth: 40 },
-  { key: "chiffre_affaires", label: "CA", defaultVisible: false, defaultWidth: 80, minWidth: 50 },
-  { key: "resultat_net", label: "Résultat", defaultVisible: false, defaultWidth: 80, minWidth: 50 },
-  { key: "dirigeants", label: "Dirigeants", defaultVisible: false, defaultWidth: 160, minWidth: 80 },
-  { key: "date_creation_entreprise", label: "Création", defaultVisible: false, defaultWidth: 80, minWidth: 50 },
+  { key: "linkedin", label: "Lien LinkedIn", defaultVisible: true, defaultWidth: 120, minWidth: 70 },
+  { key: "linkedin_entreprise", label: "LinkedIn entreprise", defaultVisible: false, defaultWidth: 130, minWidth: 70 },
+  { key: "naf_code", label: "Code NAF", defaultVisible: true, defaultWidth: 85, minWidth: 50 },
+  { key: "effectifs", label: "Effectifs", defaultVisible: true, defaultWidth: 70, minWidth: 40 },
+  { key: "ville", label: "Ville", defaultVisible: true, defaultWidth: 90, minWidth: 50 },
+  { key: "duree_poste", label: "Durée poste", defaultVisible: false, defaultWidth: 90, minWidth: 60 },
+  { key: "duree_entreprise", label: "Durée entreprise", defaultVisible: false, defaultWidth: 110, minWidth: 70 },
   { key: "resume_entreprise", label: "Résumé Ent.", defaultVisible: true, defaultWidth: 160, minWidth: 80 },
-  { key: "ai_score", label: "Score IA", defaultVisible: true, defaultWidth: 60, minWidth: 45 },
-  { key: "ai_comment", label: "Analyse IA", defaultVisible: true, defaultWidth: 180, minWidth: 80 },
 ] as { key: string; label: string; defaultVisible: boolean; defaultWidth: number; minWidth: number }[];
 
 const SCORING_TEXT_MAX_WORDS = 200;
