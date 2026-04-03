@@ -64,7 +64,14 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/sequences", label: "Campagnes", icon: Mail },
       { href: "/sequences/warmup", label: "Warmup", icon: Flame },
-      { href: "/roadmap", label: "Roadmap", icon: ListTodo, adminOnly: true },
+    ],
+  },
+  {
+    label: "Roadmap",
+    icon: ListTodo,
+    defaultOpen: false,
+    items: [
+      { href: "/roadmap", label: "Production", icon: ListTodo, adminOnly: true },
     ],
   },
 ];

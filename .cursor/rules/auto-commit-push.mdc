@@ -1,16 +1,30 @@
 ---
-description: Auto commit and push after coding changes
+description: Commit + push par défaut après livraison, sans dossiers sensibles
 alwaysApply: true
 ---
 
-# Auto Commit + Push
+# Git — commit et push automatiques
 
-User preference for this repository:
+Préférence pour ce dépôt :
 
-- After implementing requested code changes, create a git commit and push to `origin` directly.
-- Do not ask for extra confirmation before commit/push, unless there is a safety risk.
-- Stage only relevant source/config changes for the task.
-- Do not include local test data exports (csv/xlsx/logs/tmp) unless explicitly requested.
-- Keep commit messages concise and aligned with existing project style.
-- If push fails (auth/network/conflict), report exact next action needed.
+## Comportement attendu
 
+- Après avoir terminé une tâche de code demandée, **créer un commit** puis **`git push` vers `origin`** sur la branche courante (souvent `master` / `main`), **sans redemander** la permission de pousser.
+- Ne pas demander de confirmation supplémentaire pour commit/push, **sauf** si la modification touche des secrets, des credentials, ou si le push est risqué (conflit, perte de données évidente).
+
+## Ne jamais inclure dans le commit (chemins sensibles / données locales)
+
+Ne pas `git add` ces éléments (sauf demande explicite de l’utilisateur) :
+
+- Dossiers ou fichiers de **données locales / exports** : `csv contact/`, `**/csv contact/**`, exports `*.csv`, `*.xlsx` hors assets versionnés du projet.
+- **Secrets et environnement** : `.env`, `.env.*`, `.env.local`, secrets, clés API, certificats (`*.pem`, `*.key`, `id_rsa`).
+- **Caches et temporaires** : dumps, logs volumineux, fichiers temporaires évidents.
+- Tout fichier que l’utilisateur a identifié comme **non versionné** ou **confidentiel**.
+
+En cas de doute sur un fichier : **ne pas l’ajouter** ; le signaler dans la réponse.
+
+## Bonnes pratiques
+
+- Stager uniquement les fichiers **pertinents** pour la tâche (sources, config, tests associés).
+- Messages de commit **concis** et cohérents avec le style du projet (ex. `feat:`, `fix:`).
+- Si une commande échoue (auth, réseau, conflit), **indiquer** l’erreur et les prochaines étapes concrètes.
