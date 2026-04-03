@@ -7,7 +7,7 @@ import { signOut } from "next-auth/react";
 import {
   Users, Database, LayoutDashboard, Linkedin, Globe,
   Mail, ChevronDown, ChevronRight, LogOut, Settings,
-  Home, Sparkles, Bot, PanelLeftClose, PanelLeftOpen, Flame, BarChart3, FileText,
+  Home, Sparkles, Bot, PanelLeftClose, PanelLeftOpen, Flame, BarChart3, FileText, ListTodo,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePermissions, canRead } from "@/hooks/usePermissions";
@@ -17,6 +17,8 @@ interface NavItem {
   label: string;
   icon: typeof Users;
   viewKey?: string;
+  /** Visible uniquement si l’utilisateur est admin (après chargement des permissions). */
+  adminOnly?: boolean;
 }
 
 interface NavGroup {
@@ -62,6 +64,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/sequences", label: "Campagnes", icon: Mail },
       { href: "/sequences/warmup", label: "Warmup", icon: Flame },
+      { href: "/roadmap", label: "Roadmap", icon: ListTodo, adminOnly: true },
     ],
   },
 ];
@@ -95,8 +98,11 @@ export default function Sidebar() {
   const filteredGroups = NAV_GROUPS.map((group) => ({
     ...group,
     items: loading
-      ? group.items
-      : group.items.filter((item) => !item.viewKey || canRead(permissions, item.viewKey as never)),
+      ? group.items.filter((item) => !item.adminOnly)
+      : group.items.filter((item) => {
+          if (item.adminOnly && !isAdmin) return false;
+          return !item.viewKey || canRead(permissions, item.viewKey as never);
+        }),
   })).filter((g) => g.items.length > 0);
 
   return (
@@ -177,9 +183,10 @@ export default function Sidebar() {
               {isOpen && (
                 <div className="ml-3 mt-0.5 space-y-0.5">
                   {group.items.map((item) => {
-                    const isActive = (item.href === "/sequences" || item.href === "/linkedin")
-                      ? pathname === item.href
-                      : pathname.startsWith(item.href);
+                    const isActive =
+                      item.href === "/sequences" || item.href === "/linkedin" || item.href === "/roadmap"
+                        ? pathname === item.href
+                        : pathname.startsWith(item.href);
                     return (
                       <Link
                         key={item.href}
