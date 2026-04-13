@@ -1,7 +1,7 @@
 /**
  * API Route — AI Scoring & Analysis for prospects (SSE streaming)
  * POST { ids: string[] }
- * Uses gpt-5.2-chat (askAzureFast) — fast Chat Completions API (~3-5s/batch)
+ * Uses gpt-5.4-mini (askAzureFast) — Chat Completions API with retry on 429
  * Generates: ai_score (1-5), ai_comment, resume_entreprise
  * Runs 4 batches of 20 in parallel → ~15s for 120 contacts
  */

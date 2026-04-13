@@ -235,7 +235,7 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       }
     }
 
-    // ── suggest-fast: 3 sujets via gpt-5.2-chat (Base IA, ~5s) ──
+    // ── suggest-fast: 3 sujets via gpt-5.4-mini (Base IA, ~5s) ──
     if (action === "suggest-fast") {
       const { theme, sourceUrls } = body;
       const themeInfo = THEMES[theme as string];
@@ -271,7 +271,7 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       } catch (e) { console.error("suggest-fast parse error:", e, raw?.slice(0, 300)); }
 
       return NextResponse.json({
-        data: { subjects, model: "gpt-5.2-chat", durationMs, sourceCount: (sourceUrls as string[]).length },
+        data: { subjects, model: "gpt-5.4-mini", durationMs, sourceCount: (sourceUrls as string[]).length },
       });
     }
 
@@ -578,7 +578,7 @@ Réécris le post modifié.`,
     }
 
     // ── search-stats: enrich a subject with stats + sources ──
-    // Strategy: try gpt-5.4-pro web_search first, fallback to gpt-5.2-chat knowledge base
+    // Strategy: try gpt-5.4-pro web_search first, fallback to gpt-5.4-mini knowledge base
     if (action === "search-stats") {
       const { theme, subject } = body;
       const themeInfo = THEMES[theme as string];
@@ -624,7 +624,7 @@ ${statsJsonFormat}`;
         console.error("search-stats web_search failed:", error);
       }
 
-      // 2) Fallback: gpt-5.2-chat knowledge base if web returned nothing
+      // 2) Fallback: gpt-5.4-mini knowledge base if web returned nothing
       if (stats.length === 0) {
         statsSource = "knowledge";
         try {

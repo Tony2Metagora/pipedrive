@@ -1,8 +1,6 @@
 /**
- * Shared Azure OpenAI helpers.
- * Backward-compatible env strategy:
- * - Primary: AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_API_KEY / AZURE_OPENAI_DEPLOYMENT
- * - Legacy fast overrides still supported: *_FAST
+ * Shared Azure OpenAI helpers — gpt-5.4-mini (France Central).
+ * Env vars: AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_DEPLOYMENT
  *
  * Includes retry with exponential backoff for 429 (Too Many Requests) errors.
  */
@@ -14,25 +12,11 @@ function ensureSlash(url: string): string {
 }
 
 function readConfig() {
-  const endpoint =
-    process.env.AZURE_OPENAI_ENDPOINT_FAST ||
-    process.env.AZURE_OPENAI_ENDPOINT ||
-    "";
-  const apiKey =
-    process.env.AZURE_OPENAI_API_KEY_FAST ||
-    process.env.AZURE_OPENAI_API_KEY ||
-    "";
-  const deployment =
-    process.env.AZURE_OPENAI_DEPLOYMENT_FAST ||
-    process.env.AZURE_OPENAI_DEPLOYMENT ||
-    "gpt-5.4-mini";
-  const chatApiVersion =
-    process.env.AZURE_OPENAI_API_VERSION_FAST ||
-    process.env.AZURE_OPENAI_API_VERSION ||
-    "2024-12-01-preview";
-  const responsesApiVersion =
-    process.env.AZURE_OPENAI_API_VERSION_RESPONSES ||
-    "2025-04-01-preview";
+  const endpoint = process.env.AZURE_OPENAI_ENDPOINT || "";
+  const apiKey = process.env.AZURE_OPENAI_API_KEY || "";
+  const deployment = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.4-mini";
+  const chatApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-12-01-preview";
+  const responsesApiVersion = process.env.AZURE_OPENAI_API_VERSION_RESPONSES || "2025-04-01-preview";
 
   return {
     endpoint: ensureSlash(endpoint),
