@@ -3,6 +3,8 @@
  * Backward-compatible env strategy:
  * - Primary: AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_API_KEY / AZURE_OPENAI_DEPLOYMENT
  * - Legacy fast overrides still supported: *_FAST
+ *
+ * Includes retry with exponential backoff for 429 (Too Many Requests) errors.
  */
 
 type ChatMessage = { role: string; content: string };
@@ -23,7 +25,7 @@ function readConfig() {
   const deployment =
     process.env.AZURE_OPENAI_DEPLOYMENT_FAST ||
     process.env.AZURE_OPENAI_DEPLOYMENT ||
-    "gpt-5-2";
+    "gpt-5.4-mini";
   const chatApiVersion =
     process.env.AZURE_OPENAI_API_VERSION_FAST ||
     process.env.AZURE_OPENAI_API_VERSION ||
@@ -51,6 +53,15 @@ function assertConfig() {
   return cfg;
 }
 
+/** Sleep helper for retry backoff */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Retry config */
+const MAX_RETRIES = 4;
+const BASE_DELAY_MS = 2000; // 2s, 4s, 8s, 16s
+
 /* ── askAzureAI: Responses API when available, fallback to chat/completions ── */
 
 export async function askAzureAI(
@@ -73,18 +84,32 @@ export async function askAzureAI(
 
   const url = `${cfg.endpoint}openai/responses?api-version=${cfg.responsesApiVersion}`;
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "api-key": cfg.apiKey },
-      body: JSON.stringify(body),
-    });
+    let res: Response | null = null;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "api-key": cfg.apiKey },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) break;
+      if ((res.status === 429 || res.status === 503) && attempt < MAX_RETRIES) {
+        const retryAfter = res.headers.get("retry-after");
+        const delayMs = retryAfter
+          ? parseInt(retryAfter) * 1000
+          : BASE_DELAY_MS * Math.pow(2, attempt);
+        console.warn(`Azure Responses ${res.status} attempt ${attempt + 1}, retrying in ${delayMs}ms...`);
+        await sleep(delayMs);
+        continue;
+      }
+      break;
+    }
 
-    if (!res.ok) {
-      const err = await res.text();
+    if (!res || !res.ok) {
+      const err = res ? await res.text() : "no response";
       console.warn(
         "Azure Responses API failed, fallback to chat/completions:",
-        res.status,
-        err.slice(0, 200)
+        res?.status,
+        typeof err === "string" ? err.slice(0, 200) : ""
       );
       return askAzureFast(messages, maxTokens);
     }
@@ -106,7 +131,7 @@ export async function askAzureAI(
   }
 }
 
-/* ── askAzureFast: chat/completions ── */
+/* ── askAzureFast: chat/completions with retry on 429 ── */
 
 export async function askAzureFast(
   messages: ChatMessage[],
@@ -114,18 +139,37 @@ export async function askAzureFast(
 ): Promise<string> {
   const cfg = assertConfig();
   const url = `${cfg.endpoint}openai/deployments/${cfg.deployment}/chat/completions?api-version=${cfg.chatApiVersion}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "api-key": cfg.apiKey },
-    body: JSON.stringify({ messages, max_completion_tokens: maxTokens }),
-  });
+  const body = JSON.stringify({ messages, max_completion_tokens: maxTokens });
 
-  if (!res.ok) {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "api-key": cfg.apiKey },
+      body,
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      return data.choices?.[0]?.message?.content?.trim() || "";
+    }
+
+    // Retry on 429 (rate limit) and 503 (service unavailable)
+    if ((res.status === 429 || res.status === 503) && attempt < MAX_RETRIES) {
+      const retryAfter = res.headers.get("retry-after");
+      const delayMs = retryAfter
+        ? parseInt(retryAfter) * 1000
+        : BASE_DELAY_MS * Math.pow(2, attempt);
+      console.warn(
+        `Azure ${res.status} on attempt ${attempt + 1}/${MAX_RETRIES + 1}, retrying in ${delayMs}ms...`
+      );
+      await sleep(delayMs);
+      continue;
+    }
+
     const err = await res.text();
     console.error("Azure Chat Completions error:", res.status, err);
     throw new Error(`Azure OpenAI ${res.status}: ${err.slice(0, 200)}`);
   }
 
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content?.trim() || "";
+  throw new Error("Azure OpenAI: max retries exceeded");
 }

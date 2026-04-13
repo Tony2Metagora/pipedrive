@@ -151,7 +151,7 @@ export async function POST(request: Request) {
   }));
 
   const BATCH_SIZE = 20;
-  const PARALLEL = 4;
+  const PARALLEL = 2;
   const batches: { idx: number; data: typeof prospectData }[] = [];
   for (let i = 0; i < prospectData.length; i += BATCH_SIZE) {
     batches.push({ idx: batches.length + 1, data: prospectData.slice(i, i + BATCH_SIZE) });
