@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import SequencesAffairesPanel from "@/components/SequencesAffairesPanel";
+import ImportProspectsWizard from "@/components/ImportProspectsWizard";
 import { formatDateTimeParis } from "@/lib/date-paris";
 
 // ─── Types ──────────────────────────────────────────────
@@ -273,6 +274,8 @@ export default function SequencesPage() {
   // Create
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
+  // Bulk import wizard
+  const [showBulkImport, setShowBulkImport] = useState(false);
   const [creating, setCreating] = useState(false);
 
   // Detail
@@ -770,9 +773,14 @@ export default function SequencesPage() {
               <p className="text-sm text-gray-500">{campaigns.length} campagne{campaigns.length !== 1 ? "s" : ""} Smartlead</p>
             </div>
           </div>
-          <button onClick={() => setShowCreate(true)} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 cursor-pointer">
-            <Plus className="w-4 h-4" /> Nouvelle campagne
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowBulkImport(true)} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-violet-600 border border-violet-300 rounded-lg hover:bg-violet-50 cursor-pointer">
+              <Upload className="w-4 h-4" /> Importer Prospects
+            </button>
+            <button onClick={() => setShowCreate(true)} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 cursor-pointer">
+              <Plus className="w-4 h-4" /> Nouvelle campagne
+            </button>
+          </div>
         </div>
 
         <div className="flex gap-1 bg-gray-100 rounded-lg p-1 mb-4">
@@ -2378,6 +2386,12 @@ export default function SequencesPage() {
           </div>
         </div>
       )}
+      <ImportProspectsWizard
+        open={showBulkImport}
+        onClose={() => setShowBulkImport(false)}
+        onComplete={() => { setShowBulkImport(false); fetchCampaigns(); }}
+        allAccounts={allAccounts}
+      />
     </>
   );
 }
