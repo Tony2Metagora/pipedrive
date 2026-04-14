@@ -278,17 +278,38 @@ export default function WarmupPage() {
                       <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded", p.healthBg, p.healthColor)}>{p.health}/100 — {p.healthLabel}</span>
                       <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{p.isGoogle ? "Google Workspace" : p.isHostinger ? "Hostinger" : acc.type}</span>
                     </div>
-                    <p className="text-[10px] text-gray-400 mt-0.5">
-                      {acc.from_name} • SMTP: {acc.is_smtp_success ? "✅" : "❌"} • Warmup:{" "}
-                      <span className={cn("font-medium", acc.warmup_details?.status === "ACTIVE" || acc.warmup_details?.status === "ENABLED" ? "text-green-600" : "text-gray-500")}>
-                        {acc.warmup_details?.status === "ACTIVE" || acc.warmup_details?.status === "ENABLED" ? "✅ Actif" : acc.warmup_details?.status || "Inactif"}
+                    <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                      <span className="text-[10px] text-gray-400">{acc.from_name}</span>
+                      <span className={cn("text-[10px] font-medium px-1.5 py-0.5 rounded", acc.is_smtp_success ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700")}>
+                        SMTP {acc.is_smtp_success ? "OK" : "KO"}
                       </span>
-                      {" "}• Réputation: {acc.warmup_details?.warmup_reputation || "N/A"}{" "}
-                      • Ancienneté estimée: {p.emailAgeDays === null ? "non déterminée" : `${p.emailAgeDays} j`}
-                    </p>
-                    <p className="text-[10px] text-gray-400 mt-0.5">
-                      1er envoi observé: {formatDateParis(acc.warmup_meta?.firstObservedSendAt)}
-                    </p>
+                      <span className={cn("text-[10px] font-medium px-1.5 py-0.5 rounded",
+                        acc.warmup_details?.status === "ACTIVE" || acc.warmup_details?.status === "ENABLED"
+                          ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-500"
+                      )}>
+                        Warmup {acc.warmup_details?.status === "ACTIVE" || acc.warmup_details?.status === "ENABLED" ? "actif" : "inactif"}
+                      </span>
+                      {/* Reputation badge */}
+                      {(() => {
+                        const rep = acc.warmup_details?.warmup_reputation;
+                        const repNum = rep ? parseFloat(rep) : NaN;
+                        const warmupActive = acc.warmup_details?.status === "ACTIVE" || acc.warmup_details?.status === "ENABLED";
+                        if (!warmupActive && isNaN(repNum)) return <span className="text-[10px] text-gray-400">Réputation: —</span>;
+                        if (isNaN(repNum)) return <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">Réputation: en attente</span>;
+                        const repColor = repNum >= 80 ? "bg-green-50 text-green-700" : repNum >= 50 ? "bg-yellow-50 text-yellow-700" : "bg-red-50 text-red-700";
+                        return <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded", repColor)}>Réputation: {rep}%</span>;
+                      })()}
+                      <span className="text-[10px] text-gray-400">
+                        Ancienneté: {p.emailAgeDays === null ? "—" : `${p.emailAgeDays}j`}
+                      </span>
+                    </div>
+                    {/* DNS alert if SMTP broken */}
+                    {!acc.is_smtp_success && (
+                      <div className="flex items-center gap-1 mt-1 text-[10px] text-red-600">
+                        <AlertTriangle className="w-3 h-3 shrink-0" />
+                        <span>SMTP non connecté — vérifiez la configuration DNS (SPF, DKIM, DMARC) et les identifiants</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Daily / Weekly progress */}
