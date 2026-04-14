@@ -711,6 +711,14 @@ export default function LandingGeneratorPage() {
                             {upscaling ? <Loader2 className="w-3 h-3 animate-spin" /> : <ZoomIn className="w-3 h-3" />}
                             {upscaling ? "Upscaling…" : "Upscale HD"}
                           </button>
+                          <a
+                            href={localImagePreview || ""}
+                            download={`image-${brandName || "landing"}.png`}
+                            className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[10px] font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 transition-colors cursor-pointer"
+                          >
+                            <Download className="w-3 h-3" />
+                            Télécharger
+                          </a>
                           <button
                             onClick={handleDeployLocalImage}
                             disabled={imageSaving || upscaling}
