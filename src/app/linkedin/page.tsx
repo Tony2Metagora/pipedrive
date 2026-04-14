@@ -2,18 +2,16 @@
 
 import { useState } from "react";
 import dynamic from "next/dynamic";
-import { Linkedin, PenTool, Calendar, Layers } from "lucide-react";
+import { Linkedin, PenTool, Layers } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const LinkedInGenerator = dynamic(() => import("@/components/LinkedInGenerator"), { ssr: false });
-const LinkedInCalendar = dynamic(() => import("@/components/LinkedInCalendar"), { ssr: false });
 const LinkedInCarouselBuilder = dynamic(() => import("@/components/LinkedInCarouselBuilder"), { ssr: false });
 
-type LinkedInTab = "generator" | "calendar" | "carousel";
+type LinkedInTab = "generator" | "carousel";
 
 export default function LinkedInPage() {
   const [activeTab, setActiveTab] = useState<LinkedInTab>("generator");
-  const [calendarKey, setCalendarKey] = useState(0);
 
   return (
     <>
@@ -43,18 +41,6 @@ export default function LinkedInPage() {
           Générateur
         </button>
         <button
-          onClick={() => setActiveTab("calendar")}
-          className={cn(
-            "flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors cursor-pointer",
-            activeTab === "calendar"
-              ? "bg-white text-gray-900 shadow-sm"
-              : "text-gray-500 hover:text-gray-700"
-          )}
-        >
-          <Calendar className="w-4 h-4" />
-          Calendrier
-        </button>
-        <button
           onClick={() => setActiveTab("carousel")}
           className={cn(
             "flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors cursor-pointer",
@@ -69,14 +55,7 @@ export default function LinkedInPage() {
       </div>
 
       {/* Tab content */}
-      {activeTab === "generator" && (
-        <LinkedInGenerator
-          onPostValidated={() => {
-            setCalendarKey((k) => k + 1);
-          }}
-        />
-      )}
-      {activeTab === "calendar" && <LinkedInCalendar key={calendarKey} />}
+      {activeTab === "generator" && <LinkedInGenerator />}
       {activeTab === "carousel" && <LinkedInCarouselBuilder />}
     </>
   );

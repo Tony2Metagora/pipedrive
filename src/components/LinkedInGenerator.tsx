@@ -867,41 +867,16 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
             )}
           </div>
 
-          {/* Schedule / Validate */}
+          {/* Save post */}
           <div className="mt-4 pt-3 border-t border-gray-100">
-            {!showSchedule ? (
-              <button
-                onClick={() => setShowSchedule(true)}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-green-600 rounded-xl hover:bg-green-700 transition-colors cursor-pointer shadow-sm"
-              >
-                <Calendar className="w-4 h-4" />
-                Planifier & Valider
-              </button>
-            ) : (
-              <div className="space-y-3">
-                <div className="flex gap-2">
-                  <div className="flex-1">
-                    <label className="text-xs text-gray-500 mb-1 block">Date</label>
-                    <input type="date" value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg" />
-                  </div>
-                  <div className="flex-1">
-                    <label className="text-xs text-gray-500 mb-1 block">Heure</label>
-                    <div className="flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5 text-gray-400" />
-                      <input type="time" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg" />
-                    </div>
-                  </div>
-                </div>
-                <button
-                  onClick={handleSchedule}
-                  disabled={scheduleLoading}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-green-600 rounded-xl hover:bg-green-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
-                >
-                  {scheduleLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                  {scheduleLoading ? "Enregistrement…" : "Confirmer & Ajouter au calendrier"}
-                </button>
-              </div>
-            )}
+            <button
+              onClick={handleSchedule}
+              disabled={scheduleLoading}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-green-600 rounded-xl hover:bg-green-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
+            >
+              {scheduleLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {scheduleLoading ? "Enregistrement…" : "Enregistrer le post"}
+            </button>
           </div>
         </div>
       )}
