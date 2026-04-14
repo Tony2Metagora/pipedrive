@@ -8,7 +8,7 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-guard";
 import { askAzureFast } from "@/lib/azure-ai";
 import { LOGO_KEYS } from "@/lib/carousel-template";
-import type { CarouselSlide } from "@/lib/carousel-template";
+import type { AIDraftSlide } from "@/lib/carousel-template";
 
 function parseJsonSafe<T>(raw: string, fallback: T): T {
   try {
@@ -19,7 +19,7 @@ function parseJsonSafe<T>(raw: string, fallback: T): T {
   }
 }
 
-async function generateStructuredDrafts(prompt: string): Promise<{ title: string; slides: CarouselSlide[] }> {
+async function generateStructuredDrafts(prompt: string): Promise<{ title: string; slides: AIDraftSlide[] }> {
   const logoList = LOGO_KEYS.filter((k) => k !== "generic").join(", ");
 
   const raw = await askAzureFast(
@@ -61,12 +61,12 @@ FORMAT JSON :
     3000
   );
 
-  const parsed = parseJsonSafe<{ title?: string; slides?: CarouselSlide[] }>(raw, {});
+  const parsed = parseJsonSafe<{ title?: string; slides?: AIDraftSlide[] }>(raw, {});
   const title = parsed.title || "Carrousel LinkedIn";
   const slides = Array.isArray(parsed.slides) ? parsed.slides : [];
 
   // Validate and clean slides
-  const cleaned: CarouselSlide[] = slides.map((s, i) => ({
+  const cleaned: AIDraftSlide[] = slides.map((s, i) => ({
     number: s.number || i + 1,
     type: s.type || "content",
     title: s.title,

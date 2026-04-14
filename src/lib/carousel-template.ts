@@ -1,12 +1,42 @@
 /**
- * Carousel template — generates HTML slides matching Tony's LinkedIn carousel design.
- * Slides are 1200×1500px (4:5 ratio), exported to PNG via html-to-image client-side.
- * Design reverse-engineered from existing Canva template slides.
+ * Carousel data model — structured slide elements with absolute positions.
+ * Each element is independently positionable, editable, and draggable.
+ * Slides are 1200×1500px (4:5 LinkedIn ratio).
  */
+
+// ─── Constants ──────────────────────────────────────────
+
+export const SLIDE_W = 1200;
+export const SLIDE_H = 1500;
+export const BG_COLOR = "#f5f5f5";
 
 // ─── Types ──────────────────────────────────────────────
 
+export interface SlideElement {
+  id: string;
+  type: "text" | "image";
+  x: number;
+  y: number;
+  width: number;
+  content: string;          // text content or image URL/data
+  fontSize: number;
+  fontFamily: "serif" | "sans";
+  fontWeight: "normal" | "bold";
+  fontStyle: "normal" | "italic";
+  color: string;
+  textAlign: "left" | "center" | "right";
+  locked?: boolean;         // cannot be dragged/deleted (footer)
+}
+
 export interface CarouselSlide {
+  number: number;
+  type: "cover" | "content" | "cta";
+  elements: SlideElement[];
+}
+
+// ─── AI Draft (from API, before converting to positioned elements) ───
+
+export interface AIDraftSlide {
   number: number;
   type: "cover" | "content" | "cta";
   title?: string;
@@ -14,11 +44,6 @@ export interface CarouselSlide {
   logo?: string;
   bullets?: string[];
   warnings?: string[];
-}
-
-export interface CarouselDraft {
-  title: string;
-  slides: CarouselSlide[];
 }
 
 // ─── Logo library ───────────────────────────────────────
@@ -68,140 +93,124 @@ export const LOGO_LIBRARY: Record<string, { name: string; svg: string }> = {
 
 export const LOGO_KEYS = Object.keys(LOGO_LIBRARY);
 
-// ─── Constants ──────────────────────────────────────────
+// ─── Unique ID helper ───────────────────────────────────
 
-export const SLIDE_W = 1200;
-export const SLIDE_H = 1500;
-const BG = "#f5f5f5";
-const BLUE = "#2563eb";
-
-// Font stacks — using web-safe + Google Fonts loaded via @import in the HTML
-const FONTS_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400;1,700&family=Inter:wght@400;500;600;700&display=swap');`;
-const FONT_SERIF = "'Playfair Display', Georgia, 'Times New Roman', serif";
-const FONT_SANS = "'Inter', -apple-system, Helvetica, Arial, sans-serif";
-
-// ─── Footer (shared across all slides) ──────────────────
-
-function footerHTML(): string {
-  return `<div style="position:absolute;bottom:50px;left:60px;right:60px;display:flex;align-items:center;justify-content:space-between;">
-    <div style="display:flex;align-items:center;gap:14px;">
-      <img src="/carousel/tony-photo.png" style="width:60px;height:60px;border-radius:50%;object-fit:cover;" />
-      <div>
-        <div style="font-family:${FONT_SANS};font-size:17px;font-weight:600;color:#1a1a1a;line-height:1.3;">Tony Infantino</div>
-        <div style="font-family:${FONT_SANS};font-size:14px;color:#888;line-height:1.3;">IA et learning pour retailers</div>
-      </div>
-    </div>
-    <img src="/carousel/metagora-logo.png" style="height:28px;" />
-  </div>`;
+let _idCounter = 0;
+export function uid(): string {
+  return `el_${Date.now()}_${++_idCounter}`;
 }
 
-// ─── Slide renderers ────────────────────────────────────
+// ─── Convert AI draft to positioned slide elements ──────
 
-function wrapSlide(inner: string): string {
-  return `<div style="width:${SLIDE_W}px;height:${SLIDE_H}px;background:${BG};position:relative;overflow:hidden;box-sizing:border-box;">
-    <style>${FONTS_IMPORT}</style>
-    ${inner}
-  </div>`;
+export function draftToSlide(draft: AIDraftSlide): CarouselSlide {
+  if (draft.type === "cover") return buildCoverSlide(draft.title || "Titre du carrousel");
+  if (draft.type === "cta") return buildCtaSlide(draft.number);
+  return buildContentSlide(draft);
 }
 
-export function renderCoverSlide(title: string): string {
-  return wrapSlide(`
-    <div style="display:flex;flex-direction:column;justify-content:center;align-items:center;height:100%;padding:100px 80px 180px;">
-      <h1 style="font-family:${FONT_SERIF};font-size:76px;font-weight:400;font-style:italic;color:#1a1a1a;text-align:center;line-height:1.2;margin:0;">
-        ${escapeHtml(title)}
-      </h1>
-    </div>
-    ${footerHTML()}
-  `);
+function buildCoverSlide(title: string): CarouselSlide {
+  return {
+    number: 1,
+    type: "cover",
+    elements: [
+      { id: uid(), type: "text", x: 100, y: 520, width: 1000, content: title, fontSize: 76, fontFamily: "serif", fontWeight: "normal", fontStyle: "normal", color: "#1a1a1a", textAlign: "center" },
+      ...footerElements(),
+    ],
+  };
 }
 
-export function renderContentSlide(slide: CarouselSlide): string {
-  const logo = slide.logo && LOGO_LIBRARY[slide.logo] ? LOGO_LIBRARY[slide.logo] : null;
-  const logoName = logo?.name || slide.logo || "";
+function buildContentSlide(draft: AIDraftSlide): CarouselSlide {
+  const logo = draft.logo && LOGO_LIBRARY[draft.logo] ? draft.logo : "generic";
+  const logoName = LOGO_LIBRARY[logo]?.name || "IA";
 
-  const logoBlock = logo
-    ? `<div style="text-align:center;padding-top:70px;margin-bottom:8px;">
-        ${logo.svg}
-        <div style="font-family:${FONT_SANS};font-size:22px;font-weight:500;color:#333;margin-top:8px;">${escapeHtml(logoName)}</div>
-      </div>`
-    : `<div style="height:70px;"></div>`;
-
-  const roleBlock = slide.role
-    ? `<h2 style="font-family:${FONT_SERIF};font-size:54px;font-weight:400;font-style:italic;color:${BLUE};margin:20px 0 30px;line-height:1.15;padding:0 70px;">
-        ${escapeHtml(slide.role)}
-      </h2>`
+  const bulletText = (draft.bullets || []).map((b) => `• ${b}`).join("\n");
+  const warningText = (draft.warnings || []).length > 0
+    ? `Attention :\n${(draft.warnings || []).map((w) => `• ${w}`).join("\n")}`
     : "";
 
-  const bulletsBlock = (slide.bullets || []).length > 0
-    ? `<ul style="list-style:disc;padding:0 70px 0 95px;margin:0 0 24px;">
-        ${(slide.bullets || []).map((b) =>
-          `<li style="font-family:${FONT_SANS};font-size:21px;color:#333;margin-bottom:12px;line-height:1.5;">${escapeHtml(b)}</li>`
-        ).join("")}
-      </ul>`
-    : "";
+  const elements: SlideElement[] = [
+    // Logo image placeholder (SVG data URI)
+    { id: uid(), type: "image", x: 540, y: 60, width: 80, content: `logo:${logo}`, fontSize: 0, fontFamily: "sans", fontWeight: "normal", fontStyle: "normal", color: "", textAlign: "center" },
+    // Logo name
+    { id: uid(), type: "text", x: 300, y: 130, width: 600, content: logoName, fontSize: 22, fontFamily: "sans", fontWeight: "normal", fontStyle: "normal", color: "#333", textAlign: "center" },
+    // Role title
+    { id: uid(), type: "text", x: 70, y: 180, width: 1060, content: draft.role || "Le titre pour", fontSize: 54, fontFamily: "serif", fontWeight: "normal", fontStyle: "italic", color: "#2563eb", textAlign: "left" },
+    // Bullets
+    { id: uid(), type: "text", x: 70, y: 310, width: 1060, content: bulletText, fontSize: 21, fontFamily: "sans", fontWeight: "normal", fontStyle: "normal", color: "#333", textAlign: "left" },
+  ];
 
-  const warningsBlock = (slide.warnings || []).length > 0
-    ? `<div style="padding:0 70px;margin-top:20px;">
-        <div style="font-family:${FONT_SANS};font-size:20px;font-weight:600;color:#333;margin-bottom:10px;">Attention :</div>
-        <ul style="list-style:disc;padding-left:25px;margin:0;">
-          ${(slide.warnings || []).map((w) =>
-            `<li style="font-family:${FONT_SANS};font-size:19px;color:#555;margin-bottom:10px;line-height:1.45;">${escapeHtml(w)}</li>`
-          ).join("")}
-        </ul>
-      </div>`
-    : "";
-
-  return wrapSlide(`
-    ${logoBlock}
-    ${roleBlock}
-    ${bulletsBlock}
-    ${warningsBlock}
-    ${footerHTML()}
-  `);
-}
-
-export function renderCtaSlide(): string {
-  return wrapSlide(`
-    <div style="display:flex;flex-direction:column;justify-content:center;align-items:center;height:100%;padding:80px;">
-      <div style="width:140px;height:140px;border-radius:50%;border:4px solid ${BLUE};overflow:hidden;margin-bottom:24px;">
-        <img src="/carousel/tony-photo.png" style="width:100%;height:100%;object-fit:cover;" />
-      </div>
-      <div style="font-family:${FONT_SANS};font-size:28px;font-weight:700;color:#1a1a1a;margin-bottom:8px;">Tony Infantino</div>
-      <div style="font-family:${FONT_SANS};font-size:19px;color:#666;text-align:center;line-height:1.5;margin-bottom:50px;">Mon aventure de CEO tech<br/>fraichement amoureux du retail</div>
-      <div style="background:white;border-radius:24px;padding:28px 44px;text-align:center;box-shadow:0 2px 12px rgba(0,0,0,0.07);">
-        <div style="font-family:${FONT_SANS};font-size:24px;font-weight:600;color:#1a1a1a;margin-bottom:6px;">Ce post vous a plu ?</div>
-        <div style="font-family:${FONT_SANS};font-size:16px;color:#888;margin-bottom:20px;">N'hésitez pas à liker, commenter et sauvegarder</div>
-        <div style="display:flex;gap:28px;justify-content:center;">
-          <span style="font-size:32px;">👍</span>
-          <span style="font-size:32px;">💬</span>
-          <span style="font-size:32px;">🔖</span>
-        </div>
-      </div>
-    </div>
-    <div style="position:absolute;bottom:50px;right:60px;">
-      <img src="/carousel/metagora-logo.png" style="height:28px;" />
-    </div>
-  `);
-}
-
-export function renderSlideHTML(slide: CarouselSlide): string {
-  switch (slide.type) {
-    case "cover":
-      return renderCoverSlide(slide.title || "");
-    case "cta":
-      return renderCtaSlide();
-    case "content":
-    default:
-      return renderContentSlide(slide);
+  if (warningText) {
+    elements.push(
+      { id: uid(), type: "text", x: 70, y: 900, width: 1060, content: warningText, fontSize: 19, fontFamily: "sans", fontWeight: "normal", fontStyle: "normal", color: "#555", textAlign: "left" }
+    );
   }
+
+  elements.push(...footerElements());
+  return { number: draft.number, type: "content", elements };
 }
 
-// ─── Helpers ────────────────────────────────────────────
+function buildCtaSlide(number: number): CarouselSlide {
+  return {
+    number,
+    type: "cta",
+    elements: [
+      { id: uid(), type: "image", x: 530, y: 400, width: 140, content: "photo:tony", fontSize: 0, fontFamily: "sans", fontWeight: "normal", fontStyle: "normal", color: "", textAlign: "center" },
+      { id: uid(), type: "text", x: 300, y: 580, width: 600, content: "Tony Infantino", fontSize: 28, fontFamily: "sans", fontWeight: "bold", fontStyle: "normal", color: "#1a1a1a", textAlign: "center" },
+      { id: uid(), type: "text", x: 250, y: 620, width: 700, content: "Mon aventure de CEO tech\nfraichement amoureux du retail", fontSize: 19, fontFamily: "sans", fontWeight: "normal", fontStyle: "normal", color: "#666", textAlign: "center" },
+      { id: uid(), type: "text", x: 350, y: 740, width: 500, content: "Ce post vous a plu ?\nN'hésitez pas à liker, commenter\net sauvegarder", fontSize: 22, fontFamily: "sans", fontWeight: "normal", fontStyle: "normal", color: "#1a1a1a", textAlign: "center" },
+      { id: uid(), type: "text", x: 420, y: 900, width: 360, content: "👍  💬  🔖", fontSize: 40, fontFamily: "sans", fontWeight: "normal", fontStyle: "normal", color: "#1a1a1a", textAlign: "center" },
+      { id: uid(), type: "image", x: 1020, y: 1420, width: 130, content: "logo:metagora", fontSize: 0, fontFamily: "sans", fontWeight: "normal", fontStyle: "normal", color: "", textAlign: "center", locked: true },
+    ],
+  };
+}
+
+function footerElements(): SlideElement[] {
+  return [
+    { id: uid(), type: "image", x: 60, y: 1390, width: 60, content: "photo:tony-small", fontSize: 0, fontFamily: "sans", fontWeight: "normal", fontStyle: "normal", color: "", textAlign: "center", locked: true },
+    { id: uid(), type: "text", x: 130, y: 1395, width: 400, content: "Tony Infantino\nIA et learning pour retailers", fontSize: 15, fontFamily: "sans", fontWeight: "normal", fontStyle: "normal", color: "#666", textAlign: "left", locked: true },
+    { id: uid(), type: "image", x: 1020, y: 1400, width: 130, content: "logo:metagora", fontSize: 0, fontFamily: "sans", fontWeight: "normal", fontStyle: "normal", color: "", textAlign: "center", locked: true },
+  ];
+}
+
+// ─── Render slide to static HTML (for PNG export) ───────
+
+export function renderSlideToHTML(slide: CarouselSlide): string {
+  const fontImport = `@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400;1,700&family=Inter:wght@400;500;600;700&display=swap');`;
+  const fontSerif = "'Playfair Display', Georgia, serif";
+  const fontSans = "'Inter', -apple-system, sans-serif";
+
+  const elementsHtml = slide.elements.map((el) => {
+    const ff = el.fontFamily === "serif" ? fontSerif : fontSans;
+    const baseStyle = `position:absolute;left:${el.x}px;top:${el.y}px;width:${el.width}px;`;
+
+    if (el.type === "image") {
+      const src = resolveImageSrc(el.content);
+      if (el.content.startsWith("logo:") && el.content !== "logo:metagora") {
+        const logoKey = el.content.replace("logo:", "");
+        const logo = LOGO_LIBRARY[logoKey];
+        if (logo) return `<div style="${baseStyle}text-align:center;">${logo.svg}</div>`;
+      }
+      return `<div style="${baseStyle}"><img src="${src}" style="max-width:${el.width}px;max-height:${el.width}px;${el.content === "photo:tony" ? "border-radius:50%;border:4px solid #2563eb;" : ""}object-fit:contain;" /></div>`;
+    }
+
+    const textStyle = `${baseStyle}font-family:${ff};font-size:${el.fontSize}px;font-weight:${el.fontWeight};font-style:${el.fontStyle};color:${el.color};text-align:${el.textAlign};line-height:1.5;white-space:pre-wrap;word-wrap:break-word;`;
+    return `<div style="${textStyle}">${escapeHtml(el.content)}</div>`;
+  }).join("\n");
+
+  return `<div style="width:${SLIDE_W}px;height:${SLIDE_H}px;background:${BG_COLOR};position:relative;overflow:hidden;box-sizing:border-box;">
+<style>${fontImport}</style>
+${elementsHtml}
+</div>`;
+}
+
+function resolveImageSrc(content: string): string {
+  if (content === "photo:tony" || content === "photo:tony-small") return "/carousel/tony-photo.png";
+  if (content === "logo:metagora") return "/carousel/metagora-logo.png";
+  if (content.startsWith("logo:")) return "";
+  if (content.startsWith("data:") || content.startsWith("http") || content.startsWith("/")) return content;
+  return content;
+}
 
 function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
