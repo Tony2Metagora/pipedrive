@@ -129,7 +129,14 @@ export default function WarmupPage() {
       const d = await res.json();
       if (d.error) throw new Error(d.error);
       flash("Warmup mis à jour");
-      await fetchAccounts();
+      // Optimistic update: reflect warmup status change immediately in local state
+      // (Smartlead API may not reflect the change instantly on next GET)
+      const newStatus = settings.warmup_enabled === false ? "DISABLED" : "ENABLED";
+      setAccounts((prev) => prev.map((a) =>
+        a.id === accountId
+          ? { ...a, warmup_details: { ...(a.warmup_details || { warmup_reputation: "0", total_sent_count: 0, total_spam_count: 0 }), status: newStatus } }
+          : a
+      ));
     } catch (e) { setError(String(e)); }
     setSaving(null);
   };
@@ -395,7 +402,7 @@ export default function WarmupPage() {
                         {saving === acc.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Flame className="w-3 h-3" />}
                         Activer warmup ({p.dailyTarget}/jour + rampe auto)
                       </button>
-                      {acc.warmup_details?.status === "ENABLED" && (
+                      {(acc.warmup_details?.status === "ENABLED" || acc.warmup_details?.status === "ACTIVE") && (
                         <button
                           onClick={() => updateWarmup(acc.id, { warmup_enabled: false })}
                           disabled={saving === acc.id}
