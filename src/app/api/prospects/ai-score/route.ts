@@ -208,7 +208,13 @@ Pas de markdown, pas de backticks, juste le JSON array.`;
           console.log(`[AI Score] Batch ${batch.idx} OK in ${Date.now() - t0}ms, response length: ${result.length}`);
 
           const cleaned = result.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-          const parsed = JSON.parse(cleaned);
+          // Robust JSON fix: handle single quotes, trailing commas, unquoted keys
+          const fixed = cleaned
+            .replace(/,\s*([\]}])/g, "$1")           // trailing commas
+            .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":') // unquoted keys
+            .replace(/:\s*'([^']*)'/g, ': "$1"');      // single-quoted values
+          let parsed: unknown;
+          try { parsed = JSON.parse(cleaned); } catch { parsed = JSON.parse(fixed); }
           if (Array.isArray(parsed)) {
             for (const item of parsed) {
               allResults.push({

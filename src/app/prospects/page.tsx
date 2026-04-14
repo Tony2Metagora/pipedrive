@@ -911,13 +911,36 @@ export default function ProspectsPage() {
     setProcessing(null);
   };
 
-  const aiScoreProspects = () => {
-    // Detect company from selected list to pass as brand for dynamic scoring card
+  const aiScoreProspects = async () => {
     const selectedList = listFilterMode === "list" && selectedListId ? lists.find((l) => l.id === selectedListId) : null;
     const brand = selectedList?.company || "Metagora";
-    return runStreamingAction("/api/prospects/ai-score", "Score IA", (d) =>
-      `${d.scored}/${d.total} prospects analysés par l'IA (${brand})`
-    , { brand });
+    const allIds = Array.from(selected);
+    if (allIds.length === 0) return;
+
+    const CHUNK_SIZE = 500;
+    if (allIds.length <= CHUNK_SIZE) {
+      // Small batch — single call
+      return runStreamingAction("/api/prospects/ai-score", "Score IA", (d) =>
+        `${d.scored}/${d.total} prospects analysés par l'IA (${brand})`
+      , { brand });
+    }
+
+    // Large batch — split into chunks to avoid Vercel 300s timeout
+    const chunks: string[][] = [];
+    for (let i = 0; i < allIds.length; i += CHUNK_SIZE) {
+      chunks.push(allIds.slice(i, i + CHUNK_SIZE));
+    }
+
+    let totalScored = 0;
+    let totalErrors = 0;
+    for (let ci = 0; ci < chunks.length; ci++) {
+      setProcessing({ label: "Score IA", message: `Lot ${ci + 1}/${chunks.length} (${chunks[ci].length} prospects)...`, current: ci, total: chunks.length });
+      await runStreamingAction("/api/prospects/ai-score", "Score IA", (d) => {
+        totalScored += Number(d.scored || 0);
+        totalErrors += Number(d.errors || 0);
+        return `Lot ${ci + 1}/${chunks.length} terminé — ${totalScored}/${allIds.length} scorés${totalErrors > 0 ? ` (${totalErrors} erreurs)` : ""} (${brand})`;
+      }, { brand }, chunks[ci]);
+    }
   };
 
   const enrichGouvProspects = () =>
