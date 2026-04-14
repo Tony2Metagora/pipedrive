@@ -477,6 +477,64 @@ Pas de markdown, pas de backticks, juste le JSON.`,
       }
     }
 
+    // ── generate-direct: skip ideas/theme, generate post from prompt ──
+    if (action === "generate-direct") {
+      const { prompt, fileId, additionalPrompt } = body;
+
+      let sourceContext = "";
+      if (fileId) {
+        const file = await getFile(fileId);
+        if (file?.extractedText) sourceContext = `\n\nSource document :\n${file.extractedText.slice(0, 3000)}`;
+      }
+
+      const userPrompt = prompt || additionalPrompt || "";
+      if (!userPrompt && !sourceContext) {
+        return NextResponse.json({ error: "Prompt ou fichier requis" }, { status: 400 });
+      }
+
+      const result = await askAzureFast([
+        {
+          role: "system",
+          content: `Tu es le ghostwriter LinkedIn de Tony, CEO de Metagora.
+
+${EDITORIAL_LINE}
+
+${METAGORA_KNOWLEDGE}
+
+${STYLE_EXAMPLES}${learningsBlock}
+
+CONSIGNES IMPÉRATIVES :
+- Reproduis fidèlement le STYLE de Tony (ton direct, phrases courtes, emojis visuels, storytelling).
+- Le post doit faire entre 150 et 300 mots.
+- Commence par une accroche forte (fait choc, question rhétorique, ou anecdote).
+- Termine par une question ouverte pour l'engagement.
+- PAS de hashtags (#) — jamais.
+- N'utilise JAMAIS de jargon corporate vide.
+- Écris en FRANÇAIS.
+- Choisis toi-même le thème éditorial le plus adapté au sujet.
+- IMPORTANT pour le thème "IA dans la formation" : le e-learning (SCORM, LMS) n'est PAS obsolète. Ton constructif.
+
+En plus du post, propose un prompt d'image d'illustration en anglais (1 phrase, descriptif visuel pour Pexels/Unsplash).`,
+        },
+        {
+          role: "user",
+          content: `Rédige un post LinkedIn à partir de cette consigne :
+"${userPrompt}"${sourceContext}
+
+Réponds en JSON : {"post": "le post complet", "imagePrompt": "prompt image en anglais"}
+Pas de markdown, pas de backticks, juste le JSON.`,
+        },
+      ], 2500);
+
+      try {
+        const cleaned = result.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+        const parsed = JSON.parse(cleaned);
+        return NextResponse.json({ data: parsed });
+      } catch {
+        return NextResponse.json({ data: { post: result, imagePrompt: "" } });
+      }
+    }
+
     // ── hooks: generate 5 hook variants ──────────────────
     if (action === "hooks") {
       const { post } = body;

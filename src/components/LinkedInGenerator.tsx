@@ -223,6 +223,44 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
     finally { setIdeaEditLoading(false); }
   };
 
+  // ─── Generate post directly (skip ideas + theme) ───────
+
+  const handleGenerateDirect = async () => {
+    const prompt = mode === "chatgpt" ? promptInput.trim() : fileAdditionalPrompt.trim();
+    if (!prompt && mode === "chatgpt") { setError("Entre un prompt"); return; }
+    if (!selectedFileId && mode === "file") { setError("Sélectionne un fichier"); return; }
+    setGenerateLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/linkedin/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "generate-direct",
+          prompt: mode === "chatgpt" ? prompt : undefined,
+          fileId: mode === "file" ? selectedFileId : undefined,
+          additionalPrompt: mode === "file" ? prompt : undefined,
+        }),
+      });
+      const json = await res.json();
+      if (json.error) { setError(json.error); return; }
+      setGeneratedPost(json.data?.post || "");
+      const imgPrompt = json.data?.imagePrompt || "";
+      setImagePrompt(imgPrompt);
+      setEditMode(false);
+      setEditedPost("");
+      // Skip ideas/theme steps
+      setIdeas(["(post généré directement)"]);
+      setSelectedIdeaIdx(0);
+      setSelectedTheme("journal-ceo");
+      if (imgPrompt) {
+        setImageQuery(imgPrompt);
+        handleImageSearch(imgPrompt);
+      }
+    } catch (err) { setError(String(err)); }
+    finally { setGenerateLoading(false); }
+  };
+
   // ─── Generate post ─────────────────────────────────────
 
   const handleGeneratePost = async () => {
@@ -431,14 +469,24 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
               rows={ideas.length > 0 ? 3 : 4}
               className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-300 outline-none resize-y mb-3"
             />
-            <button
-              onClick={handleGenerateIdeas}
-              disabled={!promptInput.trim() || ideasLoading}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
-            >
-              {ideasLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              {ideasLoading ? "Génération en cours…" : ideas.length > 0 ? "Regénérer les idées" : "Générer 6 idées de posts"}
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={handleGenerateIdeas}
+                disabled={!promptInput.trim() || ideasLoading || generateLoading}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
+              >
+                {ideasLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {ideasLoading ? "Génération…" : ideas.length > 0 ? "Regénérer les idées" : "Générer 6 idées"}
+              </button>
+              <button
+                onClick={handleGenerateDirect}
+                disabled={!promptInput.trim() || ideasLoading || generateLoading}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-violet-600 rounded-xl hover:bg-violet-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
+              >
+                {generateLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                {generateLoading ? "Rédaction…" : "Générer le post"}
+              </button>
+            </div>
           </div>
         )}
 
@@ -501,14 +549,24 @@ export default function LinkedInGenerator({ onPostValidated }: { onPostValidated
               />
             )}
 
-            <button
-              onClick={handleGenerateIdeas}
-              disabled={!selectedFileId || ideasLoading}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-violet-600 rounded-xl hover:bg-violet-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
-            >
-              {ideasLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              {ideasLoading ? "Analyse en cours…" : ideas.length > 0 ? "Regénérer avec ce contexte" : "Analyser et générer 6 idées"}
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={handleGenerateIdeas}
+                disabled={!selectedFileId || ideasLoading || generateLoading}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-violet-600 rounded-xl hover:bg-violet-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
+              >
+                {ideasLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {ideasLoading ? "Analyse…" : ideas.length > 0 ? "Regénérer les idées" : "Générer 6 idées"}
+              </button>
+              <button
+                onClick={handleGenerateDirect}
+                disabled={!selectedFileId || ideasLoading || generateLoading}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
+              >
+                {generateLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                {generateLoading ? "Rédaction…" : "Générer le post"}
+              </button>
+            </div>
           </div>
         )}
 
