@@ -803,12 +803,25 @@ export default function ProspectsPage() {
         });
       }
 
-      const enrichedMsg = `${totalEnriched}/${selectedIds.length} contact${selectedIds.length > 1 ? "s" : ""} enrichi${totalEnriched > 1 ? "s" : ""}`;
-      if (updatedStandardFields.size === 0 && totalExtraUpdated > 0) {
-        setActionMsg(`${enrichedMsg} · 0 champ standard rempli (fill-empty) · ${totalExtraUpdated} extra`);
-      } else {
-        setActionMsg(`${enrichedMsg} · ${updatedStandardFields.size} colonne${updatedStandardFields.size > 1 ? "s" : ""} standard mise${updatedStandardFields.size > 1 ? "s" : ""} à jour`);
+      // Count emails and phones found in detail rows
+      let emailsFound = 0;
+      let phonesFound = 0;
+      for (const row of detailRows) {
+        if (row.topLevelFields.includes("email")) emailsFound++;
+        if (row.topLevelFields.includes("telephone")) phonesFound++;
       }
+      const enrichedMsg = `${totalEnriched}/${selectedIds.length} enrichi${totalEnriched > 1 ? "s" : ""}`;
+      const detailParts: string[] = [];
+      if (emailsFound > 0) detailParts.push(`${emailsFound} email${emailsFound > 1 ? "s" : ""}`);
+      if (phonesFound > 0) detailParts.push(`${phonesFound} tél${phonesFound > 1 ? "s" : ""}`);
+      if (updatedStandardFields.size > 0) {
+        const otherFields = new Set(updatedStandardFields);
+        otherFields.delete("email");
+        otherFields.delete("telephone");
+        if (otherFields.size > 0) detailParts.push(`${otherFields.size} autre${otherFields.size > 1 ? "s" : ""} champ${otherFields.size > 1 ? "s" : ""}`);
+      }
+      const detailStr = detailParts.length > 0 ? ` (${detailParts.join(", ")})` : "";
+      setActionMsg(`${enrichedMsg}${detailStr}`);
       setSelected(new Set());
       syncProspects();
       setTimeout(() => setActionMsg(null), 8000);
@@ -1301,35 +1314,41 @@ export default function ProspectsPage() {
     setTimeout(() => setActionMsg(null), 3000);
   };
 
-  const downloadCsv = () => {
+  const downloadCsv = async () => {
     const defaultTitle = listFilterMode === "list" && selectedListId
-      ? `prospects-${(lists.find((l) => l.id === selectedListId)?.name || "liste").toLowerCase()}`
+      ? `prospects-${(lists.find((l) => l.id === selectedListId)?.name || "liste").toLowerCase().replace(/\s+/g, "-")}`
       : listFilterMode === "orphans"
         ? "prospects-hors-liste"
       : selected.size > 0
-        ? "prospects-selection"
+        ? `prospects-selection-${selected.size}`
         : "prospects-export";
-    const inputTitle = prompt("Titre du fichier CSV (sans extension) :", defaultTitle);
-    if (inputTitle == null) return;
-    const cleanTitle = inputTitle.trim().replace(/[\\/:*?"<>|]/g, "").slice(0, 80);
-    if (!cleanTitle) {
-      alert("Veuillez saisir un titre de fichier valide.");
-      return;
-    }
+    const cleanTitle = defaultTitle.replace(/[\\/:*?"<>|]/g, "").slice(0, 80);
 
     const params = new URLSearchParams();
     params.set("filename", cleanTitle);
     if (selected.size > 0) {
       params.set("ids", Array.from(selected).join(","));
     } else {
-      // Always export the filtered view (respects all active filters: status, score, search, list)
       const filteredIds = filtered.map((p) => p.id);
       if (filteredIds.length > 0) {
         params.set("ids", filteredIds.join(","));
       }
     }
     const qs = params.toString();
-    window.open(`/api/prospects/download${qs ? `?${qs}` : ""}`, "_blank");
+
+    try {
+      const res = await fetch(`/api/prospects/download${qs ? `?${qs}` : ""}`);
+      if (!res.ok) { setActionMsg("Erreur export CSV"); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${cleanTitle}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setActionMsg("Erreur export CSV");
+    }
   };
 
   const toggleStatusFilter = (s: StatusKey) => {
