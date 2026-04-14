@@ -69,6 +69,32 @@ export async function POST(request: Request) {
   }
 }
 
+export async function PATCH(request: Request) {
+  const guard = await requireAuth("prospects", "POST");
+  if (guard.denied) return guard.denied;
+  try {
+    const body = await request.json();
+    const { id, company } = body as { id: string; company?: string };
+    if (!id) return NextResponse.json({ error: "id requis" }, { status: 400 });
+
+    let updated: ProspectList | null = null;
+    await withLock("prospect-lists.json", async () => {
+      const lists = await readLists();
+      const idx = lists.findIndex((l) => l.id === id);
+      if (idx === -1) return;
+      if (company !== undefined) lists[idx].company = company.trim();
+      updated = lists[idx];
+      await writeLists(lists);
+    });
+
+    if (!updated) return NextResponse.json({ error: "Liste non trouvée" }, { status: 404 });
+    return NextResponse.json({ data: updated });
+  } catch (error) {
+    console.error("PATCH /api/prospects/lists error:", error);
+    return NextResponse.json({ error: "Erreur mise à jour liste" }, { status: 500 });
+  }
+}
+
 export async function DELETE(request: Request) {
   const guard = await requireAuth("prospects", "DELETE");
   if (guard.denied) return guard.denied;

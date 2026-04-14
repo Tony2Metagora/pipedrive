@@ -493,6 +493,24 @@ export default function ProspectsPage() {
     }
   };
 
+  const [editingListCompanyId, setEditingListCompanyId] = useState<string | null>(null);
+
+  const updateListCompany = async (listId: string, newCompany: string) => {
+    try {
+      await fetch("/api/prospects/lists", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: listId, company: newCompany }),
+      });
+      fetchLists();
+      setEditingListCompanyId(null);
+      setActionMsg("Société mise à jour");
+      setTimeout(() => setActionMsg(null), 3000);
+    } catch {
+      setActionMsg("Erreur mise à jour");
+    }
+  };
+
   // Unique companies from lists for dropdown
   const knownCompanies = useMemo(() => {
     const set = new Set(lists.map((l) => l.company).filter(Boolean));
@@ -2202,10 +2220,27 @@ export default function ProspectsPage() {
                       <List className="w-3.5 h-3.5 flex-shrink-0 text-indigo-400" />
                       <div className="flex-1 min-w-0">
                         <p className="truncate">{l.name}</p>
-                        <p className="text-[9px] text-gray-400 flex items-center gap-1 truncate">
-                          <Building2 className="w-2.5 h-2.5 flex-shrink-0" />
-                          {l.company}
-                        </p>
+                        {editingListCompanyId === l.id ? (
+                          <select
+                            autoFocus
+                            value={l.company}
+                            onChange={(e) => updateListCompany(l.id, e.target.value)}
+                            onBlur={() => setEditingListCompanyId(null)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-[9px] text-gray-600 border border-indigo-300 rounded px-1 py-0.5 w-full bg-white"
+                          >
+                            {knownCompanies.map((c) => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                        ) : (
+                          <p
+                            className="text-[9px] text-gray-400 flex items-center gap-1 truncate cursor-pointer hover:text-indigo-500"
+                            onClick={(e) => { e.stopPropagation(); setEditingListCompanyId(l.id); }}
+                            title="Cliquer pour changer la société"
+                          >
+                            <Building2 className="w-2.5 h-2.5 flex-shrink-0" />
+                            {l.company}
+                          </p>
+                        )}
                       </div>
                       <span className="text-[9px] text-gray-400 flex-shrink-0">{l.count}</span>
                     </button>
