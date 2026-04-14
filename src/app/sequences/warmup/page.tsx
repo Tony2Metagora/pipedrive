@@ -275,7 +275,20 @@ export default function WarmupPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-semibold text-gray-900">{acc.from_email}</p>
-                      <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded", p.healthBg, p.healthColor)}>{p.health}/100 — {p.healthLabel}</span>
+                      {/* Warmup reputation from Smartlead */}
+                      {(() => {
+                        const warmupActive = acc.warmup_details?.status === "ACTIVE" || acc.warmup_details?.status === "ENABLED";
+                        const rep = acc.warmup_details?.warmup_reputation;
+                        const repNum = rep ? parseFloat(rep) : NaN;
+                        if (!warmupActive) return <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">Warmup inactif</span>;
+                        if (isNaN(repNum)) return <span className="text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded font-medium">Réputation : en attente</span>;
+                        const color = repNum >= 80 ? "text-green-700 bg-green-50" : repNum >= 50 ? "text-yellow-700 bg-yellow-50" : "text-red-700 bg-red-50";
+                        return <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded", color)}>Réputation : {rep}%</span>;
+                      })()}
+                      {/* Warmup active check */}
+                      {(acc.warmup_details?.status === "ACTIVE" || acc.warmup_details?.status === "ENABLED") && (
+                        <span className="text-[10px] font-medium text-green-700 bg-green-50 px-1.5 py-0.5 rounded flex items-center gap-0.5">✓ Warmup</span>
+                      )}
                       <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{p.isGoogle ? "Google Workspace" : p.isHostinger ? "Hostinger" : acc.type}</span>
                     </div>
                     <div className="flex items-center gap-2 flex-wrap mt-0.5">

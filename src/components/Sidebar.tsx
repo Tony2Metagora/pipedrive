@@ -63,7 +63,8 @@ const NAV_GROUPS: NavGroup[] = [
     defaultOpen: false,
     items: [
       { href: "/sequences", label: "Campagnes", icon: Mail },
-      { href: "/sequences/warmup", label: "Warmup", icon: Flame },
+      { href: "/sequences/warmup", label: "Emails", icon: Flame },
+      { href: "/sequences/warmup/domains", label: "Domains", icon: Globe },
     ],
   },
   {
