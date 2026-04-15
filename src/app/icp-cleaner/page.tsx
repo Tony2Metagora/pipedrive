@@ -113,13 +113,20 @@ export default function IcpCleanerPage() {
   useEffect(() => { fetchLists(); }, [fetchLists]);
   useEffect(() => { fetchContacts(); }, [fetchContacts]);
 
-  // ─── Known companies ──────────────────────────────────
+  // ─── Known companies (from ICP lists + Prospect lists) ─
+
+  const [prospectCompanies, setProspectCompanies] = useState<string[]>([]);
+  useEffect(() => {
+    fetch("/api/prospects/lists").then((r) => r.json()).then((d) => {
+      const companies = ((d.data || d.lists || []) as { company?: string }[]).map((l) => l.company || "").filter(Boolean);
+      setProspectCompanies(companies);
+    }).catch(() => {});
+  }, []);
 
   const knownCompanies = useMemo(() => {
-    const set = new Set(lists.map((l) => l.company).filter(Boolean));
-    // Also pull from prospect lists
+    const set = new Set([...lists.map((l) => l.company).filter(Boolean), ...prospectCompanies]);
     return Array.from(set).sort();
-  }, [lists]);
+  }, [lists, prospectCompanies]);
 
   // ─── ICP categories from current contacts ─────────────
 
