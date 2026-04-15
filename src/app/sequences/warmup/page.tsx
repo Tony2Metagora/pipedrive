@@ -3,24 +3,14 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Flame, Loader2, Plus, X, Check, AlertTriangle, ShieldCheck,
-  TrendingUp, Activity, BarChart3, Info, Shield, Square, Mail,
-  Eye, EyeOff, Globe, Lock, RefreshCw,
+  TrendingUp, BarChart3, Info, Square, Mail,
+  Eye, EyeOff,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDateParis } from "@/lib/date-paris";
 import { type WarmupAccountData, getAccountProfile } from "@/lib/warmup-capacity";
 
 // ─── Domain health check types ──────────────────────────
-
-interface DomainCheck {
-  domain: string;
-  spf: { found: boolean; record: string | null; valid: boolean; issue: string | null };
-  dkim: { found: boolean; record: string | null; selector: string };
-  dmarc: { found: boolean; record: string | null; policy: string | null; issue: string | null };
-  mx: { found: boolean; records: string[] };
-  score: number;
-  recommendations: string[];
-}
 
 // ─── Presets for providers ──────────────────────────────
 
@@ -61,40 +51,7 @@ export default function WarmupPage() {
   const [addSaving, setAddSaving] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  // Domain health check
-  const [domainChecks, setDomainChecks] = useState<Record<string, DomainCheck>>({});
-  const [domainLoading, setDomainLoading] = useState<string | null>(null);
-
   const flash = (msg: string) => { setActionMsg(msg); setTimeout(() => setActionMsg(null), 3500); };
-
-  const checkDomain = async (domain: string) => {
-    if (domainChecks[domain] && !domainLoading) return; // already checked
-    setDomainLoading(domain);
-    try {
-      const res = await fetch(`/api/sequences/domain-check?domain=${encodeURIComponent(domain)}`);
-      const d = await res.json();
-      if (!d.error) setDomainChecks((prev) => ({ ...prev, [domain]: d }));
-    } catch { /* ignore */ }
-    setDomainLoading(null);
-  };
-
-  const refreshDomain = async (domain: string) => {
-    setDomainLoading(domain);
-    try {
-      const res = await fetch(`/api/sequences/domain-check?domain=${encodeURIComponent(domain)}`);
-      const d = await res.json();
-      if (!d.error) setDomainChecks((prev) => ({ ...prev, [domain]: d }));
-    } catch { /* ignore */ }
-    setDomainLoading(null);
-  };
-
-  // Auto-check domains when accounts load
-  useEffect(() => {
-    if (accounts.length === 0) return;
-    const domains = [...new Set(accounts.map((a) => a.from_email.split("@")[1]).filter(Boolean))];
-    domains.forEach((d) => { if (!domainChecks[d]) checkDomain(d); });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accounts]);
 
   // Auto-detect provider from email input
   const onEmailChange = (email: string) => {
@@ -258,11 +215,25 @@ export default function WarmupPage() {
           <p className="text-sm text-gray-400 mt-1">Ajoutez votre premier compte pour commencer le warmup.</p>
         </div>
       ) : (
-        <div className="space-y-4">
-          {accounts.map((acc) => {
+        <div className="space-y-6">
+          {/* Group accounts by domain */}
+          {(() => {
+            const domainMap = new Map<string, WarmupAccountData[]>();
+            for (const acc of accounts) {
+              const domain = acc.from_email.split("@")[1] || "autre";
+              const list = domainMap.get(domain) || [];
+              list.push(acc);
+              domainMap.set(domain, list);
+            }
+            return Array.from(domainMap.entries()).map(([domain, domainAccounts]) => (
+              <div key={domain}>
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-2">
+                  <Mail className="w-3.5 h-3.5" />
+                  {domain} <span className="text-gray-400 font-normal">({domainAccounts.length} compte{domainAccounts.length > 1 ? "s" : ""})</span>
+                </h3>
+                <div className="space-y-3">
+          {domainAccounts.map((acc) => {
             const p = getAccountProfile(acc);
-            const ds = acc.warmup_stats?.daily_stats || [];
-            const maxSent = Math.max(...ds.map((d) => d.sent), 1);
             const todaySent = acc.daily_sent_count || 0;
 
             return (
@@ -348,7 +319,7 @@ export default function WarmupPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-0 lg:divide-x divide-gray-100">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 lg:divide-x divide-gray-100">
                   {/* Stats summary */}
                   <div className="p-4">
                     <h4 className="text-[10px] font-semibold text-gray-500 uppercase mb-2 flex items-center gap-1">
@@ -359,47 +330,19 @@ export default function WarmupPage() {
                         <p className="text-lg font-bold text-blue-700">{p.totalSent}</p>
                         <p className="text-[9px] text-blue-500">Total envoyés</p>
                       </div>
-                      <div className="bg-violet-50 rounded-lg p-2 text-center">
-                        <p className="text-lg font-bold text-violet-700">{p.historyWeeklySent}</p>
-                        <p className="text-[9px] text-violet-500">Envoyés 7j observés</p>
-                      </div>
                       <div className={cn("rounded-lg p-2 text-center", p.spamRate > 2 ? "bg-red-50" : "bg-green-50")}>
                         <p className={cn("text-lg font-bold", p.spamRate > 2 ? "text-red-700" : "text-green-700")}>{p.spamRate.toFixed(1)}%</p>
                         <p className={cn("text-[9px]", p.spamRate > 2 ? "text-red-500" : "text-green-500")}>Taux spam</p>
-                      </div>
-                      <div className="bg-indigo-50 rounded-lg p-2 text-center">
-                        <p className="text-lg font-bold text-indigo-700">{p.rep || "—"}</p>
-                        <p className="text-[9px] text-indigo-500">Réputation</p>
                       </div>
                       <div className="bg-gray-50 rounded-lg p-2 text-center">
                         <p className="text-sm font-bold text-gray-700">{p.maturity === "new" ? "Nouveau" : p.maturity === "warming" ? "En warmup" : p.maturity === "warm" ? "Chaud" : "Mature"}</p>
                         <p className="text-[9px] text-gray-500">Maturité</p>
                       </div>
-                    </div>
-                  </div>
-
-                  {/* 7-day chart */}
-                  <div className="p-4">
-                    <h4 className="text-[10px] font-semibold text-gray-500 uppercase mb-2 flex items-center gap-1">
-                      <Activity className="w-3 h-3" /> 7 derniers jours
-                    </h4>
-                    {ds.length === 0 ? (
-                      <p className="text-xs text-gray-400 text-center py-6">Pas de données warmup</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {ds.map((d) => (
-                          <div key={d.date} className="flex items-center gap-2 text-[10px]">
-                            <span className="text-gray-400 w-16 shrink-0">{new Date(d.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</span>
-                            <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden flex">
-                              <div className="h-full bg-blue-400 rounded-l-full" style={{ width: `${(d.delivered / maxSent) * 100}%` }} title={`${d.delivered} livrés`} />
-                              {d.spam > 0 && <div className="h-full bg-red-400" style={{ width: `${(d.spam / maxSent) * 100}%` }} title={`${d.spam} spam`} />}
-                            </div>
-                            <span className="text-gray-600 w-8 text-right font-medium">{d.sent}</span>
-                            {d.spam > 0 && <span className="text-red-500 text-[9px]">({d.spam} spam)</span>}
-                          </div>
-                        ))}
+                      <div className="bg-violet-50 rounded-lg p-2 text-center">
+                        <p className="text-lg font-bold text-violet-700">{p.historyWeeklySent}</p>
+                        <p className="text-[9px] text-violet-500">7 derniers jours</p>
                       </div>
-                    )}
+                    </div>
                   </div>
 
                   {/* Ramp + actions */}
@@ -465,181 +408,12 @@ export default function WarmupPage() {
               </div>
             );
           })}
-
-          {/* Global recommendations */}
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
-            <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2 mb-3">
-              <Shield className="w-4 h-4 text-blue-500" /> Recommandations
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-gray-600">
-              {accounts.filter((a) => a.from_email.endsWith("@metagora.tech")).length > 0 && (
-                <div className="bg-blue-50 rounded-lg p-3">
-                  <p className="font-semibold text-blue-800 mb-1">Google Workspace (@metagora.tech)</p>
-                  <ul className="space-y-0.5 text-blue-700">
-                    <li>• tony@metagora.tech (2 ans) : peut monter à 50-80/jour</li>
-                    <li>• anna.i@metagora.tech (nouveau) : commencer à 10/jour</li>
-                    <li>• Activez le warmup Smartlead sur tous les comptes neufs</li>
-                  </ul>
                 </div>
-              )}
-              {accounts.filter((a) => a.from_email.endsWith("@metagora-tech.fr")).length > 0 && (
-                <div className="bg-orange-50 rounded-lg p-3">
-                  <p className="font-semibold text-orange-800 mb-1">Hostinger (@metagora-tech.fr)</p>
-                  <ul className="space-y-0.5 text-orange-700">
-                    <li>• Réputation plus fragile — soyez conservateur</li>
-                    <li>• Nouveaux comptes : 5/jour semaine 1, max 35-40/jour à terme</li>
-                    <li>• Vérifiez SPF, DKIM et DMARC sur Hostinger</li>
-                  </ul>
-                </div>
-              )}
-            </div>
-          </div>
+              </div>
+            ));
+          })()}
         </div>
       )}
-
-      {/* ─── Domain Health Check ─────────────────────────── */}
-      {!loading && accounts.length > 0 && (() => {
-        const domains = [...new Set(accounts.map((a) => a.from_email.split("@")[1]).filter(Boolean))];
-        return (
-          <div className="mt-4 bg-white rounded-lg border border-gray-200 p-4">
-            <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2 mb-3">
-              <Globe className="w-4 h-4 text-indigo-500" /> Santé des domaines (SPF / DKIM / DMARC)
-            </h3>
-            <div className="space-y-3">
-              {domains.map((domain) => {
-                const dc = domainChecks[domain];
-                const isLoading = domainLoading === domain;
-                return (
-                  <div key={domain} className="border border-gray-100 rounded-lg p-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <Lock className="w-3.5 h-3.5 text-gray-400" />
-                        <span className="text-xs font-semibold text-gray-800">{domain}</span>
-                        {dc && (
-                          <span className={cn(
-                            "text-[10px] font-bold px-1.5 py-0.5 rounded",
-                            dc.score >= 80 ? "bg-green-100 text-green-700" : dc.score >= 50 ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"
-                          )}>
-                            {dc.score}/100
-                          </span>
-                        )}
-                      </div>
-                      <button onClick={() => refreshDomain(domain)} disabled={isLoading}
-                        className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-600 cursor-pointer disabled:opacity-50">
-                        <RefreshCw className={cn("w-3 h-3", isLoading && "animate-spin")} /> {isLoading ? "Vérification..." : "Revérifier"}
-                      </button>
-                    </div>
-                    {!dc && !isLoading && (
-                      <p className="text-[10px] text-gray-400">Cliquez sur Revérifier pour analyser le domaine</p>
-                    )}
-                    {isLoading && !dc && (
-                      <div className="flex items-center gap-2 text-[10px] text-gray-400"><Loader2 className="w-3 h-3 animate-spin" /> Analyse DNS en cours...</div>
-                    )}
-                    {dc && (
-                      <div className="space-y-1.5">
-                        <div className="grid grid-cols-4 gap-2">
-                          <div className={cn("rounded-lg p-2 text-center text-[10px]", dc.spf.found ? (dc.spf.valid ? "bg-green-50" : "bg-yellow-50") : "bg-red-50")}>
-                            <p className={cn("font-bold", dc.spf.found ? (dc.spf.valid ? "text-green-700" : "text-yellow-700") : "text-red-700")}>
-                              {dc.spf.found ? (dc.spf.valid ? "✅ OK" : "⚠️ Partiel") : "❌ Absent"}
-                            </p>
-                            <p className="text-gray-500">SPF</p>
-                          </div>
-                          <div className={cn("rounded-lg p-2 text-center text-[10px]", dc.dkim.found ? "bg-green-50" : "bg-red-50")}>
-                            <p className={cn("font-bold", dc.dkim.found ? "text-green-700" : "text-red-700")}>
-                              {dc.dkim.found ? "✅ OK" : "❌ Absent"}
-                            </p>
-                            <p className="text-gray-500">DKIM</p>
-                          </div>
-                          <div className={cn("rounded-lg p-2 text-center text-[10px]", dc.dmarc.found ? (dc.dmarc.policy !== "none" ? "bg-green-50" : "bg-yellow-50") : "bg-red-50")}>
-                            <p className={cn("font-bold", dc.dmarc.found ? (dc.dmarc.policy !== "none" ? "text-green-700" : "text-yellow-700") : "text-red-700")}>
-                              {dc.dmarc.found ? (dc.dmarc.policy !== "none" ? "✅ OK" : "⚠️ none") : "❌ Absent"}
-                            </p>
-                            <p className="text-gray-500">DMARC</p>
-                          </div>
-                          <div className={cn("rounded-lg p-2 text-center text-[10px]", dc.mx.found ? "bg-green-50" : "bg-red-50")}>
-                            <p className={cn("font-bold", dc.mx.found ? "text-green-700" : "text-red-700")}>
-                              {dc.mx.found ? "✅ OK" : "❌ Absent"}
-                            </p>
-                            <p className="text-gray-500">MX</p>
-                          </div>
-                        </div>
-                        {dc.recommendations.length > 0 && (
-                          <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-lg">
-                            <p className="text-[10px] font-semibold text-red-700 mb-1">Actions requises :</p>
-                            {dc.recommendations.map((r, i) => (
-                              <p key={i} className="text-[10px] text-red-600">• {r}</p>
-                            ))}
-                          </div>
-                        )}
-                        {dc.spf.issue && (
-                          <p className="text-[10px] text-yellow-600">SPF : {dc.spf.issue}</p>
-                        )}
-                        {dc.dmarc.issue && (
-                          <p className="text-[10px] text-yellow-600">DMARC : {dc.dmarc.issue}</p>
-                        )}
-                        {dc.dkim.found && (
-                          <p className="text-[10px] text-gray-400">DKIM sélecteur : {dc.dkim.selector}</p>
-                        )}
-
-                        {/* DNS Config Guide — shown when something is missing */}
-                        {(!dc.spf.found || !dc.dkim.found || !dc.dmarc.found) && (
-                          <div className="mt-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
-                            <p className="text-[11px] font-semibold text-indigo-800 mb-2">📋 Guide de configuration DNS — {domain}</p>
-                            <p className="text-[10px] text-indigo-600 mb-2">
-                              Connectez-vous à <b>Hostinger → hPanel → DNS Zone</b> (ou votre registrar DNS) et ajoutez ces enregistrements TXT :
-                            </p>
-                            <div className="space-y-2">
-                              {!dc.spf.found && (
-                                <div className="bg-white rounded p-2 border border-indigo-100">
-                                  <p className="text-[10px] font-bold text-indigo-800">1. SPF (empêche l&apos;usurpation d&apos;identité)</p>
-                                  <div className="mt-1 grid grid-cols-[80px_1fr] gap-1 text-[10px]">
-                                    <span className="text-gray-500">Type :</span><span className="font-mono text-gray-800">TXT</span>
-                                    <span className="text-gray-500">Nom :</span><span className="font-mono text-gray-800">@</span>
-                                    <span className="text-gray-500">Valeur :</span>
-                                    <span className="font-mono text-gray-800 bg-gray-50 px-1 rounded select-all break-all">v=spf1 include:_spf.google.com include:spf.hostinger.com ~all</span>
-                                    <span className="text-gray-500">TTL :</span><span className="font-mono text-gray-800">3600</span>
-                                  </div>
-                                </div>
-                              )}
-                              {!dc.dkim.found && (
-                                <div className="bg-white rounded p-2 border border-indigo-100">
-                                  <p className="text-[10px] font-bold text-indigo-800">2. DKIM (signe vos emails cryptographiquement)</p>
-                                  <div className="mt-1 text-[10px] text-gray-600 space-y-1">
-                                    <p><b>Hostinger :</b> hPanel → Emails → Gérer → DKIM → Copier la clé publique, puis :</p>
-                                    <div className="grid grid-cols-[80px_1fr] gap-1">
-                                      <span className="text-gray-500">Type :</span><span className="font-mono text-gray-800">TXT</span>
-                                      <span className="text-gray-500">Nom :</span><span className="font-mono text-gray-800 select-all">default._domainkey</span>
-                                      <span className="text-gray-500">Valeur :</span><span className="font-mono text-gray-800 bg-gray-50 px-1 rounded break-all">v=DKIM1; k=rsa; p=VOTRE_CLE_PUBLIQUE_ICI</span>
-                                    </div>
-                                    <p className="text-indigo-500"><b>Google Workspace :</b> Admin Console → Apps → Gmail → Authentification → Générer DKIM → Copier l&apos;enregistrement TXT</p>
-                                  </div>
-                                </div>
-                              )}
-                              {!dc.dmarc.found && (
-                                <div className="bg-white rounded p-2 border border-indigo-100">
-                                  <p className="text-[10px] font-bold text-indigo-800">3. DMARC (indique aux serveurs quoi faire si SPF/DKIM échouent)</p>
-                                  <div className="mt-1 grid grid-cols-[80px_1fr] gap-1 text-[10px]">
-                                    <span className="text-gray-500">Type :</span><span className="font-mono text-gray-800">TXT</span>
-                                    <span className="text-gray-500">Nom :</span><span className="font-mono text-gray-800 select-all">_dmarc</span>
-                                    <span className="text-gray-500">Valeur :</span>
-                                    <span className="font-mono text-gray-800 bg-gray-50 px-1 rounded select-all break-all">v=DMARC1; p=quarantine; rua=mailto:dmarc@{domain}; pct=100</span>
-                                    <span className="text-gray-500">TTL :</span><span className="font-mono text-gray-800">3600</span>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                            <p className="text-[9px] text-indigo-400 mt-2">⏱ Après modification, les DNS prennent 1-24h pour se propager. Revenez cliquer &quot;Revérifier&quot; demain.</p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })()}
 
       {/* ─── Add account modal ──────────────────────────── */}
       {showAdd && (
