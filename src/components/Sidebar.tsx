@@ -36,6 +36,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/scrapping", label: "Scrapping", icon: Database, viewKey: "scrapping" },
       { href: "/prospects", label: "Prospects", icon: Users, viewKey: "prospects" },
+      { href: "/icp-cleaner", label: "ICP Cleaner", icon: Users, viewKey: "prospects" },
       { href: "/dashboard", label: "Affaires", icon: LayoutDashboard, viewKey: "dashboard" },
       { href: "/pipeline", label: "Analytics", icon: BarChart3, viewKey: "pipeline" },
     ],
