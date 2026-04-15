@@ -38,13 +38,21 @@ function parseLine(line: string, sep: string): string[] {
 }
 
 const LABEL_SUGGESTIONS: Record<string, string> = {
-  firstname: "Prénom", first_name: "Prénom", prénom: "Prénom", prenom: "Prénom",
-  lastname: "Nom", last_name: "Nom", nom: "Nom",
-  email: "Email", mail: "Email",
-  phone: "Téléphone", telephone: "Téléphone", tel: "Téléphone", mobile: "Téléphone",
-  title: "Poste", "job title": "Poste", poste: "Poste", fonction: "Poste",
-  company: "Entreprise", entreprise: "Entreprise", société: "Entreprise",
-  linkedin: "LinkedIn", ville: "Ville", city: "Ville",
+  firstname: "Prénom", first_name: "Prénom", "first name": "Prénom", prénom: "Prénom", prenom: "Prénom",
+  lastname: "Nom", last_name: "Nom", "last name": "Nom", nom: "Nom",
+  email: "Email", "e-mail": "Email", mail: "Email",
+  phone: "Téléphone", telephone: "Téléphone", téléphone: "Téléphone", tel: "Téléphone", mobile: "Téléphone", "phone number": "Téléphone",
+  title: "Poste", "job title": "Poste", job_title: "Poste", poste: "Poste", fonction: "Poste", position: "Poste",
+  company: "Entreprise", companyname: "Entreprise", company_name: "Entreprise", "company name": "Entreprise", entreprise: "Entreprise", société: "Entreprise", societe: "Entreprise",
+  linkedin: "LinkedIn", "lien linkedin": "LinkedIn", linkedinprofileurl: "LinkedIn", defaultprofileurl: "LinkedIn",
+  company_linkedin: "LinkedIn entreprise", "linkedin entreprise": "LinkedIn entreprise",
+  ville: "Ville", city: "Ville", location: "Localisation",
+  naf: "Code NAF", naf_code: "Code NAF", "code naf": "Code NAF",
+  effectifs: "Effectifs",
+  siren: "SIREN", siret: "SIRET",
+  durationinrole: "Durée dans le poste", duree_poste: "Durée dans le poste", "durée dans le poste": "Durée dans le poste",
+  durationincompany: "Durée dans l'entreprise", duree_entreprise: "Durée dans l'entreprise", "durée dans l'entreprise": "Durée dans l'entreprise",
+  "résumé entreprise": "Résumé entreprise", resume_entreprise: "Résumé entreprise",
 };
 
 export async function POST(request: Request) {

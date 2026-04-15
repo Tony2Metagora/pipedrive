@@ -41,6 +41,7 @@ const ALIASES: Record<string, CanonicalProspectField> = {
   telephone: "telephone",
   téléphone: "telephone",
   phone: "telephone",
+  tel: "telephone",
   mobile: "telephone",
   mobile_phone: "telephone",
   "phone number": "telephone",
@@ -64,6 +65,7 @@ const ALIASES: Record<string, CanonicalProspectField> = {
   "org name": "entreprise",
 
   linkedin: "linkedin",
+  "lien linkedin": "linkedin",
   linkedinurl: "linkedin",
   linkedin_url: "linkedin",
   linkedinprofileurl: "linkedin",
@@ -74,6 +76,7 @@ const ALIASES: Record<string, CanonicalProspectField> = {
   company_linkedin_url: "linkedin_entreprise",
 
   naf: "naf_code",
+  "code naf": "naf_code",
   nafcode: "naf_code",
   naf_code: "naf_code",
   naf5code: "naf_code",
@@ -86,6 +89,7 @@ const ALIASES: Record<string, CanonicalProspectField> = {
 
   resumeentreprise: "resume_entreprise",
   resume_entreprise: "resume_entreprise",
+  "resume entreprise": "resume_entreprise",
   "score ia": "ai_score",
   scoreia: "ai_score",
   ai_score: "ai_score",
