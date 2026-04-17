@@ -97,6 +97,8 @@ export default function IcpCleanerPage() {
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set());
   const [editingCatIdx, setEditingCatIdx] = useState<number | null>(null);
   const [editCatReason, setEditCatReason] = useState("");
+  const [showRefine, setShowRefine] = useState(false);
+  const [refineFeedback, setRefineFeedback] = useState("");
 
   // Memory popup
   const [showMemory, setShowMemory] = useState(false);
@@ -241,6 +243,43 @@ export default function IcpCleanerPage() {
       setDiscoveredCategories(json.data?.categories || []);
       setExcludedSegments(json.data?.excluded_segments || []);
     } catch { setError("Erreur classification"); }
+    setDiscovering(false);
+  };
+
+  const refineCategories = async () => {
+    if (!refineFeedback.trim()) return;
+    setDiscovering(true);
+    const list = lists.find((l) => l.id === selectedListId);
+    const currentSummary = discoveredCategories.map((c) => `- ${c.name}: ${c.description} (~${c.estimatedCount || "?"} contacts)`).join("\n");
+    const excludedSummary = excludedSegments.map((s) => `- ${s.name} (exclu): ${s.reason}`).join("\n");
+    const refinedContext = `${offerContext}
+
+--- CLASSIFICATION PRÉCÉDENTE ---
+${currentSummary}
+${excludedSummary ? `\nSegments exclus:\n${excludedSummary}` : ""}
+
+--- FEEDBACK UTILISATEUR ---
+${refineFeedback}
+
+IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP. Reclass tous les contacts en conséquence.`;
+
+    try {
+      const res = await fetch("/api/icp/classify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "discover",
+          ids: selected.size > 0 ? Array.from(selected) : contacts.map((c) => c.id),
+          company: list?.company || "",
+          offerContext: refinedContext,
+        }),
+      });
+      const json = await res.json();
+      setDiscoveredCategories(json.data?.categories || []);
+      setExcludedSegments(json.data?.excluded_segments || []);
+      setShowRefine(false);
+      setRefineFeedback("");
+    } catch { setError("Erreur re-classification"); }
     setDiscovering(false);
   };
 
@@ -563,10 +602,20 @@ export default function IcpCleanerPage() {
               {icpCategories.map((cat) => {
                 const count = contacts.filter((c) => c.icp_category === cat).length;
                 return (
-                  <button key={cat} onClick={() => setIcpFilter(cat)}
-                    className={cn("w-full text-left px-2 py-1 rounded text-xs cursor-pointer",
-                      icpFilter === cat ? "bg-violet-50 text-violet-700 font-medium" : "text-gray-500 hover:bg-gray-50"
-                    )}>{cat} ({count})</button>
+                  <div key={cat} className={cn("group flex items-center rounded text-xs",
+                    icpFilter === cat ? "bg-violet-50" : "hover:bg-gray-50"
+                  )}>
+                    <button onClick={() => setIcpFilter(cat)}
+                      className={cn("flex-1 text-left px-2 py-1 cursor-pointer",
+                        icpFilter === cat ? "text-violet-700 font-medium" : "text-gray-500"
+                      )}>{cat} ({count})</button>
+                    {icpFilter === cat && (
+                      <button onClick={(e) => { e.stopPropagation(); setIcpFilter(null); }}
+                        className="p-0.5 mr-1 text-violet-400 hover:text-violet-700 cursor-pointer">
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -994,6 +1043,30 @@ export default function IcpCleanerPage() {
                       </div>
                     ))}
                   </div>
+                )}
+
+                {/* Modifier le cadrage */}
+                {showRefine ? (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
+                    <p className="text-[10px] font-semibold text-amber-700 uppercase">Modifier le cadrage</p>
+                    <textarea value={refineFeedback} onChange={(e) => setRefineFeedback(e.target.value)}
+                      rows={3} placeholder="Ex: Fusionner les 2 catégories Collectivités en une seule, séparer les bailleurs sociaux par type de poste, le segment X n'est pas pertinent..."
+                      className="w-full border border-amber-300 rounded-lg px-3 py-2 text-xs resize-y" />
+                    <div className="flex gap-2">
+                      <button onClick={refineCategories} disabled={discovering || !refineFeedback.trim()}
+                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 cursor-pointer">
+                        {discovering ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                        {discovering ? "Re-analyse..." : "Re-analyser les ICP"}
+                      </button>
+                      <button onClick={() => { setShowRefine(false); setRefineFeedback(""); }}
+                        className="px-3 py-2 text-xs text-gray-500 border border-gray-200 rounded-lg cursor-pointer">Annuler</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => setShowRefine(true)}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-amber-700 border border-amber-300 rounded-lg hover:bg-amber-50 cursor-pointer">
+                    <Pencil className="w-3 h-3" /> Modifier le cadrage
+                  </button>
                 )}
 
                 <div className="flex gap-2">
