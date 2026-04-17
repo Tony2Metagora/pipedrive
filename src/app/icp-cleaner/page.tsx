@@ -141,8 +141,18 @@ export default function IcpCleanerPage() {
     ).then((results) => setExtraContacts(results.flat()));
   }, [extraListIds]);
 
-  // Merged contacts = current list + extra lists (for ICP Finder)
-  const mergedContacts = useMemo(() => [...contacts, ...extraContacts], [contacts, extraContacts]);
+  // Merged contacts = current list + extra lists, deduplicated by email (or nom+prenom+entreprise)
+  const mergedContacts = useMemo(() => {
+    const all = [...contacts, ...extraContacts];
+    const seen = new Set<string>();
+    return all.filter((c) => {
+      const key = c.email?.trim().toLowerCase()
+        || `${(c.prenom || "").toLowerCase()}|${(c.nom || "").toLowerCase()}|${(c.entreprise || "").toLowerCase()}`;
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [contacts, extraContacts]);
 
   // Same-company lists (for multi-list picker)
   const sameCompanyLists = useMemo(() => {
@@ -989,7 +999,9 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
             <p className="text-xs text-gray-500 mb-2">
               {selected.size > 0
                 ? `${selected.size} contacts sélectionnés`
-                : `${mergedContacts.length} contacts${extraListIds.size > 0 ? ` (${contacts.length} + ${extraContacts.length} d'autres listes)` : ""}`}
+                : extraListIds.size > 0
+                  ? `${mergedContacts.length} contacts uniques (${contacts.length + extraContacts.length} total, ${contacts.length + extraContacts.length - mergedContacts.length} doublons retirés)`
+                  : `${contacts.length} contacts dans la liste`}
             </p>
 
             {/* Multi-list picker */}
