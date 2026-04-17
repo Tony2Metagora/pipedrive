@@ -6,6 +6,8 @@ import {
   Plus, Building2, List, ChevronDown, Check, Pencil, Save,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -343,6 +345,124 @@ export default function IcpCleanerPage() {
     link.download = `${filename}.csv`;
     link.click();
     URL.revokeObjectURL(url);
+  };
+
+  // ─── Export ICP PDF ────────────────────────────────────
+
+  const exportIcpPdf = () => {
+    const list = lists.find((l) => l.id === selectedListId);
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const pageW = doc.internal.pageSize.getWidth();
+    let y = 15;
+
+    // Title
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
+    doc.text(`ICP Analysis — ${list?.company || ""}`, 14, y);
+    y += 6;
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(120);
+    doc.text(`${list?.name || ""} • ${contacts.length} contacts • ${new Date().toLocaleDateString("fr-FR")}`, 14, y);
+    doc.setTextColor(0);
+    y += 10;
+
+    // Each ICP category
+    discoveredCategories.forEach((cat) => {
+      const catContacts = cat.contactNumbers
+        ? cat.contactNumbers.map((n) => contacts[n - 1]).filter(Boolean)
+        : [];
+
+      // Check page space
+      if (y > 260) { doc.addPage(); y = 15; }
+
+      // Category header
+      doc.setFillColor(124, 58, 237);
+      doc.roundedRect(14, y, pageW - 28, 7, 1, 1, "F");
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(255);
+      doc.text(`${cat.name}  (${catContacts.length} contacts)`, 17, y + 5);
+      doc.setTextColor(0);
+      y += 10;
+
+      // Description
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(80);
+      const descLines = doc.splitTextToSize(cat.description || "", pageW - 32);
+      doc.text(descLines, 16, y);
+      y += descLines.length * 3.5 + 2;
+
+      // Approach key
+      if (cat.approach_key) {
+        doc.setFont("helvetica", "bolditalic");
+        doc.setTextColor(5, 122, 85);
+        const approachLines = doc.splitTextToSize(`Message cle: ${cat.approach_key}`, pageW - 32);
+        doc.text(approachLines, 16, y);
+        y += approachLines.length * 3.5 + 3;
+      }
+      doc.setTextColor(0);
+
+      // Contact table
+      if (catContacts.length > 0) {
+        autoTable(doc, {
+          startY: y,
+          margin: { left: 14, right: 14 },
+          head: [["Prenom", "Nom", "Poste", "Entreprise", "Email"]],
+          body: catContacts.map((c) => [
+            c.prenom || "", c.nom || "", c.poste || "", c.entreprise || "", c.email || "",
+          ]),
+          styles: { fontSize: 7, cellPadding: 1.5 },
+          headStyles: { fillColor: [237, 233, 254], textColor: [88, 28, 135], fontStyle: "bold" },
+          alternateRowStyles: { fillColor: [249, 250, 251] },
+        });
+        y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
+      } else {
+        y += 4;
+      }
+    });
+
+    // Excluded segments
+    if (excludedSegments.length > 0) {
+      if (y > 250) { doc.addPage(); y = 15; }
+      doc.setFillColor(251, 146, 60);
+      doc.roundedRect(14, y, pageW - 28, 7, 1, 1, "F");
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(255);
+      doc.text("Segments exclus", 17, y + 5);
+      doc.setTextColor(0);
+      y += 10;
+
+      excludedSegments.forEach((seg) => {
+        if (y > 270) { doc.addPage(); y = 15; }
+        const exclContacts = seg.contactNumbers
+          ? seg.contactNumbers.map((n) => contacts[n - 1]).filter(Boolean)
+          : [];
+
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(180, 83, 9);
+        doc.text(`${seg.name} (${exclContacts.length} contacts) — ${seg.reason}`, 16, y);
+        doc.setTextColor(0);
+        y += 5;
+
+        if (exclContacts.length > 0) {
+          autoTable(doc, {
+            startY: y,
+            margin: { left: 14, right: 14 },
+            head: [["Prenom", "Nom", "Poste", "Entreprise"]],
+            body: exclContacts.map((c) => [c.prenom || "", c.nom || "", c.poste || "", c.entreprise || ""]),
+            styles: { fontSize: 7, cellPadding: 1.5 },
+            headStyles: { fillColor: [255, 237, 213], textColor: [154, 52, 18], fontStyle: "bold" },
+          });
+          y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
+        }
+      });
+    }
+
+    doc.save(`ICP-${list?.company || "export"}-${new Date().toISOString().slice(0, 10)}.pdf`);
   };
 
   // ─── Select all / toggle ──────────────────────────────
@@ -770,11 +890,18 @@ export default function IcpCleanerPage() {
                   </div>
                 )}
 
-                <button onClick={applyClassification} disabled={applying}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50 cursor-pointer">
-                  {applying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                  {applying ? applyProgress || "Classification..." : "Appliquer la classification"}
-                </button>
+                <div className="flex gap-2">
+                  <button onClick={applyClassification} disabled={applying}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50 cursor-pointer">
+                    {applying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                    {applying ? applyProgress || "Classification..." : "Appliquer la classification"}
+                  </button>
+                  <button onClick={exportIcpPdf}
+                    className="flex items-center gap-2 px-4 py-3 text-sm font-medium text-violet-700 border border-violet-300 rounded-lg hover:bg-violet-50 cursor-pointer"
+                    title="Exporter l'analyse ICP en PDF">
+                    <Download className="w-4 h-4" /> PDF
+                  </button>
+                </div>
               </div>
             )}
           </div>
