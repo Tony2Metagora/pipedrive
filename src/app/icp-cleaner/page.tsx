@@ -598,67 +598,173 @@ export default function IcpCleanerPage() {
                 )}
               </div>
 
-              {/* Table */}
+              {/* Table — grouped by ICP when classified, flat otherwise */}
               <div className="overflow-x-auto max-h-[65vh] overflow-y-auto">
-                <table className="w-full text-xs">
-                  <thead className="bg-gray-50 sticky top-0 z-10">
-                    <tr>
-                      <th className="px-2 py-2 text-left w-8">
-                        <input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0}
-                          onChange={toggleAll} className="accent-violet-600 cursor-pointer" />
-                      </th>
-                      <th className="px-2 py-2 text-left text-gray-500 font-medium">Prénom</th>
-                      <th className="px-2 py-2 text-left text-gray-500 font-medium">Nom</th>
-                      <th className="px-2 py-2 text-left text-gray-500 font-medium">Email</th>
-                      <th className="px-2 py-2 text-left text-gray-500 font-medium">Poste</th>
-                      <th className="px-2 py-2 text-left text-gray-500 font-medium">Entreprise</th>
-                      <th className="px-2 py-2 text-left text-gray-500 font-medium">ICP</th>
-                      <th className="px-2 py-2 text-left text-gray-500 font-medium">Approche</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map((c) => (
-                      <tr key={c.id} className={cn("border-b border-gray-50 hover:bg-gray-50/50",
-                        selected.has(c.id) && "bg-violet-50/30"
-                      )}>
-                        <td className="px-2 py-1.5">
-                          <input type="checkbox" checked={selected.has(c.id)}
-                            onChange={(e) => {
-                              const next = new Set(selected);
-                              e.target.checked ? next.add(c.id) : next.delete(c.id);
-                              setSelected(next);
-                            }}
-                            className="accent-violet-600 cursor-pointer" />
-                        </td>
-                        <td className="px-2 py-1.5 text-gray-800">{c.prenom}</td>
-                        <td className="px-2 py-1.5 text-gray-800">{c.nom}</td>
-                        <td className="px-2 py-1.5 text-gray-600 truncate max-w-[200px]">{c.email}</td>
-                        <td className="px-2 py-1.5 text-gray-600 truncate max-w-[150px]">{c.poste}</td>
-                        <td className="px-2 py-1.5 text-gray-600 truncate max-w-[150px]">{c.entreprise}</td>
-                        <td className="px-2 py-1.5">
-                          {c.icp_category ? (
-                            <button onClick={() => { setMemoryContact(c); setMemoryNewCat(c.icp_category || ""); setMemoryReason(""); setShowMemory(true); }}
-                              className="text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded text-[10px] font-medium hover:bg-violet-100 cursor-pointer"
-                              title={c.icp_reason || ""}>
-                              {c.icp_category}
-                            </button>
-                          ) : (
-                            <span className="text-gray-300">—</span>
+                {icpCategories.length > 0 && !icpFilter ? (
+                  /* ── Grouped view ── */
+                  <div className="divide-y divide-gray-100">
+                    {icpCategories.map((cat) => {
+                      const catContacts = filtered.filter((c) => c.icp_category === cat);
+                      if (catContacts.length === 0) return null;
+                      const approachMsg = catContacts.find((c) => c.icp_approach)?.icp_approach;
+                      return (
+                        <div key={cat} className="pb-2">
+                          {/* ICP header */}
+                          <div className="sticky top-0 z-10 bg-violet-50 border-b border-violet-200 px-3 py-2 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-semibold text-violet-800">{cat}</span>
+                              <span className="text-[10px] text-violet-500 font-medium">{catContacts.length} contact{catContacts.length > 1 ? "s" : ""}</span>
+                            </div>
+                          </div>
+                          {/* Contact rows */}
+                          <table className="w-full text-xs">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-2 py-1.5 text-left w-8">
+                                  <input type="checkbox"
+                                    checked={catContacts.every((c) => selected.has(c.id))}
+                                    onChange={() => {
+                                      const next = new Set(selected);
+                                      const allSelected = catContacts.every((c) => next.has(c.id));
+                                      catContacts.forEach((c) => allSelected ? next.delete(c.id) : next.add(c.id));
+                                      setSelected(next);
+                                    }}
+                                    className="accent-violet-600 cursor-pointer" />
+                                </th>
+                                <th className="px-2 py-1.5 text-left text-gray-500 font-medium">Prénom</th>
+                                <th className="px-2 py-1.5 text-left text-gray-500 font-medium">Nom</th>
+                                <th className="px-2 py-1.5 text-left text-gray-500 font-medium">Email</th>
+                                <th className="px-2 py-1.5 text-left text-gray-500 font-medium">Poste</th>
+                                <th className="px-2 py-1.5 text-left text-gray-500 font-medium">Entreprise</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {catContacts.map((c) => (
+                                <tr key={c.id} className={cn("border-b border-gray-50 hover:bg-gray-50/50",
+                                  selected.has(c.id) && "bg-violet-50/30"
+                                )}>
+                                  <td className="px-2 py-1.5">
+                                    <input type="checkbox" checked={selected.has(c.id)}
+                                      onChange={(e) => {
+                                        const next = new Set(selected);
+                                        e.target.checked ? next.add(c.id) : next.delete(c.id);
+                                        setSelected(next);
+                                      }}
+                                      className="accent-violet-600 cursor-pointer" />
+                                  </td>
+                                  <td className="px-2 py-1.5 text-gray-800">{c.prenom}</td>
+                                  <td className="px-2 py-1.5 text-gray-800">{c.nom}</td>
+                                  <td className="px-2 py-1.5 text-gray-600 truncate max-w-[200px]">{c.email}</td>
+                                  <td className="px-2 py-1.5 text-gray-600 truncate max-w-[150px]">{c.poste}</td>
+                                  <td className="px-2 py-1.5 text-gray-600 truncate max-w-[150px]">{c.entreprise}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          {/* Approach message for this segment */}
+                          {approachMsg && (
+                            <div className="mx-3 mt-2 mb-3 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                              <p className="text-[10px] font-semibold text-emerald-700 uppercase mb-0.5">Message d&apos;approche — {cat}</p>
+                              <p className="text-xs text-emerald-800 whitespace-pre-line">{approachMsg}</p>
+                            </div>
                           )}
-                        </td>
-                        <td className="px-2 py-1.5">
-                          {c.icp_approach ? (
-                            <p className="text-[10px] text-gray-600 max-w-[250px] line-clamp-2" title={c.icp_approach}>
-                              {c.icp_approach}
-                            </p>
-                          ) : (
-                            <span className="text-gray-300">—</span>
-                          )}
-                        </td>
+                        </div>
+                      );
+                    })}
+                    {/* Unclassified contacts */}
+                    {filtered.some((c) => !c.icp_category) && (
+                      <div className="pb-2">
+                        <div className="sticky top-0 z-10 bg-gray-100 border-b border-gray-200 px-3 py-2">
+                          <span className="text-xs font-semibold text-gray-600">Non classés</span>
+                          <span className="ml-2 text-[10px] text-gray-400">{filtered.filter((c) => !c.icp_category).length} contacts</span>
+                        </div>
+                        <table className="w-full text-xs">
+                          <tbody>
+                            {filtered.filter((c) => !c.icp_category).map((c) => (
+                              <tr key={c.id} className="border-b border-gray-50 hover:bg-gray-50/50">
+                                <td className="px-2 py-1.5 w-8">
+                                  <input type="checkbox" checked={selected.has(c.id)}
+                                    onChange={(e) => {
+                                      const next = new Set(selected);
+                                      e.target.checked ? next.add(c.id) : next.delete(c.id);
+                                      setSelected(next);
+                                    }}
+                                    className="accent-violet-600 cursor-pointer" />
+                                </td>
+                                <td className="px-2 py-1.5 text-gray-800">{c.prenom}</td>
+                                <td className="px-2 py-1.5 text-gray-800">{c.nom}</td>
+                                <td className="px-2 py-1.5 text-gray-600 truncate max-w-[200px]">{c.email}</td>
+                                <td className="px-2 py-1.5 text-gray-600 truncate max-w-[150px]">{c.poste}</td>
+                                <td className="px-2 py-1.5 text-gray-600 truncate max-w-[150px]">{c.entreprise}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  /* ── Flat view (no ICP yet, or filtered to one ICP) ── */
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50 sticky top-0 z-10">
+                      <tr>
+                        <th className="px-2 py-2 text-left w-8">
+                          <input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0}
+                            onChange={toggleAll} className="accent-violet-600 cursor-pointer" />
+                        </th>
+                        <th className="px-2 py-2 text-left text-gray-500 font-medium">Prénom</th>
+                        <th className="px-2 py-2 text-left text-gray-500 font-medium">Nom</th>
+                        <th className="px-2 py-2 text-left text-gray-500 font-medium">Email</th>
+                        <th className="px-2 py-2 text-left text-gray-500 font-medium">Poste</th>
+                        <th className="px-2 py-2 text-left text-gray-500 font-medium">Entreprise</th>
+                        <th className="px-2 py-2 text-left text-gray-500 font-medium">ICP</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {filtered.map((c) => (
+                        <tr key={c.id} className={cn("border-b border-gray-50 hover:bg-gray-50/50",
+                          selected.has(c.id) && "bg-violet-50/30"
+                        )}>
+                          <td className="px-2 py-1.5">
+                            <input type="checkbox" checked={selected.has(c.id)}
+                              onChange={(e) => {
+                                const next = new Set(selected);
+                                e.target.checked ? next.add(c.id) : next.delete(c.id);
+                                setSelected(next);
+                              }}
+                              className="accent-violet-600 cursor-pointer" />
+                          </td>
+                          <td className="px-2 py-1.5 text-gray-800">{c.prenom}</td>
+                          <td className="px-2 py-1.5 text-gray-800">{c.nom}</td>
+                          <td className="px-2 py-1.5 text-gray-600 truncate max-w-[200px]">{c.email}</td>
+                          <td className="px-2 py-1.5 text-gray-600 truncate max-w-[150px]">{c.poste}</td>
+                          <td className="px-2 py-1.5 text-gray-600 truncate max-w-[150px]">{c.entreprise}</td>
+                          <td className="px-2 py-1.5">
+                            {c.icp_category ? (
+                              <button onClick={() => { setMemoryContact(c); setMemoryNewCat(c.icp_category || ""); setMemoryReason(""); setShowMemory(true); }}
+                                className="text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded text-[10px] font-medium hover:bg-violet-100 cursor-pointer"
+                                title={c.icp_reason || ""}>
+                                {c.icp_category}
+                              </button>
+                            ) : (
+                              <span className="text-gray-300">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                {/* Approach message when filtered to one ICP */}
+                {icpFilter && (() => {
+                  const approachMsg = filtered.find((c) => c.icp_approach)?.icp_approach;
+                  return approachMsg ? (
+                    <div className="mx-3 my-3 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                      <p className="text-[10px] font-semibold text-emerald-700 uppercase mb-0.5">Message d&apos;approche — {icpFilter}</p>
+                      <p className="text-xs text-emerald-800 whitespace-pre-line">{approachMsg}</p>
+                    </div>
+                  ) : null;
+                })()}
               </div>
             </div>
           )}
