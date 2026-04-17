@@ -50,11 +50,14 @@ interface IcpCategory {
   criteria: string;
   approach_key?: string;
   estimatedCount?: number;
+  contactNumbers?: number[];
 }
 
 interface ExcludedSegment {
   name: string;
   reason: string;
+  estimatedCount?: number;
+  contactNumbers?: number[];
 }
 
 // ─── Component ──────────────────────────────────────────
@@ -89,6 +92,7 @@ export default function IcpCleanerPage() {
   const [applying, setApplying] = useState(false);
   const [applyProgress, setApplyProgress] = useState("");
   const [excludedSegments, setExcludedSegments] = useState<ExcludedSegment[]>([]);
+  const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set());
   const [editingCatIdx, setEditingCatIdx] = useState<number | null>(null);
   const [editCatReason, setEditCatReason] = useState("");
 
@@ -682,31 +686,86 @@ export default function IcpCleanerPage() {
                         </div>
                       </div>
                     ) : (
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900">{cat.name}</p>
-                          <p className="text-xs text-gray-500">{cat.description}</p>
-                          {cat.approach_key && (
-                            <p className="text-[10px] text-emerald-700 bg-emerald-50 rounded px-1.5 py-0.5 mt-1 inline-block">Approche : {cat.approach_key}</p>
-                          )}
-                          {cat.estimatedCount !== undefined && (
-                            <p className="text-[10px] text-violet-600 font-medium mt-0.5">~{cat.estimatedCount} contacts estimés</p>
-                          )}
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900">{cat.name}</p>
+                            <p className="text-xs text-gray-500">{cat.description}</p>
+                            {cat.approach_key && (
+                              <p className="text-[10px] text-emerald-700 bg-emerald-50 rounded px-1.5 py-0.5 mt-1 inline-block">Approche : {cat.approach_key}</p>
+                            )}
+                          </div>
+                          <button onClick={() => setEditingCatIdx(idx)}
+                            className="p-1 text-gray-400 hover:text-violet-600 cursor-pointer shrink-0">
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
                         </div>
-                        <button onClick={() => setEditingCatIdx(idx)}
-                          className="p-1 text-gray-400 hover:text-violet-600 cursor-pointer shrink-0">
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
+                        {cat.contactNumbers && cat.contactNumbers.length > 0 && (
+                          <div className="mt-1.5">
+                            <button onClick={() => {
+                              const next = new Set(expandedCats);
+                              next.has(cat.id) ? next.delete(cat.id) : next.add(cat.id);
+                              setExpandedCats(next);
+                            }} className="flex items-center gap-1 text-[10px] text-violet-600 font-medium cursor-pointer hover:text-violet-800">
+                              <ChevronDown className={cn("w-3 h-3 transition-transform", expandedCats.has(cat.id) && "rotate-180")} />
+                              {cat.contactNumbers.length} contacts
+                            </button>
+                            {expandedCats.has(cat.id) && (
+                              <div className="mt-1 max-h-32 overflow-y-auto bg-gray-50 rounded p-1.5 space-y-0.5">
+                                {cat.contactNumbers.map((num) => {
+                                  const c = contacts[num - 1];
+                                  return c ? (
+                                    <p key={num} className="text-[10px] text-gray-600 truncate">
+                                      {c.prenom} {c.nom} — <span className="text-gray-400">{c.poste} @ {c.entreprise}</span>
+                                    </p>
+                                  ) : null;
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
                 ))}
 
                 {excludedSegments.length > 0 && (
-                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
-                    <p className="text-[10px] font-semibold text-orange-700 uppercase mb-1">Segments exclus</p>
+                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 space-y-2">
+                    <p className="text-[10px] font-semibold text-orange-700 uppercase">Segments exclus</p>
                     {excludedSegments.map((seg, i) => (
-                      <p key={i} className="text-xs text-orange-600">{seg.name} — <span className="text-orange-500">{seg.reason}</span></p>
+                      <div key={i}>
+                        <p className="text-xs text-orange-600">
+                          {seg.name} — <span className="text-orange-500">{seg.reason}</span>
+                          {seg.estimatedCount !== undefined && (
+                            <span className="ml-1 font-medium">({seg.estimatedCount} contacts)</span>
+                          )}
+                        </p>
+                        {seg.contactNumbers && seg.contactNumbers.length > 0 && (
+                          <div className="mt-1">
+                            <button onClick={() => {
+                              const key = `excl_${i}`;
+                              const next = new Set(expandedCats);
+                              next.has(key) ? next.delete(key) : next.add(key);
+                              setExpandedCats(next);
+                            }} className="flex items-center gap-1 text-[10px] text-orange-600 cursor-pointer hover:text-orange-800">
+                              <ChevronDown className={cn("w-3 h-3 transition-transform", expandedCats.has(`excl_${i}`) && "rotate-180")} />
+                              Voir les contacts
+                            </button>
+                            {expandedCats.has(`excl_${i}`) && (
+                              <div className="mt-1 max-h-32 overflow-y-auto bg-orange-100/50 rounded p-1.5 space-y-0.5">
+                                {seg.contactNumbers.map((num) => {
+                                  const c = contacts[num - 1];
+                                  return c ? (
+                                    <p key={num} className="text-[10px] text-orange-700 truncate">
+                                      {c.prenom} {c.nom} — <span className="text-orange-500">{c.poste} @ {c.entreprise}</span>
+                                    </p>
+                                  ) : null;
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     ))}
                   </div>
                 )}

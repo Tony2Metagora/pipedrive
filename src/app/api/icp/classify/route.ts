@@ -81,18 +81,22 @@ export async function POST(request: Request) {
       ville: c.ville || "",
     }));
 
+    // Format compact: "poste | entreprise (ville)" pour réduire les tokens
+    const contactLines = allContacts.map((c, i) => `${i + 1}. ${c.poste} | ${c.entreprise}${c.ville ? ` (${c.ville})` : ""}`).join("\n");
+
     const raw = await askAzureFast([
       {
         role: "system",
         content: `Tu es un expert en segmentation B2B. Tu analyses une liste COMPLÈTE de contacts et un contexte d'offre pour identifier les profils de clients idéaux (ICP).
 
 INSTRUCTIONS IMPORTANTES :
-- Tu reçois la TOTALITÉ des ${allContacts.length} contacts. Chaque contact DOIT être classé dans exactement une catégorie ICP. La somme des estimatedCount DOIT être égale à ${allContacts.length}.
+- Tu reçois la TOTALITÉ des ${allContacts.length} contacts numérotés. Chaque contact DOIT être classé dans exactement une catégorie (ICP, exclu, ou "Autres / à qualifier"). La somme de TOUS les estimatedCount (catégories + excluded_segments) DOIT être égale à ${allContacts.length}.
 - Si le contexte fourni contient des segments/ICP déjà définis, EXTRAIS-LES fidèlement (noms exacts, descriptions, critères). Ne les réinvente pas.
 - Croise la **typologie de poste** (ex: DG, directeur technique, responsable patrimoine, élu...) et la **typologie d'entreprise** (ex: bailleur social, collectivité, opérateur EnR...) pour créer des ICP fins.
-- Identifie les segments explicitement exclus dans le contexte.
-- Pour chaque ICP, génère une "approach_key" : l'angle d'accroche principal à utiliser pour ce segment, basé sur le contexte fourni.
-- Ajoute une catégorie "Autres / à qualifier" pour les contacts qui ne correspondent clairement à aucun segment défini.
+- Identifie les segments explicitement exclus dans le contexte. Compte aussi les contacts qui y correspondent.
+- Pour chaque ICP, génère une "approach_key" : l'angle d'accroche principal à utiliser pour ce segment.
+- Pour chaque catégorie ET chaque segment exclu, liste les numéros des contacts correspondants dans "contactNumbers".
+- Ajoute une catégorie "Autres / à qualifier" pour les contacts qui ne correspondent clairement à aucun segment.
 - Propose entre 3 et 12 catégories ICP (la catégorie "Autres" incluse).
 ${memoryBlock}
 
@@ -104,22 +108,22 @@ Réponds UNIQUEMENT en JSON valide, sans markdown.`,
 ${offerContext || "Non spécifié"}
 
 Voici la liste COMPLÈTE des ${allContacts.length} contacts à segmenter:
-${JSON.stringify(allContacts, null, 1)}
+${contactLines}
 
-Identifie les catégories ICP pertinentes en croisant type de poste et type d'entreprise. Compte précisément le nombre de contacts qui correspondent à chaque catégorie. La somme des estimatedCount doit faire ${allContacts.length}.
+Classe CHAQUE contact dans une catégorie. La somme des estimatedCount doit faire ${allContacts.length}.
 
 Format JSON:
 {
   "categories": [
-    { "id": "icp_1", "name": "Directeur Patrimoine - Bailleur social", "description": "Responsables patrimoine au sein d'organismes HLM", "criteria": "Poste lié à la gestion de patrimoine + entreprise de type bailleur social", "approach_key": "Mettre en avant les références Promévil auprès de Paris Habitat, la RIVP...", "estimatedCount": 25 },
+    { "id": "icp_1", "name": "Directeur Patrimoine - Bailleur social", "description": "...", "criteria": "...", "approach_key": "...", "estimatedCount": 25, "contactNumbers": [1, 5, 12, 18, ...] },
     ...
   ],
   "excluded_segments": [
-    { "name": "Agences de communication", "reason": "Pas de prospection pour l'instant" }
+    { "name": "Agences de communication", "reason": "Pas de prospection pour l'instant", "estimatedCount": 3, "contactNumbers": [7, 44, 98] }
   ]
 }`,
       },
-    ], 3000);
+    ], 8000);
 
     try {
       const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
