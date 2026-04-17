@@ -13,6 +13,8 @@ import { requireAuth } from "@/lib/api-guard";
 import { askAzureFast } from "@/lib/azure-ai";
 import type { IcpContact } from "../contacts/route";
 
+export const maxDuration = 120;
+
 interface IcpMemoryEntry {
   id: string;
   company: string;
@@ -84,6 +86,19 @@ export async function POST(request: Request) {
     // Format compact: "poste | entreprise (ville)" pour réduire les tokens
     const contactLines = allContacts.map((c, i) => `${i + 1}. ${c.poste} | ${c.entreprise}${c.ville ? ` (${c.ville})` : ""}`).join("\n");
 
+    // >300 contacts: skip contactNumbers in Discover to avoid timeout (Apply will do the real classification)
+    const withNumbers = allContacts.length <= 300;
+    const contactNumbersInstruction = withNumbers
+      ? `- Pour chaque catégorie ET chaque segment exclu, liste les numéros des contacts correspondants dans "contactNumbers".`
+      : `- NE PAS lister les contactNumbers (trop de contacts). Fournir uniquement estimatedCount.`;
+    const contactNumbersExample = withNumbers
+      ? `, "contactNumbers": [1, 5, 12, 18, ...]`
+      : ``;
+    const excludedExample = withNumbers
+      ? `{ "name": "Agences de communication", "reason": "Pas de prospection pour l'instant", "estimatedCount": 3, "contactNumbers": [7, 44, 98] }`
+      : `{ "name": "Agences de communication", "reason": "Pas de prospection pour l'instant", "estimatedCount": 3 }`;
+    const outputTokens = withNumbers ? Math.min(16000, 4000 + allContacts.length * 20) : 4000;
+
     const raw = await askAzureFast([
       {
         role: "system",
@@ -95,7 +110,7 @@ INSTRUCTIONS IMPORTANTES :
 - Croise la **typologie de poste** (ex: DG, directeur technique, responsable patrimoine, élu...) et la **typologie d'entreprise** (ex: bailleur social, collectivité, opérateur EnR...) pour créer des ICP fins.
 - Identifie les segments explicitement exclus dans le contexte. Compte aussi les contacts qui y correspondent.
 - Pour chaque ICP, génère une "approach_key" : l'angle d'accroche principal à utiliser pour ce segment.
-- Pour chaque catégorie ET chaque segment exclu, liste les numéros des contacts correspondants dans "contactNumbers".
+${contactNumbersInstruction}
 - Ajoute une catégorie "Autres / à qualifier" pour les contacts qui ne correspondent clairement à aucun segment.
 - Propose entre 3 et 12 catégories ICP (la catégorie "Autres" incluse).
 ${memoryBlock}
@@ -115,15 +130,15 @@ Classe CHAQUE contact dans une catégorie. La somme des estimatedCount doit fair
 Format JSON:
 {
   "categories": [
-    { "id": "icp_1", "name": "Directeur Patrimoine - Bailleur social", "description": "...", "criteria": "...", "approach_key": "...", "estimatedCount": 25, "contactNumbers": [1, 5, 12, 18, ...] },
+    { "id": "icp_1", "name": "Directeur Patrimoine - Bailleur social", "description": "...", "criteria": "...", "approach_key": "...", "estimatedCount": 25${contactNumbersExample} },
     ...
   ],
   "excluded_segments": [
-    { "name": "Agences de communication", "reason": "Pas de prospection pour l'instant", "estimatedCount": 3, "contactNumbers": [7, 44, 98] }
+    ${excludedExample}
   ]
 }`,
       },
-    ], Math.min(16000, 4000 + allContacts.length * 20));
+    ], outputTokens);
 
     try {
       const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();

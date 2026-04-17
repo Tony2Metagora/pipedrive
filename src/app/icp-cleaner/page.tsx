@@ -89,6 +89,8 @@ export default function IcpCleanerPage() {
   // ICP Finder
   const [showIcpFinder, setShowIcpFinder] = useState(false);
   const [offerContext, setOfferContext] = useState("");
+  const [extraListIds, setExtraListIds] = useState<Set<string>>(new Set());
+  const [extraContacts, setExtraContacts] = useState<IcpContact[]>([]);
   const [discoveredCategories, setDiscoveredCategories] = useState<IcpCategory[]>([]);
   const [discovering, setDiscovering] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -128,6 +130,26 @@ export default function IcpCleanerPage() {
 
   useEffect(() => { fetchLists(); }, [fetchLists]);
   useEffect(() => { fetchContacts(); }, [fetchContacts]);
+
+  // Load extra list contacts when toggled
+  useEffect(() => {
+    if (extraListIds.size === 0) { setExtraContacts([]); return; }
+    Promise.all(
+      Array.from(extraListIds).map((id) =>
+        fetch(`/api/icp/contacts?list_id=${id}`).then((r) => r.json()).then((j) => (j.data || []) as IcpContact[])
+      )
+    ).then((results) => setExtraContacts(results.flat()));
+  }, [extraListIds]);
+
+  // Merged contacts = current list + extra lists (for ICP Finder)
+  const mergedContacts = useMemo(() => [...contacts, ...extraContacts], [contacts, extraContacts]);
+
+  // Same-company lists (for multi-list picker)
+  const sameCompanyLists = useMemo(() => {
+    const currentList = lists.find((l) => l.id === selectedListId);
+    if (!currentList?.company) return [];
+    return lists.filter((l) => l.id !== selectedListId && l.company === currentList.company);
+  }, [lists, selectedListId]);
 
   // ─── Known companies (from ICP lists + Prospect lists) ─
 
@@ -234,7 +256,7 @@ export default function IcpCleanerPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "discover",
-          ids: selected.size > 0 ? Array.from(selected) : contacts.map((c) => c.id),
+          ids: selected.size > 0 ? Array.from(selected) : mergedContacts.map((c) => c.id),
           company: list?.company || "",
           offerContext,
         }),
@@ -269,7 +291,7 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "discover",
-          ids: selected.size > 0 ? Array.from(selected) : contacts.map((c) => c.id),
+          ids: selected.size > 0 ? Array.from(selected) : mergedContacts.map((c) => c.id),
           company: list?.company || "",
           offerContext: refinedContext,
         }),
@@ -294,7 +316,7 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "apply",
-          ids: selected.size > 0 ? Array.from(selected) : contacts.map((c) => c.id),
+          ids: selected.size > 0 ? Array.from(selected) : mergedContacts.map((c) => c.id),
           company: list?.company || "",
           categories: discoveredCategories,
           offerContext,
@@ -964,9 +986,32 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
               <button onClick={() => setShowIcpFinder(false)} className="cursor-pointer"><X className="w-4 h-4 text-gray-400" /></button>
             </div>
 
-            <p className="text-xs text-gray-500 mb-3">
-              {selected.size > 0 ? `${selected.size} contacts sélectionnés` : `${contacts.length} contacts dans la liste`}
+            <p className="text-xs text-gray-500 mb-2">
+              {selected.size > 0
+                ? `${selected.size} contacts sélectionnés`
+                : `${mergedContacts.length} contacts${extraListIds.size > 0 ? ` (${contacts.length} + ${extraContacts.length} d'autres listes)` : ""}`}
             </p>
+
+            {/* Multi-list picker */}
+            {sameCompanyLists.length > 0 && (
+              <div className="mb-3 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                <p className="text-[10px] font-semibold text-gray-500 uppercase mb-1.5">Consolider avec d&apos;autres listes ({selectedList?.company})</p>
+                <div className="space-y-1">
+                  {sameCompanyLists.map((l) => (
+                    <label key={l.id} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:text-violet-700">
+                      <input type="checkbox" checked={extraListIds.has(l.id)}
+                        onChange={(e) => {
+                          const next = new Set(extraListIds);
+                          e.target.checked ? next.add(l.id) : next.delete(l.id);
+                          setExtraListIds(next);
+                        }}
+                        className="accent-violet-600 cursor-pointer" />
+                      {l.name} <span className="text-[10px] text-gray-400">({l.count} contacts)</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <textarea value={offerContext} onChange={(e) => setOfferContext(e.target.value)}
               rows={12} placeholder="Décrivez votre offre, vos clients cibles et leurs besoins. Vous pouvez coller un fichier d'instructions complet décrivant vos segments, votre positionnement et vos messages d'approche."
