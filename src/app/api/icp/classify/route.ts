@@ -86,8 +86,8 @@ export async function POST(request: Request) {
     // Format compact: "poste | entreprise (ville)" pour réduire les tokens
     const contactLines = allContacts.map((c, i) => `${i + 1}. ${c.poste} | ${c.entreprise}${c.ville ? ` (${c.ville})` : ""}`).join("\n");
 
-    // >300 contacts: skip contactNumbers in Discover to avoid timeout (Apply will do the real classification)
-    const withNumbers = allContacts.length <= 300;
+    // >1000 contacts: skip contactNumbers in Discover to avoid timeout (Apply will do the real classification)
+    const withNumbers = allContacts.length <= 1000;
     const contactNumbersInstruction = withNumbers
       ? `- Pour chaque catégorie ET chaque segment exclu, liste les numéros des contacts correspondants dans "contactNumbers".`
       : `- NE PAS lister les contactNumbers (trop de contacts). Fournir uniquement estimatedCount.`;
