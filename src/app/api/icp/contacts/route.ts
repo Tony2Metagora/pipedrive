@@ -24,6 +24,7 @@ export interface IcpContact {
   ville?: string;
   icp_category?: string;
   icp_reason?: string;
+  icp_approach?: string;
   extra_fields?: string;
   [key: string]: unknown;
 }

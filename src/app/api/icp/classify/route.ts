@@ -75,7 +75,7 @@ export async function POST(request: Request) {
 
   // ═══ DISCOVER: propose categories ═══
   if (action === "discover") {
-    const sample = contacts.slice(0, 30).map((c) => ({
+    const allContacts = contacts.map((c) => ({
       poste: c.poste || "",
       entreprise: c.entreprise || "",
       ville: c.ville || "",
@@ -84,7 +84,17 @@ export async function POST(request: Request) {
     const raw = await askAzureFast([
       {
         role: "system",
-        content: `Tu es un expert en segmentation B2B. Tu analyses une liste de contacts et un contexte d'offre pour identifier les profils de clients idéaux (ICP).${memoryBlock}
+        content: `Tu es un expert en segmentation B2B. Tu analyses une liste COMPLÈTE de contacts et un contexte d'offre pour identifier les profils de clients idéaux (ICP).
+
+INSTRUCTIONS IMPORTANTES :
+- Tu reçois la TOTALITÉ des ${allContacts.length} contacts. Chaque contact DOIT être classé dans exactement une catégorie ICP. La somme des estimatedCount DOIT être égale à ${allContacts.length}.
+- Si le contexte fourni contient des segments/ICP déjà définis, EXTRAIS-LES fidèlement (noms exacts, descriptions, critères). Ne les réinvente pas.
+- Croise la **typologie de poste** (ex: DG, directeur technique, responsable patrimoine, élu...) et la **typologie d'entreprise** (ex: bailleur social, collectivité, opérateur EnR...) pour créer des ICP fins.
+- Identifie les segments explicitement exclus dans le contexte.
+- Pour chaque ICP, génère une "approach_key" : l'angle d'accroche principal à utiliser pour ce segment, basé sur le contexte fourni.
+- Ajoute une catégorie "Autres / à qualifier" pour les contacts qui ne correspondent clairement à aucun segment défini.
+- Propose entre 3 et 12 catégories ICP (la catégorie "Autres" incluse).
+${memoryBlock}
 
 Réponds UNIQUEMENT en JSON valide, sans markdown.`,
       },
@@ -93,20 +103,23 @@ Réponds UNIQUEMENT en JSON valide, sans markdown.`,
         content: `Contexte offre de ${company || "l'entreprise"}:
 ${offerContext || "Non spécifié"}
 
-Voici un échantillon de ${sample.length} contacts (sur ${contacts.length} au total):
-${JSON.stringify(sample, null, 1)}
+Voici la liste COMPLÈTE des ${allContacts.length} contacts à segmenter:
+${JSON.stringify(allContacts, null, 1)}
 
-Identifie les catégories ICP pertinentes (3 à 8 catégories). Pour chaque catégorie, estime le nombre de contacts qui y correspondent.
+Identifie les catégories ICP pertinentes en croisant type de poste et type d'entreprise. Compte précisément le nombre de contacts qui correspondent à chaque catégorie. La somme des estimatedCount doit faire ${allContacts.length}.
 
 Format JSON:
 {
   "categories": [
-    { "id": "icp_1", "name": "Bailleur social", "description": "Organismes de logement social", "criteria": "Poste lié à la gestion de patrimoine immobilier social", "estimatedCount": 45 },
+    { "id": "icp_1", "name": "Directeur Patrimoine - Bailleur social", "description": "Responsables patrimoine au sein d'organismes HLM", "criteria": "Poste lié à la gestion de patrimoine + entreprise de type bailleur social", "approach_key": "Mettre en avant les références Promévil auprès de Paris Habitat, la RIVP...", "estimatedCount": 25 },
     ...
+  ],
+  "excluded_segments": [
+    { "name": "Agences de communication", "reason": "Pas de prospection pour l'instant" }
   ]
 }`,
       },
-    ], 2000);
+    ], 3000);
 
     try {
       const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
@@ -147,13 +160,17 @@ Format JSON:
           }));
 
           try {
+            const offerBlock = offerContext ? `\n\n--- CONTEXTE DÉTAILLÉ DE L'OFFRE ---\n${offerContext}` : "";
             const raw = await askAzureFast([
               {
                 role: "system",
                 content: `Tu classes des contacts B2B dans les catégories ICP suivantes:
 ${categoryList}
+${offerBlock}
 ${memoryBlock}
 
+Pour chaque contact, détermine la catégorie ICP la plus pertinente en croisant le poste du contact et le type d'entreprise.
+Si un contact ne correspond à aucun segment pertinent, classe-le comme "Hors cible".
 Réponds en JSON: [{"id":"xxx","icp_category":"nom catégorie","icp_reason":"explication courte"}]
 Pas de markdown, juste le JSON.`,
               },
@@ -186,7 +203,7 @@ Pas de markdown, juste le JSON.`,
           await Promise.all(batches.slice(i, i + PARALLEL).map(processBatch));
         }
 
-        // Save results
+        // Save classification results
         await withLock("icp-contacts", async () => {
           const all = await readBlob<IcpContact>("icp-contacts");
           const resultMap = new Map(results.map((r) => [r.id, r]));
@@ -199,6 +216,55 @@ Pas de markdown, juste le JSON.`,
           }
           await writeBlob("icp-contacts", all);
         });
+
+        // Generate approach messages per ICP category
+        const uniqueCategories = [...new Set(results.map((r) => r.icp_category).filter(Boolean))];
+        if (uniqueCategories.length > 0 && offerContext) {
+          send("progress", { current: done, total: batches.length, message: "Génération des messages d'approche..." });
+
+          const approachMap = new Map<string, string>();
+          const catDetails = categories || [];
+
+          for (const catName of uniqueCategories) {
+            if (catName === "Hors cible") continue;
+            const catInfo = catDetails.find((c) => c.name === catName);
+            try {
+              const approachRaw = await askAzureFast([
+                {
+                  role: "system",
+                  content: `Tu es un expert en prospection commerciale B2B pour ${company || "l'entreprise"}.
+À partir du contexte ci-dessous, rédige un message d'approche court et percutant (3-5 phrases max) pour le segment "${catName}".
+Le message doit être personnalisable avec {{prenom}} et {{entreprise}}.
+Commence directement par le message, sans introduction ni explication.
+Le ton doit être professionnel, direct et orienté valeur.`,
+                },
+                {
+                  role: "user",
+                  content: `Contexte de l'offre:\n${offerContext}\n\nSegment ciblé: ${catName}${catInfo ? `\nDescription: ${catInfo.description}\nCritères: ${catInfo.criteria}` : ""}`,
+                },
+              ], 500);
+              approachMap.set(catName, approachRaw.trim());
+            } catch (err) {
+              console.error(`[ICP] Approach generation failed for "${catName}":`, err);
+            }
+          }
+
+          // Save approach messages to contacts
+          if (approachMap.size > 0) {
+            await withLock("icp-contacts", async () => {
+              const all = await readBlob<IcpContact>("icp-contacts");
+              const idSet = new Set(results.map((r) => r.id));
+              for (const c of all) {
+                if (idSet.has(c.id) && c.icp_category && approachMap.has(c.icp_category)) {
+                  c.icp_approach = approachMap.get(c.icp_category);
+                }
+              }
+              await writeBlob("icp-contacts", all);
+            });
+          }
+
+          send("approaches", Object.fromEntries(approachMap));
+        }
 
         send("done", { classified: results.length, errors, total: contacts.length });
         controller.close();

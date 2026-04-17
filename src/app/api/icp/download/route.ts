@@ -26,6 +26,7 @@ const COLUMNS = [
   { key: "ville", label: "Ville" },
   { key: "icp_category", label: "ICP" },
   { key: "icp_reason", label: "Raison ICP" },
+  { key: "icp_approach", label: "Message d'approche" },
 ];
 
 export async function GET(request: Request) {
