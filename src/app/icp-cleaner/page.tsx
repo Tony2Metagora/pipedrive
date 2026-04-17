@@ -504,6 +504,52 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
     doc.save(`ICP-${list?.company || "export"}-${new Date().toISOString().slice(0, 10)}.pdf`);
   };
 
+  const exportApproachPdf = () => {
+    const list = lists.find((l) => l.id === selectedListId);
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const pageW = doc.internal.pageSize.getWidth();
+    let y = 15;
+
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
+    doc.text(`Messages d'approche — ${list?.company || ""}`, 14, y);
+    y += 6;
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(120);
+    doc.text(`${list?.name || ""} • ${new Date().toLocaleDateString("fr-FR")}`, 14, y);
+    doc.setTextColor(0);
+    y += 10;
+
+    const catsToShow = icpFilter ? [icpFilter] : icpCategories;
+    catsToShow.forEach((cat) => {
+      const approachMsg = contacts.find((c) => c.icp_category === cat && c.icp_approach)?.icp_approach;
+      if (!approachMsg) return;
+      const count = contacts.filter((c) => c.icp_category === cat).length;
+
+      if (y > 240) { doc.addPage(); y = 15; }
+
+      // ICP header
+      doc.setFillColor(5, 122, 85);
+      doc.roundedRect(14, y, pageW - 28, 7, 1, 1, "F");
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(255);
+      doc.text(`${cat}  (${count} contacts)`, 17, y + 5);
+      doc.setTextColor(0);
+      y += 12;
+
+      // Message body
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      const msgLines = doc.splitTextToSize(approachMsg, pageW - 32);
+      doc.text(msgLines, 16, y);
+      y += msgLines.length * 4.5 + 8;
+    });
+
+    doc.save(`Messages-approche-${list?.company || "export"}-${new Date().toISOString().slice(0, 10)}.pdf`);
+  };
+
   // ─── Select all / toggle ──────────────────────────────
 
   const toggleAll = () => {
@@ -820,8 +866,15 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
             </div>
 
             {/* ── Approach messages — separate block per ICP ── */}
-            {icpCategories.length > 0 && (
+            {icpCategories.length > 0 && contacts.some((c) => c.icp_approach) && (
               <div className="mt-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] font-semibold text-gray-500 uppercase">Messages d&apos;approche par ICP</p>
+                  <button onClick={exportApproachPdf}
+                    className="flex items-center gap-1 text-[10px] text-emerald-700 hover:text-emerald-900 cursor-pointer">
+                    <Download className="w-3 h-3" /> Télécharger PDF
+                  </button>
+                </div>
                 {(icpFilter ? [icpFilter] : icpCategories).map((cat) => {
                   const approachMsg = contacts.find((c) => c.icp_category === cat && c.icp_approach)?.icp_approach;
                   if (!approachMsg) return null;

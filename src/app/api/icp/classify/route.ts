@@ -123,7 +123,7 @@ Format JSON:
   ]
 }`,
       },
-    ], 8000);
+    ], Math.min(16000, 4000 + allContacts.length * 20));
 
     try {
       const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
