@@ -594,7 +594,24 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
           {/* ICP filter */}
           {icpCategories.length > 0 && (
             <div className="bg-white rounded-xl border border-gray-200 p-3 mt-3">
-              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Filtre ICP</h3>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase">Filtre ICP</h3>
+                <button onClick={async () => {
+                  if (!confirm("Supprimer toutes les classifications ICP de cette liste ?")) return;
+                  const ids = contacts.map((c) => c.id);
+                  await fetch("/api/icp/contacts", {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ids, updates: { icp_category: "", icp_reason: "", icp_approach: "" } }),
+                  });
+                  setIcpFilter(null);
+                  fetchContacts();
+                  setActionMsg("Classifications ICP supprimées");
+                  setTimeout(() => setActionMsg(null), 3000);
+                }} className="p-0.5 text-gray-300 hover:text-red-500 cursor-pointer" title="Supprimer toutes les classifications">
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
               <button onClick={() => setIcpFilter(null)}
                 className={cn("w-full text-left px-2 py-1 rounded text-xs cursor-pointer mb-1",
                   !icpFilter ? "bg-violet-50 text-violet-700 font-medium" : "text-gray-500 hover:bg-gray-50"
@@ -633,6 +650,7 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
           ) : loading ? (
             <div className="flex justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-violet-400" /></div>
           ) : (
+            <>
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               {/* Toolbar */}
               <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100 bg-gray-50/50">
@@ -655,7 +673,6 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
                     {icpCategories.map((cat) => {
                       const catContacts = filtered.filter((c) => c.icp_category === cat);
                       if (catContacts.length === 0) return null;
-                      const approachMsg = catContacts.find((c) => c.icp_approach)?.icp_approach;
                       return (
                         <div key={cat} className="pb-2">
                           {/* ICP header */}
@@ -710,13 +727,6 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
                               ))}
                             </tbody>
                           </table>
-                          {/* Approach message for this segment */}
-                          {approachMsg && (
-                            <div className="mx-3 mt-2 mb-3 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
-                              <p className="text-[10px] font-semibold text-emerald-700 uppercase mb-0.5">Message d&apos;approche — {cat}</p>
-                              <p className="text-xs text-emerald-800 whitespace-pre-line">{approachMsg}</p>
-                            </div>
-                          )}
                         </div>
                       );
                     })}
@@ -804,18 +814,27 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
                     </tbody>
                   </table>
                 )}
-                {/* Approach message when filtered to one ICP */}
-                {icpFilter && (() => {
-                  const approachMsg = filtered.find((c) => c.icp_approach)?.icp_approach;
-                  return approachMsg ? (
-                    <div className="mx-3 my-3 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
-                      <p className="text-[10px] font-semibold text-emerald-700 uppercase mb-0.5">Message d&apos;approche — {icpFilter}</p>
-                      <p className="text-xs text-emerald-800 whitespace-pre-line">{approachMsg}</p>
-                    </div>
-                  ) : null;
-                })()}
+
+
               </div>
             </div>
+
+            {/* ── Approach messages — separate block per ICP ── */}
+            {icpCategories.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {(icpFilter ? [icpFilter] : icpCategories).map((cat) => {
+                  const approachMsg = contacts.find((c) => c.icp_category === cat && c.icp_approach)?.icp_approach;
+                  if (!approachMsg) return null;
+                  return (
+                    <div key={cat} className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+                      <p className="text-[10px] font-semibold text-emerald-700 uppercase mb-1">Message d&apos;approche — {cat}</p>
+                      <p className="text-xs text-emerald-800 whitespace-pre-line leading-relaxed">{approachMsg}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            </>
           )}
         </div>
       </div>
