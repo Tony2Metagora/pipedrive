@@ -287,6 +287,44 @@ export default function IcpCleanerPage() {
     setTimeout(() => setActionMsg(null), 3000);
   };
 
+  // ─── Dedup contactNumbers across categories ───────────
+  // The AI may return the same contact in multiple categories.
+  // This ensures each contact appears in exactly one category (first-come).
+
+  const dedupCategoryContacts = (
+    categories: IcpCategory[],
+    excluded: ExcludedSegment[],
+    totalContacts: number,
+  ): { categories: IcpCategory[]; excluded: ExcludedSegment[] } => {
+    const seen = new Set<number>();
+    const dedupedCats = categories.map((cat) => {
+      const uniqueNums: number[] = [];
+      for (const n of cat.contactNumbers || []) {
+        if (n >= 1 && n <= totalContacts && !seen.has(n)) {
+          seen.add(n);
+          uniqueNums.push(n);
+        }
+      }
+      return { ...cat, contactNumbers: uniqueNums, estimatedCount: uniqueNums.length };
+    });
+    const dedupedExcl = excluded.map((seg) => {
+      const uniqueNums: number[] = [];
+      for (const n of seg.contactNumbers || []) {
+        if (n >= 1 && n <= totalContacts && !seen.has(n)) {
+          seen.add(n);
+          uniqueNums.push(n);
+        }
+      }
+      return { ...seg, contactNumbers: uniqueNums, estimatedCount: uniqueNums.length };
+    });
+    const total = dedupedCats.reduce((s, c) => s + c.contactNumbers.length, 0)
+      + dedupedExcl.reduce((s, e) => s + (e.contactNumbers?.length || 0), 0);
+    if (total !== totalContacts) {
+      console.warn(`[ICP] Dedup: ${total}/${totalContacts} contacts assigned. ${totalContacts - total} unassigned.`);
+    }
+    return { categories: dedupedCats, excluded: dedupedExcl };
+  };
+
   // ─── ICP Finder ───────────────────────────────────────
 
   const discoverCategories = async () => {
@@ -306,8 +344,12 @@ export default function IcpCleanerPage() {
         }),
       });
       const json = await res.json();
-      setDiscoveredCategories(json.data?.categories || []);
-      setExcludedSegments(json.data?.excluded_segments || []);
+      const contactCount = selected.size > 0 ? selected.size : mergedContacts.length;
+      const { categories: dedupedCats, excluded: dedupedExcl } = dedupCategoryContacts(
+        json.data?.categories || [], json.data?.excluded_segments || [], contactCount,
+      );
+      setDiscoveredCategories(dedupedCats);
+      setExcludedSegments(dedupedExcl);
     } catch { setError("Erreur classification"); }
     setDiscovering(false);
   };
@@ -341,8 +383,12 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
         }),
       });
       const json = await res.json();
-      setDiscoveredCategories(json.data?.categories || []);
-      setExcludedSegments(json.data?.excluded_segments || []);
+      const contactCount = selected.size > 0 ? selected.size : mergedContacts.length;
+      const { categories: dedupedCats, excluded: dedupedExcl } = dedupCategoryContacts(
+        json.data?.categories || [], json.data?.excluded_segments || [], contactCount,
+      );
+      setDiscoveredCategories(dedupedCats);
+      setExcludedSegments(dedupedExcl);
       setShowRefine(false);
       setRefineFeedback("");
     } catch { setError("Erreur re-classification"); }
