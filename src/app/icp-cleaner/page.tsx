@@ -296,91 +296,51 @@ export default function IcpCleanerPage() {
   const isAutresCat = (name: string) =>
     name === "Autres / à qualifier" || name === "Autres / a qualifier";
 
-  // Step 1: Discover taxonomy (no contact assignment)
-  const discoverCategories = async () => {
-    if (!offerContext.trim()) return;
-    setDiscovering(true);
+  // ─── Full analysis: discover → classify → auto-rebalance ─
+
+  const runFullAnalysis = async (customOfferContext?: string) => {
+    const ctx = customOfferContext || offerContext;
+    if (!ctx.trim()) return;
+    const list = lists.find((l) => l.id === selectedListId);
+    const contactIds = selected.size > 0 ? Array.from(selected) : mergedContacts.map((c) => c.id);
+
+    // Reset state
     setDiscoveredCategories([]);
+    setExcludedSegments([]);
     setClassified(false);
     setCategoryContactMap({});
-    const list = lists.find((l) => l.id === selectedListId);
-    try {
-      const res = await fetch("/api/icp/classify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "discover",
-          ids: selected.size > 0 ? Array.from(selected) : mergedContacts.map((c) => c.id),
-          company: list?.company || "",
-          offerContext,
-        }),
-      });
-      const json = await res.json();
-      setDiscoveredCategories(json.data?.categories || []);
-      setExcludedSegments(json.data?.excluded_segments || []);
-    } catch { setError("Erreur classification"); }
-    setDiscovering(false);
-  };
-
-  const refineCategories = async () => {
-    if (!refineFeedback.trim()) return;
     setDiscovering(true);
-    setClassified(false);
-    setCategoryContactMap({});
-    const list = lists.find((l) => l.id === selectedListId);
-    const currentSummary = discoveredCategories.map((c) => `- ${c.name}: ${c.description}`).join("\n");
-    const excludedSummary = excludedSegments.map((s) => `- ${s.name} (exclu): ${s.reason}`).join("\n");
-    const refinedContext = `${offerContext}
-
---- CATÉGORIES PRÉCÉDENTES ---
-${currentSummary}
-${excludedSummary ? `\nSegments exclus:\n${excludedSummary}` : ""}
-
---- FEEDBACK UTILISATEUR ---
-${refineFeedback}
-
-IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
+    setClassifyProgress("");
 
     try {
-      const res = await fetch("/api/icp/classify", {
+      // ── Step 1: Discover taxonomy ──
+      setClassifyProgress("Étape 1/3 — Analyse des profils...");
+      const discoverRes = await fetch("/api/icp/classify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "discover",
-          ids: selected.size > 0 ? Array.from(selected) : mergedContacts.map((c) => c.id),
-          company: list?.company || "",
-          offerContext: refinedContext,
-        }),
+        body: JSON.stringify({ action: "discover", ids: contactIds, company: list?.company || "", offerContext: ctx }),
       });
-      const json = await res.json();
-      setDiscoveredCategories(json.data?.categories || []);
-      setExcludedSegments(json.data?.excluded_segments || []);
-      setShowRefine(false);
-      setRefineFeedback("");
-    } catch { setError("Erreur re-classification"); }
-    setDiscovering(false);
-  };
+      const discoverJson = await discoverRes.json();
+      const categories: IcpCategory[] = discoverJson.data?.categories || [];
+      const excluded: ExcludedSegment[] = discoverJson.data?.excluded_segments || [];
+      setDiscoveredCategories(categories);
+      setExcludedSegments(excluded);
 
-  // Step 2: Batch classify contacts into validated categories
-  const startClassify = async () => {
-    if (discoveredCategories.length === 0) return;
-    setClassifying(true);
-    setClassifyProgress("Démarrage...");
-    const list = lists.find((l) => l.id === selectedListId);
-    try {
-      const res = await fetch("/api/icp/classify", {
+      if (categories.length === 0) { setError("Aucune catégorie identifiée"); setDiscovering(false); return; }
+
+      // ── Step 2: Batch classify ──
+      setClassifyProgress("Étape 2/3 — Classification des contacts...");
+      setClassifying(true);
+      const classifyRes = await fetch("/api/icp/classify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "batch-classify",
-          ids: selected.size > 0 ? Array.from(selected) : mergedContacts.map((c) => c.id),
-          company: list?.company || "",
-          categories: discoveredCategories,
-          offerContext,
-        }),
+        body: JSON.stringify({ action: "batch-classify", ids: contactIds, company: list?.company || "", categories, offerContext: ctx }),
       });
-      if (!res.body) throw new Error("No response body");
-      const reader = res.body.getReader();
+      if (!classifyRes.body) throw new Error("No response body");
+
+      // Consume SSE
+      let map: Record<string, string[]> = {};
+      const reader = classifyRes.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
       let eventType = "";
@@ -395,26 +355,111 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
           if (line.startsWith("data: ")) {
             try {
               const data = JSON.parse(line.slice(6));
-              if (eventType === "progress") setClassifyProgress(data.message || "");
+              if (eventType === "progress") setClassifyProgress(`Étape 2/3 — ${data.message || ""}`);
               if (eventType === "done") {
-                const map: Record<string, string[]> = {};
                 for (const r of (data.results || []) as { id: string; icp_category: string }[]) {
                   if (!map[r.icp_category]) map[r.icp_category] = [];
                   map[r.icp_category].push(r.id);
                 }
-                setCategoryContactMap(map);
-                setClassified(true);
-                setClassifyProgress("");
-                setActionMsg(`${data.classified}/${data.total} contacts classifiés`);
-                setTimeout(() => setActionMsg(null), 5000);
               }
               eventType = "";
-            } catch { /* partial data, will be completed in next read */ }
+            } catch { /* partial data */ }
           }
         }
       }
+      setClassifying(false);
+
+      // ── Step 3: Auto-rebalance ──
+      setClassifyProgress("Étape 3/3 — Équilibrage...");
+      const MIN_SIZE = 25;
+      const MAX_SIZE = 100;
+      let updatedCats = [...categories];
+      let rebalanced = false;
+
+      // Merge small categories into nearest large one
+      const smallCats = Object.entries(map).filter(([, ids]) => ids.length > 0 && ids.length < MIN_SIZE);
+      if (smallCats.length > 1) {
+        // Merge all small categories together into one "Divers" category
+        const mergedIds: string[] = [];
+        const mergedNames: string[] = [];
+        for (const [name, ids] of smallCats) {
+          mergedIds.push(...ids);
+          mergedNames.push(name);
+          delete map[name];
+          updatedCats = updatedCats.filter((c) => c.name !== name);
+        }
+        const mergedName = mergedNames.length <= 3 ? mergedNames.join(" + ") : `${mergedNames[0]} + ${mergedNames.length - 1} autres`;
+        map[mergedName] = mergedIds;
+        updatedCats.push({ id: `icp_merged_${Date.now()}`, name: mergedName, description: "Catégories regroupées (volume insuffisant individuellement)", criteria: "" });
+        rebalanced = true;
+      }
+
+      // Split large categories via re-classification with sub-categories
+      for (const [catName, ids] of Object.entries(map)) {
+        if (ids.length <= MAX_SIZE) continue;
+        // Ask AI for sub-categories of this large group
+        try {
+          const subRes = await fetch("/api/icp/classify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "qualify",
+              ids,
+              company: list?.company || "",
+              offerContext: ctx,
+              existingCategories: updatedCats.filter((c) => c.name !== catName).map((c) => ({ name: c.name, description: c.description })),
+            }),
+          });
+          const subJson = await subRes.json();
+          const groups = subJson.data?.groups || [];
+          if (groups.length >= 2) {
+            // Split into sub-categories
+            delete map[catName];
+            updatedCats = updatedCats.filter((c) => c.name !== catName);
+            for (const g of groups) {
+              const subIds = g.contactNumbers.map((n: number) => ids[n - 1]).filter(Boolean);
+              const newIcp = g.suggestions?.find((s: { type: string }) => s.type === "new_icp");
+              const subName = newIcp?.name || `${catName} — ${g.label}`;
+              const subDesc = newIcp?.description || g.description || "";
+              map[subName] = [...(map[subName] || []), ...subIds];
+              if (!updatedCats.find((c) => c.name === subName)) {
+                updatedCats.push({ id: `icp_sub_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, name: subName, description: subDesc, criteria: "" });
+              }
+            }
+            rebalanced = true;
+          }
+        } catch { /* keep original category if split fails */ }
+      }
+
+      setCategoryContactMap(map);
+      setDiscoveredCategories(updatedCats);
+      setClassified(true);
+      setClassifyProgress("");
+      const total = Object.values(map).reduce((s, ids) => s + ids.length, 0);
+      setActionMsg(`${total} contacts répartis dans ${Object.keys(map).length} ICP${rebalanced ? " (équilibrage auto)" : ""}`);
+      setTimeout(() => setActionMsg(null), 6000);
     } catch (e) { setError(String(e)); }
+    setDiscovering(false);
     setClassifying(false);
+  };
+
+  const refineAndRerun = async () => {
+    if (!refineFeedback.trim()) return;
+    const currentSummary = discoveredCategories.map((c) => `- ${c.name}: ${c.description}`).join("\n");
+    const excludedSummary = excludedSegments.map((s) => `- ${s.name} (exclu): ${s.reason}`).join("\n");
+    const refinedContext = `${offerContext}
+
+--- CATÉGORIES PRÉCÉDENTES ---
+${currentSummary}
+${excludedSummary ? `\nSegments exclus:\n${excludedSummary}` : ""}
+
+--- FEEDBACK UTILISATEUR ---
+${refineFeedback}
+
+IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
+    setShowRefine(false);
+    setRefineFeedback("");
+    await runFullAnalysis(refinedContext);
   };
 
   // Computed: contact count per category (after classification)
@@ -1248,7 +1293,7 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
         </div>
       )}
 
-      {/* ═══ ICP Finder Modal ═══ */}
+      {/* ═══ ICP Finder — Inline flow ═══ */}
       {showIcpFinder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl mx-4 p-5 max-h-[85vh] overflow-y-auto">
@@ -1256,172 +1301,94 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
               <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-violet-600" /> ICP Finder — {selectedList?.company || ""}
               </h3>
-              <button onClick={() => setShowIcpFinder(false)} className="cursor-pointer"><X className="w-4 h-4 text-gray-400" /></button>
+              <button onClick={() => { setShowIcpFinder(false); setClassified(false); setDiscoveredCategories([]); }}
+                className="cursor-pointer"><X className="w-4 h-4 text-gray-400" /></button>
             </div>
 
-            <p className="text-xs text-gray-500 mb-2">
-              {selected.size > 0
-                ? `${selected.size} contacts sélectionnés`
-                : extraListIds.size > 0
-                  ? `${mergedContacts.length} contacts uniques (${contacts.length + extraContacts.length} total, ${contacts.length + extraContacts.length - mergedContacts.length} doublons retirés)`
-                  : `${contacts.length} contacts dans la liste`}
-            </p>
+            {/* ── Setup: context + lists (visible when not yet analyzed) ── */}
+            {!classified && !discovering && !classifying && (
+              <>
+                <p className="text-xs text-gray-500 mb-2">
+                  {extraListIds.size > 0
+                    ? `${mergedContacts.length} contacts uniques (doublons retirés)`
+                    : `${contacts.length} contacts`}
+                </p>
 
-            {/* Multi-list picker */}
-            {sameCompanyLists.length > 0 && (
-              <div className="mb-3 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
-                <p className="text-[10px] font-semibold text-gray-500 uppercase mb-1.5">Consolider avec d&apos;autres listes ({selectedList?.company})</p>
-                <div className="space-y-1">
-                  {sameCompanyLists.map((l) => (
-                    <label key={l.id} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:text-violet-700">
-                      <input type="checkbox" checked={extraListIds.has(l.id)}
-                        onChange={(e) => {
-                          const next = new Set(extraListIds);
-                          e.target.checked ? next.add(l.id) : next.delete(l.id);
-                          setExtraListIds(next);
-                        }}
-                        className="accent-violet-600 cursor-pointer" />
-                      {l.name} <span className="text-[10px] text-gray-400">({l.count} contacts)</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <textarea value={offerContext} onChange={(e) => setOfferContext(e.target.value)}
-              rows={12} placeholder="Décrivez votre offre, vos clients cibles et leurs besoins. Vous pouvez coller un fichier d'instructions complet décrivant vos segments, votre positionnement et vos messages d'approche."
-              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm resize-y mb-1" />
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-[10px] text-gray-400">{offerContext.length > 0 ? `${offerContext.length.toLocaleString()} caractères` : ""}</span>
-              <label className="flex items-center gap-1 text-[10px] text-violet-600 hover:text-violet-800 cursor-pointer">
-                <Upload className="w-3 h-3" /> Charger un fichier .txt
-                <input type="file" accept=".txt,.md" className="hidden" onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) {
-                    const reader = new FileReader();
-                    reader.onload = () => setOfferContext(reader.result as string);
-                    reader.readAsText(f, "utf-8");
-                  }
-                  e.target.value = "";
-                }} />
-              </label>
-            </div>
-
-            <button onClick={discoverCategories} disabled={discovering || !offerContext.trim()}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 cursor-pointer mb-4">
-              {discovering ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-              {discovering ? "Analyse en cours..." : "Analyser et proposer les ICP"}
-            </button>
-
-            {/* ═══ Step 1 result: Category taxonomy ═══ */}
-            {discoveredCategories.length > 0 && !classified && (
-              <div className="space-y-3">
-                <h4 className="text-xs font-semibold text-gray-700 uppercase">Étape 1 — Catégories ICP proposées ({discoveredCategories.length})</h4>
-                {discoveredCategories.map((cat, idx) => (
-                  <div key={cat.id} className="border border-gray-200 rounded-lg p-3">
-                    {editingCatIdx === idx ? (
-                      <div className="space-y-2">
-                        <input value={cat.name} onChange={(e) => {
-                          const next = [...discoveredCategories];
-                          next[idx] = { ...next[idx], name: e.target.value };
-                          setDiscoveredCategories(next);
-                        }} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-medium" />
-                        <textarea value={cat.description} onChange={(e) => {
-                          const next = [...discoveredCategories];
-                          next[idx] = { ...next[idx], description: e.target.value };
-                          setDiscoveredCategories(next);
-                        }} rows={2} className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
-                        <div className="flex gap-2">
-                          <button onClick={() => { setEditingCatIdx(null); }}
-                            className="flex items-center gap-1 px-2 py-1 text-xs text-green-700 bg-green-50 rounded cursor-pointer">
-                            <Save className="w-3 h-3" /> OK
-                          </button>
-                          <button onClick={() => { setEditingCatIdx(null); }}
-                            className="px-2 py-1 text-xs text-gray-500 cursor-pointer">Annuler</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900">{cat.name}</p>
-                          <p className="text-xs text-gray-500">{cat.description}</p>
-                          {cat.approach_key && (
-                            <p className="text-[10px] text-emerald-700 bg-emerald-50 rounded px-1.5 py-0.5 mt-1 inline-block">Approche : {cat.approach_key}</p>
-                          )}
-                        </div>
-                        <button onClick={() => setEditingCatIdx(idx)}
-                          className="p-1 text-gray-400 hover:text-violet-600 cursor-pointer shrink-0">
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-
-                {excludedSegments.length > 0 && (
-                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 space-y-1">
-                    <p className="text-[10px] font-semibold text-orange-700 uppercase">Segments exclus</p>
-                    {excludedSegments.map((seg, i) => (
-                      <p key={i} className="text-xs text-orange-600">{seg.name} — <span className="text-orange-500">{seg.reason}</span></p>
-                    ))}
-                  </div>
-                )}
-
-                {/* Modifier le cadrage */}
-                {showRefine ? (
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
-                    <p className="text-[10px] font-semibold text-amber-700 uppercase">Modifier le cadrage</p>
-                    <textarea value={refineFeedback} onChange={(e) => setRefineFeedback(e.target.value)}
-                      rows={3} placeholder="Ex: Séparer les bailleurs sociaux par type de poste, le segment X n'est pas pertinent..."
-                      className="w-full border border-amber-300 rounded-lg px-3 py-2 text-xs resize-y" />
-                    <div className="flex gap-2">
-                      <button onClick={refineCategories} disabled={discovering || !refineFeedback.trim()}
-                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 cursor-pointer">
-                        {discovering ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-                        {discovering ? "Re-analyse..." : "Re-analyser"}
-                      </button>
-                      <button onClick={() => { setShowRefine(false); setRefineFeedback(""); }}
-                        className="px-3 py-2 text-xs text-gray-500 border border-gray-200 rounded-lg cursor-pointer">Annuler</button>
+                {sameCompanyLists.length > 0 && (
+                  <div className="mb-3 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                    <p className="text-[10px] font-semibold text-gray-500 uppercase mb-1.5">Consolider avec d&apos;autres listes</p>
+                    <div className="space-y-1">
+                      {sameCompanyLists.map((l) => (
+                        <label key={l.id} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:text-violet-700">
+                          <input type="checkbox" checked={extraListIds.has(l.id)}
+                            onChange={(e) => {
+                              const next = new Set(extraListIds);
+                              e.target.checked ? next.add(l.id) : next.delete(l.id);
+                              setExtraListIds(next);
+                            }}
+                            className="accent-violet-600 cursor-pointer" />
+                          {l.name} <span className="text-[10px] text-gray-400">({l.count})</span>
+                        </label>
+                      ))}
                     </div>
                   </div>
-                ) : (
-                  <button onClick={() => setShowRefine(true)}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-amber-700 border border-amber-300 rounded-lg hover:bg-amber-50 cursor-pointer">
-                    <Pencil className="w-3 h-3" /> Modifier le cadrage
-                  </button>
                 )}
 
-                {/* Step 2 trigger: Classify */}
-                <button onClick={startClassify} disabled={classifying}
+                <textarea value={offerContext} onChange={(e) => setOfferContext(e.target.value)}
+                  rows={10} placeholder="Décrivez votre offre, vos clients cibles et leurs besoins..."
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm resize-y mb-1" />
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-[10px] text-gray-400">{offerContext.length > 0 ? `${offerContext.length.toLocaleString()} car.` : "Contexte offre obligatoire"}</span>
+                  <label className="flex items-center gap-1 text-[10px] text-violet-600 hover:text-violet-800 cursor-pointer">
+                    <Upload className="w-3 h-3" /> Charger .txt
+                    <input type="file" accept=".txt,.md" className="hidden" onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) {
+                        const reader = new FileReader();
+                        reader.onload = () => setOfferContext(reader.result as string);
+                        reader.readAsText(f, "utf-8");
+                      }
+                      e.target.value = "";
+                    }} />
+                  </label>
+                </div>
+
+                <button onClick={() => runFullAnalysis()} disabled={!offerContext.trim()}
                   className="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 cursor-pointer">
-                  {classifying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                  {classifying ? classifyProgress || "Classification..." : `Classer les ${mergedContacts.length} contacts`}
+                  <Sparkles className="w-4 h-4" /> Lancer l&apos;analyse ({mergedContacts.length} contacts)
                 </button>
+              </>
+            )}
+
+            {/* ── Progress ── */}
+            {(discovering || classifying) && (
+              <div className="flex flex-col items-center justify-center py-16 gap-4">
+                <Loader2 className="w-8 h-8 animate-spin text-violet-500" />
+                <p className="text-sm font-medium text-gray-700">{classifyProgress || "Analyse en cours..."}</p>
+                <p className="text-xs text-gray-400">Découverte des ICP → Classification → Équilibrage automatique</p>
               </div>
             )}
 
-            {/* ═══ Step 2+3 result: Classification results + Rebalance ═══ */}
+            {/* ── Results ── */}
             {classified && (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-semibold text-gray-700 uppercase">Étape 2 — Répartition ({totalClassified} contacts)</h4>
-                  {mergeSelection.size >= 2 && (
-                    <button onClick={applyMerge}
-                      className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium text-blue-700 bg-blue-50 border border-blue-300 rounded cursor-pointer hover:bg-blue-100">
-                      Fusionner ({mergeSelection.size})
-                    </button>
-                  )}
+                  <h4 className="text-xs font-semibold text-gray-700 uppercase">
+                    Répartition — {totalClassified} contacts dans {Object.keys(categoryContactMap).length} ICP
+                  </h4>
                 </div>
 
                 {discoveredCategories.map((cat) => {
                   const count = getCatCount(cat.name);
-                  const isTooLarge = count > 150;
-                  const isTooSmall = count > 0 && count < 20;
+                  if (count === 0) return null;
+                  const isTooLarge = count > 100;
+                  const isTooSmall = count < 25;
                   return (
-                    <div key={cat.id} className={cn("border rounded-lg p-3", isTooLarge ? "border-red-200 bg-red-50/30" : isTooSmall ? "border-amber-200 bg-amber-50/30" : "border-gray-200")}>
+                    <div key={cat.id} className={cn("border rounded-lg p-3",
+                      isTooLarge ? "border-red-200 bg-red-50/30" : isTooSmall ? "border-amber-200 bg-amber-50/30" : "border-gray-200"
+                    )}>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2 flex-1 min-w-0">
-                          {/* Merge checkbox for small categories */}
                           {isTooSmall && (
                             <input type="checkbox" checked={mergeSelection.has(cat.name)}
                               onChange={(e) => {
@@ -1429,7 +1396,7 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
                                 e.target.checked ? next.add(cat.name) : next.delete(cat.name);
                                 setMergeSelection(next);
                               }}
-                              className="accent-blue-600 cursor-pointer" title="Sélectionner pour fusionner" />
+                              className="accent-blue-600 cursor-pointer" title="Fusionner" />
                           )}
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium text-gray-900 truncate">{cat.name}</p>
@@ -1443,26 +1410,19 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
                           {isTooLarge && (
                             <button onClick={() => startSplit(cat.name)} disabled={qualifyLoading && splitTarget === cat.name}
                               className="text-[10px] font-medium text-red-600 hover:text-red-800 cursor-pointer">
-                              {qualifyLoading && splitTarget === cat.name ? <Loader2 className="w-3 h-3 animate-spin" /> : "Sous-découper"}
+                              {qualifyLoading && splitTarget === cat.name ? <Loader2 className="w-3 h-3 animate-spin" /> : "Découper"}
                             </button>
-                          )}
-                          {isTooSmall && (
-                            <span className="text-[10px] text-amber-600">Petit</span>
                           )}
                         </div>
                       </div>
-
-                      {/* Inline split flow */}
+                      {/* Inline split */}
                       {splitTarget === cat.name && qualifyGroups.length > 0 && (
                         <div className="mt-3 border-t border-red-200 pt-3 space-y-2">
-                          <p className="text-[10px] font-semibold text-red-700 uppercase">Sous-découpage de &quot;{cat.name}&quot;</p>
                           {qualifyGroups.map((g) => {
                             const choice = qualifyChoices[g.id];
                             return (
                               <div key={g.id} className="bg-white border border-gray-200 rounded p-2">
-                                <div className="flex items-center justify-between mb-1">
-                                  <p className="text-xs font-medium text-gray-800">{g.label} <span className="text-gray-400">({g.count})</span></p>
-                                </div>
+                                <p className="text-xs font-medium text-gray-800 mb-1">{g.label} <span className="text-gray-400">({g.count})</span></p>
                                 <div className="space-y-1">
                                   {g.suggestions.map((s, si) => (
                                     <label key={si} className={cn("flex items-center gap-2 p-1 rounded text-[10px] cursor-pointer",
@@ -1486,10 +1446,7 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
                             );
                           })}
                           <div className="flex gap-2">
-                            <button onClick={applySplit}
-                              className="flex-1 px-3 py-1.5 text-xs font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 cursor-pointer">
-                              Appliquer
-                            </button>
+                            <button onClick={applySplit} className="flex-1 px-3 py-1.5 text-xs font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 cursor-pointer">Appliquer</button>
                             <button onClick={() => { setSplitTarget(null); setQualifyGroups([]); setQualifyChoices({}); }}
                               className="px-3 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-lg cursor-pointer">Annuler</button>
                           </div>
@@ -1499,22 +1456,53 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
                   );
                 })}
 
-                {/* Also show "Autres" and "Hors cible" counts if they exist */}
+                {/* Extra categories (Autres, Hors cible) */}
                 {Object.entries(categoryContactMap).filter(([name]) => !discoveredCategories.find((c) => c.name === name)).map(([name, ids]) => (
-                  <div key={name} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium text-gray-600">{name}</p>
-                      <span className="text-xs font-semibold text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full">{ids.length}</span>
+                  ids.length > 0 && (
+                    <div key={name} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-medium text-gray-600">{name}</p>
+                        <span className="text-xs text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full">{ids.length}</span>
+                      </div>
                     </div>
-                  </div>
+                  )
                 ))}
 
-                {/* Email filter + Download */}
-                <div className="space-y-2 pt-2 border-t border-gray-100">
+                {/* Merge button */}
+                {mergeSelection.size >= 2 && (
+                  <button onClick={applyMerge}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-300 rounded-lg hover:bg-blue-100 cursor-pointer">
+                    Fusionner les {mergeSelection.size} catégories sélectionnées
+                  </button>
+                )}
+
+                {/* Refine */}
+                {showRefine ? (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
+                    <textarea value={refineFeedback} onChange={(e) => setRefineFeedback(e.target.value)}
+                      rows={2} placeholder="Ex: Trop de contacts dans X, séparer Y par type de poste..."
+                      className="w-full border border-amber-300 rounded-lg px-3 py-2 text-xs resize-y" />
+                    <div className="flex gap-2">
+                      <button onClick={refineAndRerun} disabled={discovering || !refineFeedback.trim()}
+                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 cursor-pointer">
+                        <Sparkles className="w-3 h-3" /> Relancer l&apos;analyse
+                      </button>
+                      <button onClick={() => { setShowRefine(false); setRefineFeedback(""); }}
+                        className="px-3 py-2 text-xs text-gray-500 border border-gray-200 rounded-lg cursor-pointer">Annuler</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => setShowRefine(true)}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-amber-700 border border-amber-300 rounded-lg hover:bg-amber-50 cursor-pointer">
+                    <Pencil className="w-3 h-3" /> Modifier et relancer
+                  </button>
+                )}
+
+                {/* Download */}
+                <div className="space-y-2 pt-2 border-t border-gray-200">
                   <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
-                    <input type="checkbox" checked={emailOnly} onChange={(e) => setEmailOnly(e.target.checked)}
-                      className="accent-green-600" />
-                    <Mail className="w-3.5 h-3.5" /> Uniquement les contacts avec email
+                    <input type="checkbox" checked={emailOnly} onChange={(e) => setEmailOnly(e.target.checked)} className="accent-green-600" />
+                    <Mail className="w-3.5 h-3.5" /> Uniquement avec email
                   </label>
                   <div className="flex gap-2">
                     <button onClick={downloadZip} disabled={downloading}
@@ -1523,8 +1511,7 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
                       {downloading ? "Génération..." : "Télécharger (ZIP)"}
                     </button>
                     <button onClick={exportIcpPdf}
-                      className="flex items-center gap-2 px-4 py-3 text-sm font-medium text-violet-700 border border-violet-300 rounded-lg hover:bg-violet-50 cursor-pointer"
-                      title="Exporter l'analyse ICP en PDF">
+                      className="flex items-center gap-2 px-4 py-3 text-sm font-medium text-violet-700 border border-violet-300 rounded-lg hover:bg-violet-50 cursor-pointer">
                       <Download className="w-4 h-4" /> PDF
                     </button>
                   </div>
