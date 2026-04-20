@@ -64,21 +64,12 @@ interface ExcludedSegment {
   contactNumbers?: number[];
 }
 
-interface QualifyGroup {
-  id: string;
-  label: string;
-  description: string;
-  contactNumbers: number[];
-  count: number;
-  suggestions: { type: "assign" | "new_icp" | "exclude"; targetIcp?: string; name?: string; description?: string; reason: string }[];
-  recommended: string;
-}
-
-interface QualifyChoice {
-  groupId: string;
-  action: "assign" | "new_icp" | "exclude";
-  targetIcp?: string;
-  newIcpName?: string;
+interface UserIcpDef {
+  name: string;
+  postes: string;
+  entreprises: string;
+  antiPostes: string;
+  antiEntreprises: string;
 }
 
 // ─── Component ──────────────────────────────────────────
@@ -107,31 +98,19 @@ export default function IcpCleanerPage() {
 
   // ICP Finder
   const [showIcpFinder, setShowIcpFinder] = useState(false);
-  const [offerContext, setOfferContext] = useState("");
   const [extraListIds, setExtraListIds] = useState<Set<string>>(new Set());
   const [extraContacts, setExtraContacts] = useState<IcpContact[]>([]);
-  const [discoveredCategories, setDiscoveredCategories] = useState<IcpCategory[]>([]);
-  const [discovering, setDiscovering] = useState(false);
-  const [excludedSegments, setExcludedSegments] = useState<ExcludedSegment[]>([]);
-  const [editingCatIdx, setEditingCatIdx] = useState<number | null>(null);
-  const [showRefine, setShowRefine] = useState(false);
-  const [refineFeedback, setRefineFeedback] = useState("");
 
-  // Step 2: Batch classification
+  // User-defined ICPs
+  const [icpDefs, setIcpDefs] = useState<UserIcpDef[]>([{ name: "", postes: "", entreprises: "", antiPostes: "", antiEntreprises: "" }]);
+
+  // Classification
   const [classifying, setClassifying] = useState(false);
   const [classifyProgress, setClassifyProgress] = useState("");
-  const [classified, setClassified] = useState(false); // true once batch-classify is done
-  const [categoryContactMap, setCategoryContactMap] = useState<Record<string, string[]>>({}); // categoryName → contactIds
-
-  // Step 3: Rebalance (split/merge)
-  const [qualifyGroups, setQualifyGroups] = useState<QualifyGroup[]>([]);
-  const [qualifyChoices, setQualifyChoices] = useState<Record<string, QualifyChoice>>({});
-  const [qualifyLoading, setQualifyLoading] = useState(false);
-  const [splitTarget, setSplitTarget] = useState<string | null>(null); // category being split
-  const [mergeSelection, setMergeSelection] = useState<Set<string>>(new Set()); // categories to merge
+  const [classified, setClassified] = useState(false);
+  const [categoryContactMap, setCategoryContactMap] = useState<Record<string, string[]>>({});
 
   // Results expand/collapse
-  const [expandedDescs, setExpandedDescs] = useState<Set<string>>(new Set());
   const [expandedContacts, setExpandedContacts] = useState<Set<string>>(new Set());
 
   // Download from ICP Finder
@@ -295,418 +274,102 @@ export default function IcpCleanerPage() {
     setTimeout(() => setActionMsg(null), 3000);
   };
 
-  // ─── ICP Finder ───────────────────────────────────────
+  // ─── ICP Classification ───────────────────────────────
 
-  const isAutresCat = (name: string) =>
-    name === "Autres / à qualifier" || name === "Autres / a qualifier";
+  const updateIcpDef = (idx: number, field: keyof UserIcpDef, value: string) => {
+    const next = [...icpDefs];
+    next[idx] = { ...next[idx], [field]: value };
+    setIcpDefs(next);
+  };
 
-  // ─── Full analysis: discover → classify → auto-rebalance ─
+  const setIcpCount = (count: number) => {
+    const next: UserIcpDef[] = [];
+    for (let i = 0; i < count; i++) {
+      next.push(icpDefs[i] || { name: "", postes: "", entreprises: "", antiPostes: "", antiEntreprises: "" });
+    }
+    setIcpDefs(next);
+  };
 
-  const runFullAnalysis = async (customOfferContext?: string) => {
-    const ctx = customOfferContext || offerContext;
-    if (!ctx.trim()) return;
+  const canLaunch = icpDefs.length > 0 && icpDefs.every((d) => d.name.trim() && d.postes.trim());
+
+  // ─── Classify contacts into user-defined ICPs ─────────
+
+  const consumeSSE = async (res: Response, onProgress: (msg: string) => void): Promise<Record<string, string[]>> => {
+    if (!res.body) throw new Error("No response body");
+    const map: Record<string, string[]> = {};
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "", eventType = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n"); buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (line.startsWith("event: ")) { eventType = line.slice(7).trim(); continue; }
+        if (line.startsWith("data: ")) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (eventType === "progress") onProgress(data.message || "");
+            if (eventType === "done") {
+              for (const r of (data.results || []) as { id: string; icp_category: string }[]) {
+                if (!map[r.icp_category]) map[r.icp_category] = [];
+                map[r.icp_category].push(r.id);
+              }
+            }
+            eventType = "";
+          } catch { /* partial data */ }
+        }
+      }
+    }
+    return map;
+  };
+
+  const runClassification = async () => {
+    if (!canLaunch) return;
     const list = lists.find((l) => l.id === selectedListId);
-    const contactIds = selected.size > 0 ? Array.from(selected) : mergedContacts.map((c) => c.id);
+    const contactIds = mergedContacts.map((c) => c.id);
 
-    // Reset state
-    setDiscoveredCategories([]);
-    setExcludedSegments([]);
+    // Build categories from user definitions
+    const categories: IcpCategory[] = icpDefs.map((d, i) => ({
+      id: `icp_${i + 1}`,
+      name: d.name,
+      description: `Postes : ${d.postes}. Entreprises : ${d.entreprises}`,
+      criteria: `Postes ciblés : ${d.postes}. Types d'entreprises : ${d.entreprises}.${d.antiPostes ? ` Exclure postes : ${d.antiPostes}.` : ""}${d.antiEntreprises ? ` Exclure entreprises : ${d.antiEntreprises}.` : ""}`,
+    }));
+
     setClassified(false);
     setCategoryContactMap({});
-    setDiscovering(true);
-    setClassifyProgress("");
+    setClassifying(true);
+    setClassifyProgress("Classification en cours...");
 
-    try {
-      // ── Step 1: Discover taxonomy ──
-      setClassifyProgress("Étape 1/3 — Analyse des profils...");
-      const discoverRes = await fetch("/api/icp/classify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "discover", ids: contactIds, company: list?.company || "", offerContext: ctx }),
-      });
-      const discoverJson = await discoverRes.json();
-      const categories: IcpCategory[] = discoverJson.data?.categories || [];
-      const excluded: ExcludedSegment[] = discoverJson.data?.excluded_segments || [];
-      setDiscoveredCategories(categories);
-      setExcludedSegments(excluded);
-
-      if (categories.length === 0) { setError("Aucune catégorie identifiée"); setDiscovering(false); return; }
-
-      // ── Step 2: Batch classify ──
-      setClassifyProgress("Étape 2/3 — Classification des contacts...");
-      setClassifying(true);
-      const classifyRes = await fetch("/api/icp/classify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "batch-classify", ids: contactIds, company: list?.company || "", categories, offerContext: ctx }),
-      });
-      if (!classifyRes.body) throw new Error("No response body");
-
-      // Consume SSE
-      let map: Record<string, string[]> = {};
-      const reader = classifyRes.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let eventType = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          if (line.startsWith("event: ")) { eventType = line.slice(7).trim(); continue; }
-          if (line.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (eventType === "progress") setClassifyProgress(`Étape 2/3 — ${data.message || ""}`);
-              if (eventType === "done") {
-                for (const r of (data.results || []) as { id: string; icp_category: string }[]) {
-                  if (!map[r.icp_category]) map[r.icp_category] = [];
-                  map[r.icp_category].push(r.id);
-                }
-              }
-              eventType = "";
-            } catch { /* partial data */ }
-          }
-        }
-      }
-      setClassifying(false);
-
-      // ── Step 2b: Auto-refine if "Autres" > 5% ──
-      const autresThreshold = Math.round(contactIds.length * 0.05);
-      const autresKeys = Object.keys(map).filter((k) => isAutresCat(k));
-      const autresIds = autresKeys.flatMap((k) => map[k] || []);
-      let updatedCats = [...categories];
-
-      if (autresIds.length > autresThreshold && autresIds.length > 10) {
-        setClassifyProgress("Affinage — Trop de contacts dans Autres, création de nouvelles catégories...");
-        // Discover new categories from Autres contacts
-        try {
-          const refineRes = await fetch("/api/icp/classify", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "discover", ids: autresIds, company: list?.company || "",
-              offerContext: `${ctx}\n\n--- CATÉGORIES DÉJÀ EXISTANTES (ne pas les recréer) ---\n${updatedCats.filter((c) => !isAutresCat(c.name)).map((c) => `- ${c.name}: ${c.criteria}`).join("\n")}\n\nCrée de NOUVELLES catégories pour ces contacts qui n'ont pas pu être classés dans les catégories existantes. NE reproduis PAS les catégories ci-dessus.`,
-            }),
-          });
-          const refineJson = await refineRes.json();
-          const newCats: IcpCategory[] = (refineJson.data?.categories || []).filter(
-            (c: IcpCategory) => !isAutresCat(c.name) && !updatedCats.find((uc) => uc.name === c.name)
-          );
-          if (newCats.length > 0) {
-            // Merge new categories into the list
-            const allCatsForReclassify = [...updatedCats.filter((c) => !isAutresCat(c.name)), ...newCats];
-            updatedCats = allCatsForReclassify;
-            // Re-classify Autres contacts into ALL categories (existing + new)
-            setClassifyProgress(`Affinage — Reclassification de ${autresIds.length} contacts...`);
-            for (const k of autresKeys) delete map[k];
-            const reRes = await fetch("/api/icp/classify", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ action: "batch-classify", ids: autresIds, company: list?.company || "", categories: allCatsForReclassify, offerContext: ctx }),
-            });
-            if (reRes.body) {
-              const rr = reRes.body.getReader();
-              const rd = new TextDecoder();
-              let rb = "", re = "";
-              while (true) {
-                const { done: rdone, value: rval } = await rr.read();
-                if (rdone) break;
-                rb += rd.decode(rval, { stream: true });
-                const rlines = rb.split("\n"); rb = rlines.pop() || "";
-                for (const rl of rlines) {
-                  if (rl.startsWith("event: ")) { re = rl.slice(7).trim(); continue; }
-                  if (rl.startsWith("data: ") && re === "done") {
-                    try {
-                      const rd2 = JSON.parse(rl.slice(6));
-                      for (const r of (rd2.results || []) as { id: string; icp_category: string }[]) {
-                        if (!map[r.icp_category]) map[r.icp_category] = [];
-                        map[r.icp_category].push(r.id);
-                      }
-                    } catch { /* partial */ }
-                    re = "";
-                  }
-                }
-              }
-            }
-          }
-        } catch { /* keep Autres as-is if refine fails */ }
-      }
-
-      // ── Step 3: Auto-rebalance ──
-      setClassifyProgress("Étape 3/3 — Équilibrage...");
-      const MIN_SIZE = 25;
-      const MAX_SIZE = 100;
-      let rebalanced = false;
-
-      // 3a. Collect contacts from small categories and re-classify them into large ones
-      const smallCatNames = Object.entries(map)
-        .filter(([, ids]) => ids.length > 0 && ids.length < MIN_SIZE)
-        .map(([name]) => name);
-      const largeCatNames = Object.entries(map)
-        .filter(([, ids]) => ids.length >= MIN_SIZE)
-        .map(([name]) => name);
-
-      if (smallCatNames.length > 0 && largeCatNames.length > 0) {
-        setClassifyProgress("Étape 3/3 — Redistribution des petits groupes...");
-        const smallContactIds: string[] = [];
-        for (const name of smallCatNames) {
-          smallContactIds.push(...(map[name] || []));
-          delete map[name];
-          updatedCats = updatedCats.filter((c) => c.name !== name);
-        }
-        // Re-classify these contacts into the large categories only
-        const largeCats = updatedCats.filter((c) => largeCatNames.includes(c.name));
-        try {
-          const rebalRes = await fetch("/api/icp/classify", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "batch-classify", ids: smallContactIds, company: list?.company || "", categories: largeCats, offerContext: ctx }),
-          });
-          if (rebalRes.body) {
-            const rr = rebalRes.body.getReader();
-            const rd = new TextDecoder();
-            let rb = "";
-            let re = "";
-            while (true) {
-              const { done: rdone, value: rval } = await rr.read();
-              if (rdone) break;
-              rb += rd.decode(rval, { stream: true });
-              const rlines = rb.split("\n");
-              rb = rlines.pop() || "";
-              for (const rl of rlines) {
-                if (rl.startsWith("event: ")) { re = rl.slice(7).trim(); continue; }
-                if (rl.startsWith("data: ") && re === "done") {
-                  try {
-                    const rd2 = JSON.parse(rl.slice(6));
-                    for (const r of (rd2.results || []) as { id: string; icp_category: string }[]) {
-                      const target = map[r.icp_category];
-                      if (target) target.push(r.id);
-                      else map[r.icp_category] = [r.id];
-                    }
-                  } catch { /* partial */ }
-                  re = "";
-                }
-              }
-            }
-          }
-          rebalanced = true;
-        } catch { /* if re-classify fails, contacts are lost — add them to first large cat */
-          if (largeCatNames[0]) map[largeCatNames[0]].push(...smallContactIds);
-        }
-      }
-
-      // 3b. Split large categories via sub-classification
-      const toSplit = Object.entries(map).filter(([, ids]) => ids.length > MAX_SIZE);
-      for (const [catName, ids] of toSplit) {
-        setClassifyProgress(`Étape 3/3 — Découpage de "${catName}" (${ids.length})...`);
-        try {
-          const subRes = await fetch("/api/icp/classify", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "qualify",
-              ids,
-              company: list?.company || "",
-              offerContext: ctx,
-              existingCategories: updatedCats.filter((c) => c.name !== catName).map((c) => ({ name: c.name, description: c.description })),
-            }),
-          });
-          const subJson = await subRes.json();
-          const groups = subJson.data?.groups || [];
-          if (groups.length >= 2) {
-            delete map[catName];
-            updatedCats = updatedCats.filter((c) => c.name !== catName);
-            for (const g of groups) {
-              const subIds = g.contactNumbers.map((n: number) => ids[n - 1]).filter(Boolean);
-              const newIcp = g.suggestions?.find((s: { type: string }) => s.type === "new_icp");
-              const subName = newIcp?.name || `${catName} — ${g.label}`;
-              const subDesc = newIcp?.description || g.description || "";
-              map[subName] = [...(map[subName] || []), ...subIds];
-              if (!updatedCats.find((c) => c.name === subName)) {
-                updatedCats.push({ id: `icp_sub_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, name: subName, description: subDesc, criteria: "" });
-              }
-            }
-            rebalanced = true;
-          }
-        } catch { /* keep original */ }
-      }
-
-      // 3c. Sync updatedCats with map (add any categories the AI created that aren't in updatedCats)
-      for (const name of Object.keys(map)) {
-        if (!updatedCats.find((c) => c.name === name)) {
-          updatedCats.push({ id: `icp_auto_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, name, description: "", criteria: "" });
-        }
-      }
-
-      setCategoryContactMap(map);
-      setDiscoveredCategories(updatedCats);
-      setClassified(true);
-      setClassifyProgress("");
-      const total = Object.values(map).reduce((s, ids) => s + ids.length, 0);
-      setActionMsg(`${total} contacts répartis dans ${Object.keys(map).length} ICP${rebalanced ? " (équilibrage auto)" : ""}`);
-      setTimeout(() => setActionMsg(null), 6000);
-    } catch (e) { setError(String(e)); }
-    setDiscovering(false);
-    setClassifying(false);
-  };
-
-  const refineAndRerun = async () => {
-    if (!refineFeedback.trim()) return;
-    const currentSummary = discoveredCategories.map((c) => `- ${c.name}: ${c.description}`).join("\n");
-    const excludedSummary = excludedSegments.map((s) => `- ${s.name} (exclu): ${s.reason}`).join("\n");
-    const refinedContext = `${offerContext}
-
---- CATÉGORIES PRÉCÉDENTES ---
-${currentSummary}
-${excludedSummary ? `\nSegments exclus:\n${excludedSummary}` : ""}
-
---- FEEDBACK UTILISATEUR ---
-${refineFeedback}
-
-IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
-    setShowRefine(false);
-    setRefineFeedback("");
-    await runFullAnalysis(refinedContext);
-  };
-
-  // Computed: contact count per category (after classification)
-  const getCatCount = (catName: string) => (categoryContactMap[catName] || []).length;
-  const totalClassified = Object.values(categoryContactMap).reduce((s, ids) => s + ids.length, 0);
-
-  // Step 3: Rebalance — split large category
-  const startSplit = async (catName: string) => {
-    const contactIds = categoryContactMap[catName] || [];
-    if (contactIds.length === 0) return;
-    setSplitTarget(catName);
-    setQualifyLoading(true);
-    setQualifyGroups([]);
-    setQualifyChoices({});
-    const list = lists.find((l) => l.id === selectedListId);
-    const otherCats = discoveredCategories
-      .filter((c) => c.name !== catName && !isAutresCat(c.name))
-      .map((c) => ({ name: c.name, description: c.description }));
     try {
       const res = await fetch("/api/icp/classify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "qualify",
-          ids: contactIds,
-          company: list?.company || "",
-          offerContext,
-          existingCategories: otherCats,
-        }),
+        body: JSON.stringify({ action: "batch-classify", ids: contactIds, company: list?.company || "", categories }),
       });
-      const json = await res.json();
-      const groups: QualifyGroup[] = json.data?.groups || [];
-      setQualifyGroups(groups);
-      const defaults: Record<string, QualifyChoice> = {};
-      for (const g of groups) {
-        const rec = g.suggestions.find((s) => s.type === g.recommended) || g.suggestions[0];
-        if (rec) {
-          defaults[g.id] = {
-            groupId: g.id,
-            action: rec.type,
-            targetIcp: rec.type === "assign" ? rec.targetIcp : undefined,
-            newIcpName: rec.type === "new_icp" ? rec.name : undefined,
-          };
-        }
-      }
-      setQualifyChoices(defaults);
-    } catch { setError("Erreur lors du sous-découpage"); }
-    setQualifyLoading(false);
+      const map = await consumeSSE(res, (msg) => setClassifyProgress(msg));
+      setCategoryContactMap(map);
+      setClassified(true);
+      setClassifyProgress("");
+      const total = Object.values(map).reduce((s, ids) => s + ids.length, 0);
+      setActionMsg(`${total} contacts répartis dans ${Object.keys(map).length} catégories`);
+      setTimeout(() => setActionMsg(null), 5000);
+    } catch (e) { setError(String(e)); }
+    setClassifying(false);
   };
 
-  const applySplit = () => {
-    if (!splitTarget) return;
-    const sourceIds = categoryContactMap[splitTarget] || [];
-    const newMap = { ...categoryContactMap };
-    const remainingIds: string[] = [];
-    const newCats = [...discoveredCategories];
-
-    // Build a map from qualify group contactNumbers to actual contact IDs
-    // contactNumbers in qualify groups are 1-indexed into the sourceIds array
-    for (const g of qualifyGroups) {
-      const choice = qualifyChoices[g.id];
-      const groupIds = g.contactNumbers.map((n) => sourceIds[n - 1]).filter(Boolean);
-      if (!choice) { remainingIds.push(...groupIds); continue; }
-      if (choice.action === "assign" && choice.targetIcp) {
-        newMap[choice.targetIcp] = [...(newMap[choice.targetIcp] || []), ...groupIds];
-      } else if (choice.action === "new_icp" && choice.newIcpName) {
-        newMap[choice.newIcpName] = [...(newMap[choice.newIcpName] || []), ...groupIds];
-        if (!newCats.find((c) => c.name === choice.newIcpName)) {
-          const suggestion = g.suggestions.find((s) => s.type === "new_icp");
-          newCats.push({
-            id: `icp_new_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-            name: choice.newIcpName,
-            description: suggestion?.description || "",
-            criteria: suggestion?.description || "",
-          });
-        }
-      } else if (choice.action === "exclude") {
-        newMap["Hors cible"] = [...(newMap["Hors cible"] || []), ...groupIds];
-      } else {
-        remainingIds.push(...groupIds);
-      }
-    }
-
-    // Update or remove the original category
-    if (remainingIds.length > 0) {
-      newMap[splitTarget] = remainingIds;
-    } else {
-      delete newMap[splitTarget];
-      const idx = newCats.findIndex((c) => c.name === splitTarget);
-      if (idx >= 0) newCats.splice(idx, 1);
-    }
-
-    setCategoryContactMap(newMap);
-    setDiscoveredCategories(newCats);
-    setSplitTarget(null);
-    setQualifyGroups([]);
-    setQualifyChoices({});
-    setActionMsg("Catégorie sous-découpée");
-    setTimeout(() => setActionMsg(null), 4000);
-  };
-
-  // Step 3: Rebalance — merge small categories
-  const applyMerge = () => {
-    if (mergeSelection.size < 2) return;
-    const names = Array.from(mergeSelection);
-    const mergedName = names.join(" + ");
-    const newMap = { ...categoryContactMap };
-    const mergedIds: string[] = [];
-    for (const name of names) {
-      mergedIds.push(...(newMap[name] || []));
-      delete newMap[name];
-    }
-    newMap[mergedName] = mergedIds;
-
-    const newCats = discoveredCategories.filter((c) => !mergeSelection.has(c.name));
-    const firstCat = discoveredCategories.find((c) => mergeSelection.has(c.name));
-    newCats.push({
-      id: `icp_merged_${Date.now()}`,
-      name: mergedName,
-      description: names.map((n) => discoveredCategories.find((c) => c.name === n)?.description || "").join(" / "),
-      criteria: firstCat?.criteria || "",
-    });
-
-    setCategoryContactMap(newMap);
-    setDiscoveredCategories(newCats);
-    setMergeSelection(new Set());
-    setActionMsg(`${names.length} catégories fusionnées`);
-    setTimeout(() => setActionMsg(null), 4000);
-  };
+  // Computed
+  const totalClassified = Object.values(categoryContactMap).reduce((s, ids) => s + ids.length, 0);
 
   // ─── Generate approach messages + Download ZIP ────────
 
   const generateApproaches = async (): Promise<Record<string, string>> => {
     const list = lists.find((l) => l.id === selectedListId);
-    const catsToProcess = discoveredCategories.filter((c) => !isAutresCat(c.name) && c.name !== "Hors cible");
     const messages: Record<string, string> = {};
-    for (const cat of catsToProcess) {
+    for (const def of icpDefs) {
+      if (!def.name.trim()) continue;
       try {
         const res = await fetch("/api/icp/classify", {
           method: "POST",
@@ -715,12 +378,11 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
             action: "generate-approach",
             ids: [],
             company: list?.company || "",
-            offerContext,
-            categories: [cat],
+            categories: [{ name: def.name, description: `Postes : ${def.postes}. Entreprises : ${def.entreprises}`, criteria: def.postes }],
           }),
         });
         const json = await res.json();
-        if (json.message) messages[cat.name] = json.message;
+        if (json.message) messages[def.name] = json.message;
       } catch { /* skip */ }
     }
     setApproachMessages(messages);
@@ -748,8 +410,8 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
       const zip = new JSZip();
       const csvHeader = "Prénom;Nom;Email;Téléphone;Poste;Entreprise;LinkedIn;Ville";
 
-      for (const [catName, contactIds] of Object.entries(categoryContactMap)) {
-        let catContacts = contactIds.map((id) => contactById.get(id)).filter(Boolean) as IcpContact[];
+      for (const [catName, catIds] of Object.entries(categoryContactMap)) {
+        let catContacts = catIds.map((id) => contactById.get(id)).filter(Boolean) as IcpContact[];
         if (emailOnly) catContacts = catContacts.filter((c) => c.email?.trim());
         if (catContacts.length === 0) continue;
         const rows = catContacts.map((c) =>
@@ -762,10 +424,10 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
       }
 
       if (Object.keys(messages).length > 0) {
-        const approachHeader = "ICP;Titre;Message type";
-        const approachRows = discoveredCategories
-          .filter((c) => messages[c.name])
-          .map((c) => [c.name, c.approach_key || "", messages[c.name] || ""].map((v) => escapeCsvField(String(v))).join(";"));
+        const approachHeader = "ICP;Message type";
+        const approachRows = icpDefs
+          .filter((d) => messages[d.name])
+          .map((d) => [d.name, messages[d.name] || ""].map((v) => escapeCsvField(String(v))).join(";"));
         const approachCsv = "\uFEFF" + [approachHeader, ...approachRows].join("\n");
         zip.file("Messages d'approche.csv", approachCsv);
       }
@@ -841,7 +503,6 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
     const pageW = doc.internal.pageSize.getWidth();
     let y = 15;
 
-    // Title
     doc.setFontSize(16);
     doc.setFont("helvetica", "bold");
     doc.text(`ICP Analysis — ${list?.company || ""}`, 14, y);
@@ -849,155 +510,49 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
     doc.setFontSize(9);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(120);
-    doc.text(`${list?.name || ""} • ${mergedContacts.length} contacts • ${new Date().toLocaleDateString("fr-FR")}`, 14, y);
+    doc.text(`${totalClassified} contacts • ${new Date().toLocaleDateString("fr-FR")}`, 14, y);
     doc.setTextColor(0);
     y += 10;
 
-    // Each ICP category
-    discoveredCategories.forEach((cat) => {
-      const catContacts = cat.contactNumbers
-        ? cat.contactNumbers.map((n) => mergedContacts[n - 1]).filter(Boolean)
-        : [];
-
-      // Check page space
+    for (const [catName, catIds] of Object.entries(categoryContactMap)) {
+      const catContacts = catIds.map((id) => contactById.get(id)).filter(Boolean) as IcpContact[];
+      if (catContacts.length === 0) continue;
       if (y > 260) { doc.addPage(); y = 15; }
 
-      // Category header
       doc.setFillColor(124, 58, 237);
       doc.roundedRect(14, y, pageW - 28, 7, 1, 1, "F");
       doc.setFontSize(11);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(255);
-      doc.text(`${cat.name}  (${catContacts.length} contacts)`, 17, y + 5);
+      doc.text(`${catName}  (${catContacts.length})`, 17, y + 5);
       doc.setTextColor(0);
       y += 10;
 
-      // Description
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(80);
-      const descLines = doc.splitTextToSize(cat.description || "", pageW - 32);
-      doc.text(descLines, 16, y);
-      y += descLines.length * 3.5 + 2;
-
-      // Approach message (full if available, fallback to approach_key)
-      const fullMsg = approachMessages[cat.name];
-      if (fullMsg || cat.approach_key) {
-        doc.setFont("helvetica", "bolditalic");
+      const fullMsg = approachMessages[catName];
+      if (fullMsg) {
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "italic");
         doc.setTextColor(5, 122, 85);
-        const msgText = fullMsg ? `Message d'approche:\n${fullMsg}` : `Accroche: ${cat.approach_key}`;
-        const approachLines = doc.splitTextToSize(msgText, pageW - 32);
-        if (y + approachLines.length * 3.5 > 270) { doc.addPage(); y = 15; }
-        doc.text(approachLines, 16, y);
-        y += approachLines.length * 3.5 + 3;
-      }
-      doc.setTextColor(0);
-
-      // Contact table
-      if (catContacts.length > 0) {
-        autoTable(doc, {
-          startY: y,
-          margin: { left: 14, right: 14 },
-          head: [["Prenom", "Nom", "Poste", "Entreprise", "Email"]],
-          body: catContacts.map((c) => [
-            c.prenom || "", c.nom || "", c.poste || "", c.entreprise || "", c.email || "",
-          ]),
-          styles: { fontSize: 7, cellPadding: 1.5 },
-          headStyles: { fillColor: [237, 233, 254], textColor: [88, 28, 135], fontStyle: "bold" },
-          alternateRowStyles: { fillColor: [249, 250, 251] },
-        });
-        y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
-      } else {
-        y += 4;
-      }
-    });
-
-    // Excluded segments
-    if (excludedSegments.length > 0) {
-      if (y > 250) { doc.addPage(); y = 15; }
-      doc.setFillColor(251, 146, 60);
-      doc.roundedRect(14, y, pageW - 28, 7, 1, 1, "F");
-      doc.setFontSize(11);
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(255);
-      doc.text("Segments exclus", 17, y + 5);
-      doc.setTextColor(0);
-      y += 10;
-
-      excludedSegments.forEach((seg) => {
-        if (y > 270) { doc.addPage(); y = 15; }
-        const exclContacts = seg.contactNumbers
-          ? seg.contactNumbers.map((n) => mergedContacts[n - 1]).filter(Boolean)
-          : [];
-
-        doc.setFontSize(9);
-        doc.setFont("helvetica", "bold");
-        doc.setTextColor(180, 83, 9);
-        doc.text(`${seg.name} (${exclContacts.length} contacts) — ${seg.reason}`, 16, y);
+        const msgLines = doc.splitTextToSize(fullMsg, pageW - 32);
+        if (y + msgLines.length * 3.5 > 270) { doc.addPage(); y = 15; }
+        doc.text(msgLines, 16, y);
+        y += msgLines.length * 3.5 + 3;
         doc.setTextColor(0);
-        y += 5;
+      }
 
-        if (exclContacts.length > 0) {
-          autoTable(doc, {
-            startY: y,
-            margin: { left: 14, right: 14 },
-            head: [["Prenom", "Nom", "Poste", "Entreprise"]],
-            body: exclContacts.map((c) => [c.prenom || "", c.nom || "", c.poste || "", c.entreprise || ""]),
-            styles: { fontSize: 7, cellPadding: 1.5 },
-            headStyles: { fillColor: [255, 237, 213], textColor: [154, 52, 18], fontStyle: "bold" },
-          });
-          y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
-        }
+      autoTable(doc, {
+        startY: y,
+        margin: { left: 14, right: 14 },
+        head: [["Prenom", "Nom", "Poste", "Entreprise", "Email"]],
+        body: catContacts.map((c) => [c.prenom || "", c.nom || "", c.poste || "", c.entreprise || "", c.email || ""]),
+        styles: { fontSize: 7, cellPadding: 1.5 },
+        headStyles: { fillColor: [237, 233, 254], textColor: [88, 28, 135], fontStyle: "bold" },
+        alternateRowStyles: { fillColor: [249, 250, 251] },
       });
+      y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
     }
 
     doc.save(`ICP-${list?.company || "export"}-${new Date().toISOString().slice(0, 10)}.pdf`);
-  };
-
-  const exportApproachPdf = () => {
-    const list = lists.find((l) => l.id === selectedListId);
-    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-    const pageW = doc.internal.pageSize.getWidth();
-    let y = 15;
-
-    doc.setFontSize(16);
-    doc.setFont("helvetica", "bold");
-    doc.text(`Messages d'approche — ${list?.company || ""}`, 14, y);
-    y += 6;
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(120);
-    doc.text(`${list?.name || ""} • ${new Date().toLocaleDateString("fr-FR")}`, 14, y);
-    doc.setTextColor(0);
-    y += 10;
-
-    const catsToShow = icpFilter ? [icpFilter] : icpCategories;
-    catsToShow.forEach((cat) => {
-      const approachMsg = contacts.find((c) => c.icp_category === cat && c.icp_approach)?.icp_approach;
-      if (!approachMsg) return;
-      const count = contacts.filter((c) => c.icp_category === cat).length;
-
-      if (y > 240) { doc.addPage(); y = 15; }
-
-      // ICP header
-      doc.setFillColor(5, 122, 85);
-      doc.roundedRect(14, y, pageW - 28, 7, 1, 1, "F");
-      doc.setFontSize(11);
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(255);
-      doc.text(`${cat}  (${count} contacts)`, 17, y + 5);
-      doc.setTextColor(0);
-      y += 12;
-
-      // Message body
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "normal");
-      const msgLines = doc.splitTextToSize(approachMsg, pageW - 32);
-      doc.text(msgLines, 16, y);
-      y += msgLines.length * 4.5 + 8;
-    });
-
-    doc.save(`Messages-approche-${list?.company || "export"}-${new Date().toISOString().slice(0, 10)}.pdf`);
   };
 
   // ─── Select all / toggle ──────────────────────────────
@@ -1316,28 +871,6 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
               </div>
             </div>
 
-            {/* ── Approach messages — separate block per ICP ── */}
-            {icpCategories.length > 0 && contacts.some((c) => c.icp_approach) && (
-              <div className="mt-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-[10px] font-semibold text-gray-500 uppercase">Messages d&apos;approche par ICP</p>
-                  <button onClick={exportApproachPdf}
-                    className="flex items-center gap-1 text-[10px] text-emerald-700 hover:text-emerald-900 cursor-pointer">
-                    <Download className="w-3 h-3" /> Télécharger PDF
-                  </button>
-                </div>
-                {(icpFilter ? [icpFilter] : icpCategories).map((cat) => {
-                  const approachMsg = contacts.find((c) => c.icp_category === cat && c.icp_approach)?.icp_approach;
-                  if (!approachMsg) return null;
-                  return (
-                    <div key={cat} className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
-                      <p className="text-[10px] font-semibold text-emerald-700 uppercase mb-1">Message d&apos;approche — {cat}</p>
-                      <p className="text-xs text-emerald-800 whitespace-pre-line leading-relaxed">{approachMsg}</p>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
             </>
           )}
         </div>
@@ -1407,21 +940,21 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
       {/* ═══ ICP Finder — Inline in center panel ═══ */}
       {showIcpFinder && (
         <div className="flex-1 min-w-0">
-          <div className="bg-white rounded-xl border border-gray-200 p-5 max-h-[85vh] overflow-y-auto">
+          <div className="bg-white rounded-xl border border-gray-200 p-5 overflow-y-auto" style={{ maxHeight: "calc(100vh - 140px)" }}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-violet-600" /> ICP Finder — {selectedList?.company || ""}
               </h3>
-              <button onClick={() => { setShowIcpFinder(false); setClassified(false); setDiscoveredCategories([]); }}
+              <button onClick={() => { setShowIcpFinder(false); setClassified(false); setCategoryContactMap({}); }}
                 className="text-xs text-gray-500 hover:text-gray-700 cursor-pointer flex items-center gap-1">
                 <X className="w-3.5 h-3.5" /> Retour aux contacts
               </button>
             </div>
 
-            {/* ── Setup: context + lists (visible when not yet analyzed) ── */}
-            {!classified && !discovering && !classifying && (
+            {/* ── Setup: define ICPs ── */}
+            {!classified && !classifying && (
               <>
-                <p className="text-xs text-gray-500 mb-2">
+                <p className="text-xs text-gray-500 mb-3">
                   {extraListIds.size > 0
                     ? `${mergedContacts.length} contacts uniques (doublons retirés)`
                     : `${contacts.length} contacts`}
@@ -1434,11 +967,7 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
                       {sameCompanyLists.map((l) => (
                         <label key={l.id} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:text-violet-700">
                           <input type="checkbox" checked={extraListIds.has(l.id)}
-                            onChange={(e) => {
-                              const next = new Set(extraListIds);
-                              e.target.checked ? next.add(l.id) : next.delete(l.id);
-                              setExtraListIds(next);
-                            }}
+                            onChange={(e) => { const next = new Set(extraListIds); e.target.checked ? next.add(l.id) : next.delete(l.id); setExtraListIds(next); }}
                             className="accent-violet-600 cursor-pointer" />
                           {l.name} <span className="text-[10px] text-gray-400">({l.count})</span>
                         </label>
@@ -1447,107 +976,88 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
                   </div>
                 )}
 
-                <textarea value={offerContext} onChange={(e) => setOfferContext(e.target.value)}
-                  rows={10} placeholder="Décrivez votre offre, vos clients cibles et leurs besoins..."
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm resize-y mb-1" />
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-[10px] text-gray-400">{offerContext.length > 0 ? `${offerContext.length.toLocaleString()} car.` : "Contexte offre obligatoire"}</span>
-                  <label className="flex items-center gap-1 text-[10px] text-violet-600 hover:text-violet-800 cursor-pointer">
-                    <Upload className="w-3 h-3" /> Charger .txt
-                    <input type="file" accept=".txt,.md" className="hidden" onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) {
-                        const reader = new FileReader();
-                        reader.onload = () => setOfferContext(reader.result as string);
-                        reader.readAsText(f, "utf-8");
-                      }
-                      e.target.value = "";
-                    }} />
-                  </label>
+                {/* Number of ICPs */}
+                <div className="flex items-center gap-3 mb-4">
+                  <label className="text-xs font-medium text-gray-700">Nombre d&apos;ICP :</label>
+                  <select value={icpDefs.length} onChange={(e) => setIcpCount(Number(e.target.value))}
+                    className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm">
+                    {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
                 </div>
 
-                <button onClick={() => runFullAnalysis()} disabled={!offerContext.trim()}
+                {/* ICP definitions */}
+                <div className="space-y-4 mb-4">
+                  {icpDefs.map((def, idx) => (
+                    <div key={idx} className="border border-violet-200 rounded-lg p-3 bg-violet-50/30">
+                      <p className="text-[10px] font-semibold text-violet-600 uppercase mb-2">ICP {idx + 1}</p>
+                      <input value={def.name} onChange={(e) => updateIcpDef(idx, "name", e.target.value)}
+                        placeholder="Nom de l'ICP (ex: Directeurs Patrimoine - Bailleurs sociaux)"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-2" />
+                      <div className="grid grid-cols-2 gap-2 mb-2">
+                        <div>
+                          <label className="text-[10px] font-medium text-gray-500">Postes ciblés</label>
+                          <textarea value={def.postes} onChange={(e) => updateIcpDef(idx, "postes", e.target.value)}
+                            rows={2} placeholder="Directeur patrimoine, responsable maintenance, DG..."
+                            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs resize-y" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-medium text-gray-500">Types d&apos;entreprises</label>
+                          <textarea value={def.entreprises} onChange={(e) => updateIcpDef(idx, "entreprises", e.target.value)}
+                            rows={2} placeholder="Bailleurs sociaux, OPH, SA d'HLM..."
+                            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs resize-y" />
+                        </div>
+                      </div>
+                      <details className="text-[10px] text-gray-400">
+                        <summary className="cursor-pointer hover:text-gray-600">Exclusions (optionnel)</summary>
+                        <div className="grid grid-cols-2 gap-2 mt-1">
+                          <input value={def.antiPostes} onChange={(e) => updateIcpDef(idx, "antiPostes", e.target.value)}
+                            placeholder="Postes à exclure..." className="border border-gray-200 rounded px-2 py-1 text-xs" />
+                          <input value={def.antiEntreprises} onChange={(e) => updateIcpDef(idx, "antiEntreprises", e.target.value)}
+                            placeholder="Entreprises à exclure..." className="border border-gray-200 rounded px-2 py-1 text-xs" />
+                        </div>
+                      </details>
+                    </div>
+                  ))}
+                </div>
+
+                <button onClick={runClassification} disabled={!canLaunch}
                   className="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 cursor-pointer">
-                  <Sparkles className="w-4 h-4" /> Lancer l&apos;analyse ({mergedContacts.length} contacts)
+                  <Sparkles className="w-4 h-4" /> Classer les {mergedContacts.length} contacts
                 </button>
               </>
             )}
 
             {/* ── Progress ── */}
-            {(discovering || classifying) && (
+            {classifying && (
               <div className="flex flex-col items-center justify-center py-16 gap-4">
                 <Loader2 className="w-8 h-8 animate-spin text-violet-500" />
-                <p className="text-sm font-medium text-gray-700">{classifyProgress || "Analyse en cours..."}</p>
-                <p className="text-xs text-gray-400">Découverte des ICP → Classification → Équilibrage automatique</p>
+                <p className="text-sm font-medium text-gray-700">{classifyProgress || "Classification en cours..."}</p>
               </div>
             )}
 
             {/* ── Results ── */}
             {classified && (
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-semibold text-gray-700 uppercase">
-                    Répartition — {totalClassified} contacts dans {Object.keys(categoryContactMap).length} ICP
-                  </h4>
-                </div>
+                <h4 className="text-xs font-semibold text-gray-700 uppercase">
+                  Répartition — {totalClassified} contacts dans {Object.keys(categoryContactMap).length} catégories
+                </h4>
 
-                {discoveredCategories.map((cat) => {
-                  const count = getCatCount(cat.name);
-                  if (count === 0) return null;
-                  const isTooLarge = count > 100;
-                  const isTooSmall = count < 25;
-                  const isDescExpanded = expandedDescs.has(cat.id);
-                  const isContactsExpanded = expandedContacts.has(cat.id);
-                  const catContactIds = categoryContactMap[cat.name] || [];
+                {Object.entries(categoryContactMap).sort(([, a], [, b]) => b.length - a.length).map(([catName, catIds]) => {
+                  if (catIds.length === 0) return null;
+                  const isExpanded = expandedContacts.has(catName);
                   return (
-                    <div key={cat.id} className={cn("border rounded-lg overflow-hidden",
-                      isTooLarge ? "border-red-200 bg-red-50/30" : isTooSmall ? "border-amber-200 bg-amber-50/30" : "border-gray-200"
-                    )}>
+                    <div key={catName} className="border border-gray-200 rounded-lg overflow-hidden">
                       <div className="p-3">
                         <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2 flex-1 min-w-0">
-                            {isTooSmall && (
-                              <input type="checkbox" checked={mergeSelection.has(cat.name)}
-                                onChange={(e) => {
-                                  const next = new Set(mergeSelection);
-                                  e.target.checked ? next.add(cat.name) : next.delete(cat.name);
-                                  setMergeSelection(next);
-                                }}
-                                className="accent-blue-600 cursor-pointer" title="Fusionner" />
-                            )}
-                            <button onClick={() => {
-                              const next = new Set(expandedDescs);
-                              isDescExpanded ? next.delete(cat.id) : next.add(cat.id);
-                              setExpandedDescs(next);
-                            }} className="flex-1 min-w-0 text-left cursor-pointer group">
-                              <p className={cn("text-sm font-medium text-gray-900", !isDescExpanded && "truncate")}>{cat.name}</p>
-                              <p className={cn("text-xs text-gray-500", !isDescExpanded && "truncate")}>{cat.description}</p>
-                              {cat.approach_key && isDescExpanded && (
-                                <p className="text-[10px] text-emerald-700 bg-emerald-50 rounded px-1.5 py-0.5 mt-1 inline-block">Approche : {cat.approach_key}</p>
-                              )}
-                              {cat.criteria && isDescExpanded && (
-                                <p className="text-[10px] text-gray-400 mt-1">Critères : {cat.criteria}</p>
-                              )}
-                            </button>
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0 ml-2">
-                            <button onClick={() => {
-                              const next = new Set(expandedContacts);
-                              isContactsExpanded ? next.delete(cat.id) : next.add(cat.id);
-                              setExpandedContacts(next);
-                            }} className={cn("text-xs font-semibold px-2 py-0.5 rounded-full cursor-pointer hover:ring-2 hover:ring-offset-1",
-                              isTooLarge ? "text-red-700 bg-red-100 hover:ring-red-300" : isTooSmall ? "text-amber-700 bg-amber-100 hover:ring-amber-300" : "text-violet-700 bg-violet-100 hover:ring-violet-300"
-                            )} title="Voir les contacts">{count}</button>
-                            {isTooLarge && (
-                              <button onClick={() => startSplit(cat.name)} disabled={qualifyLoading && splitTarget === cat.name}
-                                className="text-[10px] font-medium text-red-600 hover:text-red-800 cursor-pointer">
-                                {qualifyLoading && splitTarget === cat.name ? <Loader2 className="w-3 h-3 animate-spin" /> : "Découper"}
-                              </button>
-                            )}
-                          </div>
+                          <p className="text-sm font-medium text-gray-900 flex-1">{catName}</p>
+                          <button onClick={() => {
+                            const next = new Set(expandedContacts);
+                            isExpanded ? next.delete(catName) : next.add(catName);
+                            setExpandedContacts(next);
+                          }} className="text-xs font-semibold text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full cursor-pointer hover:ring-2 hover:ring-violet-300 hover:ring-offset-1"
+                            title="Voir les contacts">{catIds.length}</button>
                         </div>
-                        {/* Expanded contacts list */}
-                        {isContactsExpanded && catContactIds.length > 0 && (
+                        {isExpanded && (
                           <div className="mt-2 max-h-48 overflow-y-auto bg-gray-50 rounded-lg border border-gray-100">
                             <table className="w-full text-[10px]">
                               <thead className="bg-gray-100 sticky top-0">
@@ -1559,7 +1069,7 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
                                 </tr>
                               </thead>
                               <tbody>
-                                {catContactIds.map((id) => {
+                                {catIds.map((id) => {
                                   const c = contactById.get(id);
                                   if (!c) return null;
                                   return (
@@ -1576,88 +1086,15 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
                           </div>
                         )}
                       </div>
-                      {/* Inline split */}
-                      {splitTarget === cat.name && qualifyGroups.length > 0 && (
-                        <div className="mt-3 border-t border-red-200 pt-3 space-y-2">
-                          {qualifyGroups.map((g) => {
-                            const choice = qualifyChoices[g.id];
-                            return (
-                              <div key={g.id} className="bg-white border border-gray-200 rounded p-2">
-                                <p className="text-xs font-medium text-gray-800 mb-1">{g.label} <span className="text-gray-400">({g.count})</span></p>
-                                <div className="space-y-1">
-                                  {g.suggestions.map((s, si) => (
-                                    <label key={si} className={cn("flex items-center gap-2 p-1 rounded text-[10px] cursor-pointer",
-                                      choice?.action === s.type && (s.type !== "assign" || choice?.targetIcp === s.targetIcp) && (s.type !== "new_icp" || choice?.newIcpName === s.name)
-                                        ? "bg-red-50 border border-red-200" : "hover:bg-gray-50"
-                                    )}>
-                                      <input type="radio" name={`split_${g.id}`}
-                                        checked={choice?.action === s.type && (s.type !== "assign" || choice?.targetIcp === s.targetIcp) && (s.type !== "new_icp" || choice?.newIcpName === s.name)}
-                                        onChange={() => setQualifyChoices((prev) => ({
-                                          ...prev,
-                                          [g.id]: { groupId: g.id, action: s.type, targetIcp: s.type === "assign" ? s.targetIcp : undefined, newIcpName: s.type === "new_icp" ? s.name : undefined },
-                                        }))}
-                                        className="accent-red-600" />
-                                      {s.type === "assign" && <span>→ {s.targetIcp}</span>}
-                                      {s.type === "new_icp" && <span className="text-emerald-700 font-medium">+ {s.name}</span>}
-                                      {s.type === "exclude" && <span className="text-red-600">Exclure</span>}
-                                    </label>
-                                  ))}
-                                </div>
-                              </div>
-                            );
-                          })}
-                          <div className="flex gap-2">
-                            <button onClick={applySplit} className="flex-1 px-3 py-1.5 text-xs font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 cursor-pointer">Appliquer</button>
-                            <button onClick={() => { setSplitTarget(null); setQualifyGroups([]); setQualifyChoices({}); }}
-                              className="px-3 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-lg cursor-pointer">Annuler</button>
-                          </div>
-                        </div>
-                      )}
                     </div>
                   );
                 })}
 
-                {/* Extra categories (Autres, Hors cible) */}
-                {Object.entries(categoryContactMap).filter(([name]) => !discoveredCategories.find((c) => c.name === name)).map(([name, ids]) => (
-                  ids.length > 0 && (
-                    <div key={name} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-medium text-gray-600">{name}</p>
-                        <span className="text-xs text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full">{ids.length}</span>
-                      </div>
-                    </div>
-                  )
-                ))}
-
-                {/* Merge button */}
-                {mergeSelection.size >= 2 && (
-                  <button onClick={applyMerge}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-300 rounded-lg hover:bg-blue-100 cursor-pointer">
-                    Fusionner les {mergeSelection.size} catégories sélectionnées
-                  </button>
-                )}
-
-                {/* Refine */}
-                {showRefine ? (
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
-                    <textarea value={refineFeedback} onChange={(e) => setRefineFeedback(e.target.value)}
-                      rows={2} placeholder="Ex: Trop de contacts dans X, séparer Y par type de poste..."
-                      className="w-full border border-amber-300 rounded-lg px-3 py-2 text-xs resize-y" />
-                    <div className="flex gap-2">
-                      <button onClick={refineAndRerun} disabled={discovering || !refineFeedback.trim()}
-                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 cursor-pointer">
-                        <Sparkles className="w-3 h-3" /> Relancer l&apos;analyse
-                      </button>
-                      <button onClick={() => { setShowRefine(false); setRefineFeedback(""); }}
-                        className="px-3 py-2 text-xs text-gray-500 border border-gray-200 rounded-lg cursor-pointer">Annuler</button>
-                    </div>
-                  </div>
-                ) : (
-                  <button onClick={() => setShowRefine(true)}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-amber-700 border border-amber-300 rounded-lg hover:bg-amber-50 cursor-pointer">
-                    <Pencil className="w-3 h-3" /> Modifier et relancer
-                  </button>
-                )}
+                {/* Reclassify */}
+                <button onClick={() => { setClassified(false); setCategoryContactMap({}); }}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-amber-700 border border-amber-300 rounded-lg hover:bg-amber-50 cursor-pointer">
+                  <Pencil className="w-3 h-3" /> Modifier les ICP et relancer
+                </button>
 
                 {/* Download */}
                 <div className="space-y-2 pt-2 border-t border-gray-200">
