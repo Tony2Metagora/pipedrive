@@ -3,12 +3,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Users, Upload, Download, Search, Loader2, Sparkles, X, Trash2,
-  Building2, ChevronDown, Check, Pencil, Save,
-  Mail, FileArchive,
+  Building2, Check, Pencil, Save, Mail, FileArchive,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
 import JSZip from "jszip";
 
 // ─── Types ──────────────────────────────────────────────
@@ -53,13 +50,6 @@ interface IcpCategory {
   description: string;
   criteria: string;
   approach_key?: string;
-  estimatedCount?: number;
-  contactNumbers?: number[];
-}
-
-interface ExcludedSegment {
-  name: string;
-  reason: string;
   estimatedCount?: number;
   contactNumbers?: number[];
 }
@@ -116,7 +106,6 @@ export default function IcpCleanerPage() {
   // Download from ICP Finder
   const [emailOnly, setEmailOnly] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [approachMessages, setApproachMessages] = useState<Record<string, string>>({});
 
   // Memory popup
   const [showMemory, setShowMemory] = useState(false);
@@ -385,7 +374,6 @@ export default function IcpCleanerPage() {
         if (json.message) messages[def.name] = json.message;
       } catch { /* skip */ }
     }
-    setApproachMessages(messages);
     return messages;
   };
 
@@ -493,66 +481,6 @@ export default function IcpCleanerPage() {
     link.download = `${filename}.csv`;
     link.click();
     URL.revokeObjectURL(url);
-  };
-
-  // ─── Export ICP PDF ────────────────────────────────────
-
-  const exportIcpPdf = () => {
-    const list = lists.find((l) => l.id === selectedListId);
-    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-    const pageW = doc.internal.pageSize.getWidth();
-    let y = 15;
-
-    doc.setFontSize(16);
-    doc.setFont("helvetica", "bold");
-    doc.text(`ICP Analysis — ${list?.company || ""}`, 14, y);
-    y += 6;
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(120);
-    doc.text(`${totalClassified} contacts • ${new Date().toLocaleDateString("fr-FR")}`, 14, y);
-    doc.setTextColor(0);
-    y += 10;
-
-    for (const [catName, catIds] of Object.entries(categoryContactMap)) {
-      const catContacts = catIds.map((id) => contactById.get(id)).filter(Boolean) as IcpContact[];
-      if (catContacts.length === 0) continue;
-      if (y > 260) { doc.addPage(); y = 15; }
-
-      doc.setFillColor(124, 58, 237);
-      doc.roundedRect(14, y, pageW - 28, 7, 1, 1, "F");
-      doc.setFontSize(11);
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(255);
-      doc.text(`${catName}  (${catContacts.length})`, 17, y + 5);
-      doc.setTextColor(0);
-      y += 10;
-
-      const fullMsg = approachMessages[catName];
-      if (fullMsg) {
-        doc.setFontSize(8);
-        doc.setFont("helvetica", "italic");
-        doc.setTextColor(5, 122, 85);
-        const msgLines = doc.splitTextToSize(fullMsg, pageW - 32);
-        if (y + msgLines.length * 3.5 > 270) { doc.addPage(); y = 15; }
-        doc.text(msgLines, 16, y);
-        y += msgLines.length * 3.5 + 3;
-        doc.setTextColor(0);
-      }
-
-      autoTable(doc, {
-        startY: y,
-        margin: { left: 14, right: 14 },
-        head: [["Prenom", "Nom", "Poste", "Entreprise", "Email"]],
-        body: catContacts.map((c) => [c.prenom || "", c.nom || "", c.poste || "", c.entreprise || "", c.email || ""]),
-        styles: { fontSize: 7, cellPadding: 1.5 },
-        headStyles: { fillColor: [237, 233, 254], textColor: [88, 28, 135], fontStyle: "bold" },
-        alternateRowStyles: { fillColor: [249, 250, 251] },
-      });
-      y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
-    }
-
-    doc.save(`ICP-${list?.company || "export"}-${new Date().toISOString().slice(0, 10)}.pdf`);
   };
 
   // ─── Select all / toggle ──────────────────────────────
@@ -1102,17 +1030,11 @@ export default function IcpCleanerPage() {
                     <input type="checkbox" checked={emailOnly} onChange={(e) => setEmailOnly(e.target.checked)} className="accent-green-600" />
                     <Mail className="w-3.5 h-3.5" /> Uniquement avec email
                   </label>
-                  <div className="flex gap-2">
-                    <button onClick={downloadZip} disabled={downloading}
-                      className="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50 cursor-pointer">
-                      {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileArchive className="w-4 h-4" />}
-                      {downloading ? "Génération..." : "Télécharger (ZIP)"}
-                    </button>
-                    <button onClick={exportIcpPdf}
-                      className="flex items-center gap-2 px-4 py-3 text-sm font-medium text-violet-700 border border-violet-300 rounded-lg hover:bg-violet-50 cursor-pointer">
-                      <Download className="w-4 h-4" /> PDF
-                    </button>
-                  </div>
+                  <button onClick={downloadZip} disabled={downloading}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50 cursor-pointer">
+                    {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileArchive className="w-4 h-4" />}
+                    {downloading ? "Génération..." : "Télécharger (ZIP)"}
+                  </button>
                 </div>
               </div>
             )}
