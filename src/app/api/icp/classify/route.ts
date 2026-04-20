@@ -44,7 +44,7 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const { action, ids, company, offerContext, categories, existingCategories, qualifyChoices, groupContacts } = body as {
-    action: "discover" | "apply" | "qualify" | "apply-qualify";
+    action: "discover" | "apply" | "qualify" | "apply-qualify" | "generate-approach";
     ids: string[];
     company: string;
     offerContext?: string;
@@ -410,6 +410,30 @@ ${contactLines}`,
     return new Response(stream, {
       headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" },
     });
+  }
+
+  // ═══ GENERATE-APPROACH: generate approach message for a single ICP ═══
+  if (action === "generate-approach" && categories?.length) {
+    const cat = categories[0];
+    try {
+      const raw = await askAzureFast([
+        {
+          role: "system",
+          content: `Tu es un expert en prospection commerciale B2B pour ${company || "l'entreprise"}.
+À partir du contexte ci-dessous, rédige un message d'approche court et percutant (3-5 phrases max) pour le segment "${cat.name}".
+Le message doit être personnalisable avec {{prenom}} et {{entreprise}}.
+Commence directement par le message, sans introduction ni explication.
+Le ton doit être professionnel, direct et orienté valeur.`,
+        },
+        {
+          role: "user",
+          content: `Contexte de l'offre:\n${offerContext || "Non spécifié"}\n\nSegment ciblé: ${cat.name}${cat.description ? `\nDescription: ${cat.description}` : ""}${cat.criteria ? `\nCritères: ${cat.criteria}` : ""}`,
+        },
+      ], 500);
+      return new Response(JSON.stringify({ message: raw.trim() }), { headers: { "Content-Type": "application/json" } });
+    } catch {
+      return new Response(JSON.stringify({ message: "" }), { headers: { "Content-Type": "application/json" } });
+    }
   }
 
   return new Response(JSON.stringify({ error: "Action invalide" }), { status: 400, headers: { "Content-Type": "application/json" } });
