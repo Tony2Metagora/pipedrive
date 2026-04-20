@@ -4,10 +4,12 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Users, Upload, Download, Search, Loader2, Sparkles, X, Trash2,
   Plus, Building2, List, ChevronDown, Check, Pencil, Save,
+  HelpCircle, ChevronRight, Mail, FileArchive,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import JSZip from "jszip";
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -62,6 +64,23 @@ interface ExcludedSegment {
   contactNumbers?: number[];
 }
 
+interface QualifyGroup {
+  id: string;
+  label: string;
+  description: string;
+  contactNumbers: number[];
+  count: number;
+  suggestions: { type: "assign" | "new_icp" | "exclude"; targetIcp?: string; name?: string; description?: string; reason: string }[];
+  recommended: string;
+}
+
+interface QualifyChoice {
+  groupId: string;
+  action: "assign" | "new_icp" | "exclude";
+  targetIcp?: string;
+  newIcpName?: string;
+}
+
 // ─── Component ──────────────────────────────────────────
 
 export default function IcpCleanerPage() {
@@ -102,11 +121,26 @@ export default function IcpCleanerPage() {
   const [showRefine, setShowRefine] = useState(false);
   const [refineFeedback, setRefineFeedback] = useState("");
 
+  // Qualify "Autres" flow
+  const [showQualify, setShowQualify] = useState(false);
+  const [qualifyGroups, setQualifyGroups] = useState<QualifyGroup[]>([]);
+  const [qualifyChoices, setQualifyChoices] = useState<Record<string, QualifyChoice>>({});
+  const [qualifyLoading, setQualifyLoading] = useState(false);
+  const [qualifyApplying, setQualifyApplying] = useState(false);
+  const [expandedQGroups, setExpandedQGroups] = useState<Set<string>>(new Set());
+
+  // Export dropdown
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [emailOnly, setEmailOnly] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
   // Memory popup
   const [showMemory, setShowMemory] = useState(false);
   const [memoryContact, setMemoryContact] = useState<IcpContact | null>(null);
   const [memoryNewCat, setMemoryNewCat] = useState("");
   const [memoryReason, setMemoryReason] = useState("");
+
+  const exportMenuRef = useRef<HTMLDivElement>(null);
 
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -130,6 +164,16 @@ export default function IcpCleanerPage() {
 
   useEffect(() => { fetchLists(); }, [fetchLists]);
   useEffect(() => { fetchContacts(); }, [fetchContacts]);
+
+  // Close export menu on outside click
+  useEffect(() => {
+    if (!showExportMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) setShowExportMenu(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showExportMenu]);
 
   // Load extra list contacts when toggled
   useEffect(() => {
@@ -398,16 +442,124 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
     setTimeout(() => setActionMsg(null), 3000);
   };
 
+  // ─── Qualify "Autres" contacts ─────────────────────────
+
+  const autresContacts = useMemo(() => {
+    return contacts.filter((c) => c.icp_category === "Autres / à qualifier" || c.icp_category === "Autres / a qualifier");
+  }, [contacts]);
+
+  const startQualify = async () => {
+    if (autresContacts.length === 0) return;
+    setShowQualify(true);
+    setQualifyLoading(true);
+    setQualifyGroups([]);
+    setQualifyChoices({});
+    const list = lists.find((l) => l.id === selectedListId);
+    const existingCats = icpCategories
+      .filter((c) => c !== "Autres / à qualifier" && c !== "Autres / a qualifier" && c !== "Hors cible")
+      .map((name) => {
+        const sample = contacts.find((ct) => ct.icp_category === name);
+        return { name, description: sample?.icp_reason || "" };
+      });
+    try {
+      const res = await fetch("/api/icp/classify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "qualify",
+          ids: autresContacts.map((c) => c.id),
+          company: list?.company || "",
+          offerContext,
+          existingCategories: existingCats,
+        }),
+      });
+      const json = await res.json();
+      const groups: QualifyGroup[] = json.data?.groups || [];
+      setQualifyGroups(groups);
+      // Pre-select recommended action for each group
+      const defaults: Record<string, QualifyChoice> = {};
+      for (const g of groups) {
+        const rec = g.suggestions.find((s) => s.type === g.recommended) || g.suggestions[0];
+        if (rec) {
+          defaults[g.id] = {
+            groupId: g.id,
+            action: rec.type,
+            targetIcp: rec.type === "assign" ? rec.targetIcp : undefined,
+            newIcpName: rec.type === "new_icp" ? rec.name : undefined,
+          };
+        }
+      }
+      setQualifyChoices(defaults);
+    } catch { setError("Erreur lors de l'analyse des contacts non classés"); }
+    setQualifyLoading(false);
+  };
+
+  const applyQualification = async () => {
+    if (Object.keys(qualifyChoices).length === 0) return;
+    setQualifyApplying(true);
+    const list = lists.find((l) => l.id === selectedListId);
+    // Build groupContacts map: groupId -> contact IDs
+    const groupContactsMap: Record<string, string[]> = {};
+    for (const g of qualifyGroups) {
+      groupContactsMap[g.id] = g.contactNumbers
+        .map((n) => autresContacts[n - 1]?.id)
+        .filter(Boolean) as string[];
+    }
+    try {
+      const res = await fetch("/api/icp/classify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "apply-qualify",
+          ids: autresContacts.map((c) => c.id),
+          company: list?.company || "",
+          qualifyChoices: Object.values(qualifyChoices),
+          groupContacts: groupContactsMap,
+        }),
+      });
+      if (!res.body) throw new Error("No response body");
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        let eventType = "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) { eventType = line.slice(7).trim(); continue; }
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (eventType === "done") {
+                setActionMsg(`${data.qualified} contacts qualifiés`);
+                setTimeout(() => setActionMsg(null), 5000);
+                setShowQualify(false);
+                fetchContacts();
+              }
+            } catch { /* ignore */ }
+          }
+        }
+      }
+    } catch (e) { setError(String(e)); }
+    setQualifyApplying(false);
+  };
+
   // ─── Export CSV ────────────────────────────────────────
 
-  const exportCsv = async () => {
+  const exportSingleCsv = async (category?: string) => {
     if (!selectedListId) return;
+    setExporting(true);
     const list = lists.find((l) => l.id === selectedListId);
     const baseName = list?.name || "icp-export";
-    const suffix = icpFilter ? ` - ICP ${icpFilter}` : "";
+    const cat = category || icpFilter;
+    const suffix = cat ? ` - ICP ${cat}` : "";
     const filename = `${baseName}${suffix}`;
     const params = new URLSearchParams({ list_id: selectedListId, filename });
-    if (icpFilter) params.set("icp_category", icpFilter);
+    if (cat) params.set("icp_category", cat);
+    if (emailOnly) params.set("email_only", "1");
     const res = await fetch(`/api/icp/download?${params}`);
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -416,6 +568,34 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
     link.download = `${filename}.csv`;
     link.click();
     URL.revokeObjectURL(url);
+    setExporting(false);
+    setShowExportMenu(false);
+  };
+
+  const exportAllZip = async () => {
+    if (!selectedListId || icpCategories.length === 0) return;
+    setExporting(true);
+    const list = lists.find((l) => l.id === selectedListId);
+    const baseName = list?.name || "icp-export";
+    const zip = new JSZip();
+    for (const cat of icpCategories) {
+      const params = new URLSearchParams({ list_id: selectedListId, filename: `${baseName} - ${cat}` });
+      params.set("icp_category", cat);
+      if (emailOnly) params.set("email_only", "1");
+      const res = await fetch(`/api/icp/download?${params}`);
+      const text = await res.text();
+      const safeName = cat.replace(/[\\/:*?"<>|]/g, "").slice(0, 60);
+      zip.file(`${safeName}.csv`, text);
+    }
+    const blob = await zip.generateAsync({ type: "blob" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${baseName} - Tous les ICP.zip`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setExporting(false);
+    setShowExportMenu(false);
   };
 
   // ─── Export ICP PDF ────────────────────────────────────
@@ -614,11 +794,58 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
                 className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-violet-600 border border-violet-300 rounded-lg hover:bg-violet-50 disabled:opacity-50 cursor-pointer">
                 <Sparkles className="w-4 h-4" /> ICP Finder
               </button>
-              <button onClick={exportCsv}
-                disabled={filtered.length === 0}
-                className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-green-600 border border-green-300 rounded-lg hover:bg-green-50 disabled:opacity-50 cursor-pointer">
-                <Download className="w-4 h-4" /> Export CSV
-              </button>
+              <div className="relative" ref={exportMenuRef}>
+                <button onClick={() => setShowExportMenu(!showExportMenu)}
+                  disabled={filtered.length === 0}
+                  className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-green-600 border border-green-300 rounded-lg hover:bg-green-50 disabled:opacity-50 cursor-pointer">
+                  {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Export CSV <ChevronDown className="w-3 h-3" />
+                </button>
+                {showExportMenu && (
+                  <div className="absolute right-0 top-full mt-1 w-64 bg-white border border-gray-200 rounded-xl shadow-lg z-50 py-2">
+                    {/* Email filter toggle */}
+                    <label className="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 cursor-pointer">
+                      <input type="checkbox" checked={emailOnly} onChange={(e) => setEmailOnly(e.target.checked)}
+                        className="accent-green-600" />
+                      <Mail className="w-3.5 h-3.5" /> Uniquement avec email
+                    </label>
+                    <div className="border-t border-gray-100 my-1" />
+                    {/* Export current filter / single ICP */}
+                    <button onClick={() => exportSingleCsv()}
+                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-green-50 flex items-center gap-2 cursor-pointer">
+                      <Download className="w-3.5 h-3.5 text-green-600" />
+                      {icpFilter ? `Exporter "${icpFilter}"` : "Exporter tout (1 fichier CSV)"}
+                    </button>
+                    {/* Export all as ZIP */}
+                    {icpCategories.length > 1 && (
+                      <button onClick={exportAllZip}
+                        className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-green-50 flex items-center gap-2 cursor-pointer">
+                        <FileArchive className="w-3.5 h-3.5 text-green-600" />
+                        Exporter tout (ZIP, 1 CSV par ICP)
+                      </button>
+                    )}
+                    {/* Per-ICP quick export */}
+                    {icpCategories.length > 1 && !icpFilter && (
+                      <>
+                        <div className="border-t border-gray-100 my-1" />
+                        <p className="px-3 py-1 text-[10px] font-semibold text-gray-400 uppercase">Par ICP</p>
+                        {icpCategories.map((cat) => (
+                          <button key={cat} onClick={() => exportSingleCsv(cat)}
+                            className="w-full text-left px-3 py-1.5 text-[11px] text-gray-600 hover:bg-green-50 flex items-center gap-2 cursor-pointer truncate">
+                            <ChevronRight className="w-3 h-3 text-gray-400 shrink-0" />
+                            <span className="truncate">{cat}</span>
+                            <span className="text-[9px] text-gray-400 ml-auto shrink-0">({contacts.filter((c) => c.icp_category === cat).length})</span>
+                          </button>
+                        ))}
+                      </>
+                    )}
+                    <div className="border-t border-gray-100 my-1" />
+                    <button onClick={() => setShowExportMenu(false)}
+                      className="w-full text-left px-3 py-1.5 text-xs text-gray-400 hover:bg-gray-50 cursor-pointer">
+                      Fermer
+                    </button>
+                  </div>
+                )}
+              </div>
             </>
           )}
           <button onClick={() => setShowUpload(true)}
@@ -754,11 +981,21 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
                       return (
                         <div key={cat} className="pb-2">
                           {/* ICP header */}
-                          <div className="sticky top-0 z-10 bg-violet-50 border-b border-violet-200 px-3 py-2 flex items-center justify-between">
+                          <div className={cn("sticky top-0 z-10 border-b px-3 py-2 flex items-center justify-between",
+                            (cat === "Autres / à qualifier" || cat === "Autres / a qualifier")
+                              ? "bg-amber-50 border-amber-200"
+                              : "bg-violet-50 border-violet-200"
+                          )}>
                             <div className="flex items-center gap-2">
-                              <span className="text-xs font-semibold text-violet-800">{cat}</span>
-                              <span className="text-[10px] text-violet-500 font-medium">{catContacts.length} contact{catContacts.length > 1 ? "s" : ""}</span>
+                              <span className={cn("text-xs font-semibold", (cat === "Autres / à qualifier" || cat === "Autres / a qualifier") ? "text-amber-800" : "text-violet-800")}>{cat}</span>
+                              <span className={cn("text-[10px] font-medium", (cat === "Autres / à qualifier" || cat === "Autres / a qualifier") ? "text-amber-500" : "text-violet-500")}>{catContacts.length} contact{catContacts.length > 1 ? "s" : ""}</span>
                             </div>
+                            {(cat === "Autres / à qualifier" || cat === "Autres / a qualifier") && catContacts.length > 0 && (
+                              <button onClick={startQualify}
+                                className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium text-amber-700 bg-amber-100 border border-amber-300 rounded-lg hover:bg-amber-200 cursor-pointer">
+                                <HelpCircle className="w-3.5 h-3.5" /> Qualifier ces contacts
+                              </button>
+                            )}
                           </div>
                           {/* Contact rows */}
                           <table className="w-full text-xs">
@@ -1211,6 +1448,139 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
                   </button>
                 </div>
               </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Qualify "Autres" modal ═══ */}
+      {showQualify && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl mx-4 p-5 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <HelpCircle className="w-4 h-4 text-amber-600" /> Qualifier les contacts non classés
+              </h3>
+              <button onClick={() => setShowQualify(false)} className="cursor-pointer"><X className="w-4 h-4 text-gray-400" /></button>
+            </div>
+
+            <p className="text-xs text-gray-500 mb-4">
+              {autresContacts.length} contacts dans &quot;Autres / à qualifier&quot;. L&apos;IA les a regroupés par profil similaire. Choisissez une action pour chaque groupe.
+            </p>
+
+            {qualifyLoading ? (
+              <div className="flex flex-col items-center justify-center py-12 gap-3">
+                <Loader2 className="w-6 h-6 animate-spin text-amber-500" />
+                <p className="text-sm text-gray-500">Analyse des contacts non classés...</p>
+                <p className="text-xs text-gray-400">L&apos;IA regroupe les profils similaires et propose des options</p>
+              </div>
+            ) : qualifyGroups.length > 0 ? (
+              <div className="space-y-3">
+                {qualifyGroups.map((g) => {
+                  const choice = qualifyChoices[g.id];
+                  return (
+                    <div key={g.id} className="border border-gray-200 rounded-lg overflow-hidden">
+                      {/* Group header */}
+                      <div className="bg-amber-50 px-3 py-2.5 border-b border-amber-100">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-medium text-amber-900">{g.label}</p>
+                            <p className="text-xs text-amber-700 mt-0.5">{g.description}</p>
+                          </div>
+                          <span className="text-xs font-semibold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full shrink-0 ml-2">
+                            {g.count} contact{g.count > 1 ? "s" : ""}
+                          </span>
+                        </div>
+                        {/* Expand contacts */}
+                        <button onClick={() => {
+                          const next = new Set(expandedQGroups);
+                          next.has(g.id) ? next.delete(g.id) : next.add(g.id);
+                          setExpandedQGroups(next);
+                        }} className="flex items-center gap-1 text-[10px] text-amber-600 mt-1.5 cursor-pointer hover:text-amber-800">
+                          <ChevronDown className={cn("w-3 h-3 transition-transform", expandedQGroups.has(g.id) && "rotate-180")} />
+                          Voir les contacts
+                        </button>
+                        {expandedQGroups.has(g.id) && (
+                          <div className="mt-1.5 max-h-28 overflow-y-auto bg-white/60 rounded p-1.5 space-y-0.5">
+                            {g.contactNumbers.map((num) => {
+                              const c = autresContacts[num - 1];
+                              return c ? (
+                                <p key={num} className="text-[10px] text-gray-600 truncate">
+                                  {c.prenom} {c.nom} — <span className="text-gray-400">{c.poste} @ {c.entreprise}</span>
+                                </p>
+                              ) : null;
+                            })}
+                          </div>
+                        )}
+                      </div>
+                      {/* Suggestions / choices */}
+                      <div className="px-3 py-2 space-y-1.5">
+                        {g.suggestions.map((s, si) => (
+                          <label key={si} className={cn(
+                            "flex items-start gap-2 p-2 rounded-lg border cursor-pointer text-xs",
+                            choice?.action === s.type && (s.type !== "assign" || choice?.targetIcp === s.targetIcp) && (s.type !== "new_icp" || choice?.newIcpName === s.name)
+                              ? "border-amber-400 bg-amber-50"
+                              : "border-gray-100 hover:bg-gray-50"
+                          )}>
+                            <input type="radio" name={`qualify_${g.id}`}
+                              checked={choice?.action === s.type && (s.type !== "assign" || choice?.targetIcp === s.targetIcp) && (s.type !== "new_icp" || choice?.newIcpName === s.name)}
+                              onChange={() => setQualifyChoices((prev) => ({
+                                ...prev,
+                                [g.id]: {
+                                  groupId: g.id,
+                                  action: s.type,
+                                  targetIcp: s.type === "assign" ? s.targetIcp : undefined,
+                                  newIcpName: s.type === "new_icp" ? s.name : undefined,
+                                },
+                              }))}
+                              className="accent-amber-600 mt-0.5" />
+                            <div className="flex-1">
+                              {s.type === "assign" && (
+                                <p className="text-gray-800">
+                                  Rattacher à <span className="font-semibold text-violet-700">{s.targetIcp}</span>
+                                </p>
+                              )}
+                              {s.type === "new_icp" && (
+                                <p className="text-gray-800">
+                                  Créer un nouvel ICP : <span className="font-semibold text-emerald-700">{s.name}</span>
+                                </p>
+                              )}
+                              {s.type === "exclude" && (
+                                <p className="text-gray-800">Exclure <span className="text-red-600">(hors cible)</span></p>
+                              )}
+                              <p className="text-[10px] text-gray-500 mt-0.5">{s.reason}</p>
+                            </div>
+                            {s.type === g.recommended && (
+                              <span className="text-[9px] font-semibold text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded shrink-0">Recommandé</span>
+                            )}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Summary + Apply */}
+                <div className="bg-gray-50 rounded-lg p-3 mt-2">
+                  <p className="text-xs text-gray-600 mb-2">
+                    <strong>Résumé :</strong>{" "}
+                    {Object.values(qualifyChoices).filter((c) => c.action === "assign").length > 0 &&
+                      `${Object.values(qualifyChoices).filter((c) => c.action === "assign").reduce((sum, c) => sum + (qualifyGroups.find((g) => g.id === c.groupId)?.count || 0), 0)} vers ICP existants`}
+                    {Object.values(qualifyChoices).filter((c) => c.action === "new_icp").length > 0 &&
+                      ` • ${Object.values(qualifyChoices).filter((c) => c.action === "new_icp").reduce((sum, c) => sum + (qualifyGroups.find((g) => g.id === c.groupId)?.count || 0), 0)} vers nouveaux ICP`}
+                    {Object.values(qualifyChoices).filter((c) => c.action === "exclude").length > 0 &&
+                      ` • ${Object.values(qualifyChoices).filter((c) => c.action === "exclude").reduce((sum, c) => sum + (qualifyGroups.find((g) => g.id === c.groupId)?.count || 0), 0)} exclus`}
+                  </p>
+                  <button onClick={applyQualification}
+                    disabled={qualifyApplying || Object.keys(qualifyChoices).length === 0}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 cursor-pointer">
+                    {qualifyApplying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                    {qualifyApplying ? "Application en cours..." : "Appliquer la qualification"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400 text-center py-8">Aucun groupe identifié</p>
             )}
           </div>
         </div>

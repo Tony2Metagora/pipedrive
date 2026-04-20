@@ -36,11 +36,13 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const listId = searchParams.get("list_id");
   const icpCategory = searchParams.get("icp_category");
+  const emailOnlyParam = searchParams.get("email_only");
   const filename = searchParams.get("filename") || "icp-export";
 
   let contacts = await readBlob<IcpContact>("icp-contacts");
   if (listId) contacts = contacts.filter((c) => c.list_id === listId);
   if (icpCategory) contacts = contacts.filter((c) => c.icp_category === icpCategory);
+  if (emailOnlyParam === "1") contacts = contacts.filter((c) => c.email?.trim());
 
   const header = COLUMNS.map((c) => c.label).join(";");
   const rows = contacts.map((c) =>

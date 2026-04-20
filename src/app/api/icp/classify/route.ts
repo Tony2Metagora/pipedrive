@@ -43,12 +43,15 @@ export async function POST(request: Request) {
   if (guard.denied) return guard.denied;
 
   const body = await request.json();
-  const { action, ids, company, offerContext, categories } = body as {
-    action: "discover" | "apply";
+  const { action, ids, company, offerContext, categories, existingCategories, qualifyChoices, groupContacts } = body as {
+    action: "discover" | "apply" | "qualify" | "apply-qualify";
     ids: string[];
     company: string;
     offerContext?: string;
     categories?: IcpCategory[];
+    existingCategories?: { name: string; description: string }[];
+    qualifyChoices?: { groupId: string; action: "assign" | "new_icp" | "exclude"; targetIcp?: string; newIcpName?: string }[];
+    groupContacts?: Record<string, string[]>;
   };
 
   if (!ids?.length) {
@@ -286,6 +289,120 @@ Le ton doit être professionnel, direct et orienté valeur.`,
         }
 
         send("done", { classified: results.length, errors, total: contacts.length });
+        controller.close();
+      },
+    });
+
+    return new Response(stream, {
+      headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" },
+    });
+  }
+
+  // ═══ QUALIFY: cluster "Autres" contacts and propose questions ═══
+  if (action === "qualify") {
+    const existingIcpList = (existingCategories || []).map((c) => `- ${c.name}: ${c.description}`).join("\n");
+
+    const contactLines = contacts.map((c, i) => `${i + 1}. ${c.poste || "?"} | ${c.entreprise || "?"}${c.ville ? ` (${c.ville})` : ""}`).join("\n");
+
+    const raw = await askAzureFast([
+      {
+        role: "system",
+        content: `Tu es un expert en segmentation B2B. On te donne des contacts qui n'ont pas pu être classés lors d'une première analyse ICP.
+
+Ton travail : regrouper ces contacts en **sous-groupes homogènes** (3 à 8 groupes max) et pour chaque groupe proposer des options de classement.
+
+ICP existants :
+${existingIcpList}
+
+${memoryBlock}
+
+Pour chaque groupe, propose :
+1. Un rattachement à un ICP existant (si pertinent)
+2. La création d'un nouvel ICP (avec nom et description)
+3. L'exclusion (hors cible)
+
+Réponds UNIQUEMENT en JSON valide, sans markdown :
+{
+  "groups": [
+    {
+      "id": "g1",
+      "label": "Nom court du groupe",
+      "description": "Description du profil commun",
+      "contactNumbers": [1, 5, 12],
+      "count": 3,
+      "suggestions": [
+        { "type": "assign", "targetIcp": "Nom ICP existant", "reason": "Pourquoi ce rattachement" },
+        { "type": "new_icp", "name": "Nom du nouvel ICP", "description": "Description", "reason": "Pourquoi un nouvel ICP" },
+        { "type": "exclude", "reason": "Pourquoi exclure" }
+      ],
+      "recommended": "assign"
+    }
+  ]
+}
+
+IMPORTANT : Chaque contact doit apparaître dans exactement un groupe. La somme de tous les count doit faire ${contacts.length}.`,
+      },
+      {
+        role: "user",
+        content: `Contexte offre de ${company || "l'entreprise"}:
+${offerContext || "Non spécifié"}
+
+Voici les ${contacts.length} contacts non classés à analyser :
+${contactLines}`,
+      },
+    ], Math.min(12000, 3000 + contacts.length * 15));
+
+    try {
+      const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+      const parsed = JSON.parse(cleaned);
+      return new Response(JSON.stringify({ data: parsed }), { headers: { "Content-Type": "application/json" } });
+    } catch {
+      return new Response(JSON.stringify({ data: { groups: [] }, raw }), { headers: { "Content-Type": "application/json" } });
+    }
+  }
+
+  // ═══ APPLY-QUALIFY: reclassify based on user choices ═══
+  if (action === "apply-qualify" && qualifyChoices?.length) {
+    const stream = new ReadableStream({
+      async start(controller) {
+        const send = (event: string, data: unknown) => {
+          try { controller.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)); } catch { /* closed */ }
+        };
+
+        send("progress", { message: "Application des choix de qualification..." });
+
+        // Build mapping: contactId -> new category
+        const updates: { id: string; icp_category: string; icp_reason: string }[] = [];
+        for (const choice of qualifyChoices) {
+          const contactIds = groupContacts?.[choice.groupId] || [];
+          for (const contactId of contactIds) {
+            if (choice.action === "assign" && choice.targetIcp) {
+              updates.push({ id: contactId, icp_category: choice.targetIcp, icp_reason: "Qualifié manuellement" });
+            } else if (choice.action === "new_icp" && choice.newIcpName) {
+              updates.push({ id: contactId, icp_category: choice.newIcpName, icp_reason: "Nouveau segment identifié" });
+            } else if (choice.action === "exclude") {
+              updates.push({ id: contactId, icp_category: "Hors cible", icp_reason: "Exclu lors de la qualification" });
+            }
+          }
+        }
+
+        // Save updates
+        if (updates.length > 0) {
+          await withLock("icp-contacts", async () => {
+            const all = await readBlob<IcpContact>("icp-contacts");
+            const updateMap = new Map(updates.map((u) => [u.id, u]));
+            for (const c of all) {
+              const u = updateMap.get(c.id);
+              if (u) {
+                c.icp_category = u.icp_category;
+                c.icp_reason = u.icp_reason;
+              }
+            }
+            await writeBlob("icp-contacts", all);
+          });
+        }
+
+        send("done", { qualified: updates.length, total: contacts.length });
         controller.close();
       },
     });
