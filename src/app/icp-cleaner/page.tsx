@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Users, Upload, Download, Search, Loader2, Sparkles, X, Trash2,
   Building2, ChevronDown, Check, Pencil, Save,
-  HelpCircle, Mail, FileArchive,
+  Mail, FileArchive,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { jsPDF } from "jspdf";
@@ -113,18 +113,22 @@ export default function IcpCleanerPage() {
   const [discoveredCategories, setDiscoveredCategories] = useState<IcpCategory[]>([]);
   const [discovering, setDiscovering] = useState(false);
   const [excludedSegments, setExcludedSegments] = useState<ExcludedSegment[]>([]);
-  const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set());
   const [editingCatIdx, setEditingCatIdx] = useState<number | null>(null);
-  const [editCatReason, setEditCatReason] = useState("");
   const [showRefine, setShowRefine] = useState(false);
   const [refineFeedback, setRefineFeedback] = useState("");
 
-  // Qualify "Autres" (inline in ICP Finder)
+  // Step 2: Batch classification
+  const [classifying, setClassifying] = useState(false);
+  const [classifyProgress, setClassifyProgress] = useState("");
+  const [classified, setClassified] = useState(false); // true once batch-classify is done
+  const [categoryContactMap, setCategoryContactMap] = useState<Record<string, string[]>>({}); // categoryName → contactIds
+
+  // Step 3: Rebalance (split/merge)
   const [qualifyGroups, setQualifyGroups] = useState<QualifyGroup[]>([]);
   const [qualifyChoices, setQualifyChoices] = useState<Record<string, QualifyChoice>>({});
   const [qualifyLoading, setQualifyLoading] = useState(false);
-  const [expandedQGroups, setExpandedQGroups] = useState<Set<string>>(new Set());
-  const [qualifyActive, setQualifyActive] = useState(false);
+  const [splitTarget, setSplitTarget] = useState<string | null>(null); // category being split
+  const [mergeSelection, setMergeSelection] = useState<Set<string>>(new Set()); // categories to merge
 
   // Download from ICP Finder
   const [emailOnly, setEmailOnly] = useState(false);
@@ -287,50 +291,18 @@ export default function IcpCleanerPage() {
     setTimeout(() => setActionMsg(null), 3000);
   };
 
-  // ─── Dedup contactNumbers across categories ───────────
-  // The AI may return the same contact in multiple categories.
-  // This ensures each contact appears in exactly one category (first-come).
-
-  const dedupCategoryContacts = (
-    categories: IcpCategory[],
-    excluded: ExcludedSegment[],
-    totalContacts: number,
-  ): { categories: IcpCategory[]; excluded: ExcludedSegment[] } => {
-    const seen = new Set<number>();
-    const dedupedCats = categories.map((cat) => {
-      const uniqueNums: number[] = [];
-      for (const n of cat.contactNumbers || []) {
-        if (n >= 1 && n <= totalContacts && !seen.has(n)) {
-          seen.add(n);
-          uniqueNums.push(n);
-        }
-      }
-      return { ...cat, contactNumbers: uniqueNums, estimatedCount: uniqueNums.length };
-    });
-    const dedupedExcl = excluded.map((seg) => {
-      const uniqueNums: number[] = [];
-      for (const n of seg.contactNumbers || []) {
-        if (n >= 1 && n <= totalContacts && !seen.has(n)) {
-          seen.add(n);
-          uniqueNums.push(n);
-        }
-      }
-      return { ...seg, contactNumbers: uniqueNums, estimatedCount: uniqueNums.length };
-    });
-    const total = dedupedCats.reduce((s, c) => s + c.contactNumbers.length, 0)
-      + dedupedExcl.reduce((s, e) => s + (e.contactNumbers?.length || 0), 0);
-    if (total !== totalContacts) {
-      console.warn(`[ICP] Dedup: ${total}/${totalContacts} contacts assigned. ${totalContacts - total} unassigned.`);
-    }
-    return { categories: dedupedCats, excluded: dedupedExcl };
-  };
-
   // ─── ICP Finder ───────────────────────────────────────
 
+  const isAutresCat = (name: string) =>
+    name === "Autres / à qualifier" || name === "Autres / a qualifier";
+
+  // Step 1: Discover taxonomy (no contact assignment)
   const discoverCategories = async () => {
     if (!offerContext.trim()) return;
     setDiscovering(true);
     setDiscoveredCategories([]);
+    setClassified(false);
+    setCategoryContactMap({});
     const list = lists.find((l) => l.id === selectedListId);
     try {
       const res = await fetch("/api/icp/classify", {
@@ -344,12 +316,8 @@ export default function IcpCleanerPage() {
         }),
       });
       const json = await res.json();
-      const contactCount = selected.size > 0 ? selected.size : mergedContacts.length;
-      const { categories: dedupedCats, excluded: dedupedExcl } = dedupCategoryContacts(
-        json.data?.categories || [], json.data?.excluded_segments || [], contactCount,
-      );
-      setDiscoveredCategories(dedupedCats);
-      setExcludedSegments(dedupedExcl);
+      setDiscoveredCategories(json.data?.categories || []);
+      setExcludedSegments(json.data?.excluded_segments || []);
     } catch { setError("Erreur classification"); }
     setDiscovering(false);
   };
@@ -357,19 +325,21 @@ export default function IcpCleanerPage() {
   const refineCategories = async () => {
     if (!refineFeedback.trim()) return;
     setDiscovering(true);
+    setClassified(false);
+    setCategoryContactMap({});
     const list = lists.find((l) => l.id === selectedListId);
-    const currentSummary = discoveredCategories.map((c) => `- ${c.name}: ${c.description} (~${c.estimatedCount || "?"} contacts)`).join("\n");
+    const currentSummary = discoveredCategories.map((c) => `- ${c.name}: ${c.description}`).join("\n");
     const excludedSummary = excludedSegments.map((s) => `- ${s.name} (exclu): ${s.reason}`).join("\n");
     const refinedContext = `${offerContext}
 
---- CLASSIFICATION PRÉCÉDENTE ---
+--- CATÉGORIES PRÉCÉDENTES ---
 ${currentSummary}
 ${excludedSummary ? `\nSegments exclus:\n${excludedSummary}` : ""}
 
 --- FEEDBACK UTILISATEUR ---
 ${refineFeedback}
 
-IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP. Reclass tous les contacts en conséquence.`;
+IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
 
     try {
       const res = await fetch("/api/icp/classify", {
@@ -383,46 +353,96 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
         }),
       });
       const json = await res.json();
-      const contactCount = selected.size > 0 ? selected.size : mergedContacts.length;
-      const { categories: dedupedCats, excluded: dedupedExcl } = dedupCategoryContacts(
-        json.data?.categories || [], json.data?.excluded_segments || [], contactCount,
-      );
-      setDiscoveredCategories(dedupedCats);
-      setExcludedSegments(dedupedExcl);
+      setDiscoveredCategories(json.data?.categories || []);
+      setExcludedSegments(json.data?.excluded_segments || []);
       setShowRefine(false);
       setRefineFeedback("");
     } catch { setError("Erreur re-classification"); }
     setDiscovering(false);
   };
 
-  // ─── Qualify "Autres" inline in ICP Finder ─────────────
+  // Step 2: Batch classify contacts into validated categories
+  const startClassify = async () => {
+    if (discoveredCategories.length === 0) return;
+    setClassifying(true);
+    setClassifyProgress("Démarrage...");
+    const list = lists.find((l) => l.id === selectedListId);
+    try {
+      const res = await fetch("/api/icp/classify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "batch-classify",
+          ids: selected.size > 0 ? Array.from(selected) : mergedContacts.map((c) => c.id),
+          company: list?.company || "",
+          categories: discoveredCategories,
+          offerContext,
+        }),
+      });
+      if (!res.body) throw new Error("No response body");
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        let eventType = "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) { eventType = line.slice(7).trim(); continue; }
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (eventType === "progress") setClassifyProgress(data.message || "");
+              if (eventType === "done") {
+                // Build categoryContactMap from results
+                const map: Record<string, string[]> = {};
+                for (const r of (data.results || []) as { id: string; icp_category: string }[]) {
+                  if (!map[r.icp_category]) map[r.icp_category] = [];
+                  map[r.icp_category].push(r.id);
+                }
+                setCategoryContactMap(map);
+                setClassified(true);
+                setClassifyProgress("");
+                setActionMsg(`${data.classified}/${data.total} contacts classifiés`);
+                setTimeout(() => setActionMsg(null), 5000);
+              }
+            } catch { /* ignore */ }
+          }
+        }
+      }
+    } catch (e) { setError(String(e)); }
+    setClassifying(false);
+  };
 
-  const isAutresCat = (name: string) =>
-    name === "Autres / à qualifier" || name === "Autres / a qualifier";
+  // Computed: contact count per category (after classification)
+  const getCatCount = (catName: string) => (categoryContactMap[catName] || []).length;
+  const totalClassified = Object.values(categoryContactMap).reduce((s, ids) => s + ids.length, 0);
 
-  const startQualifyDiscovered = async () => {
-    const autresCat = discoveredCategories.find((c) => isAutresCat(c.name));
-    if (!autresCat?.contactNumbers?.length) return;
-    setQualifyActive(true);
+  // Step 3: Rebalance — split large category
+  const startSplit = async (catName: string) => {
+    const contactIds = categoryContactMap[catName] || [];
+    if (contactIds.length === 0) return;
+    setSplitTarget(catName);
     setQualifyLoading(true);
     setQualifyGroups([]);
     setQualifyChoices({});
     const list = lists.find((l) => l.id === selectedListId);
-    const existingCats = discoveredCategories
-      .filter((c) => !isAutresCat(c.name))
+    const otherCats = discoveredCategories
+      .filter((c) => c.name !== catName && !isAutresCat(c.name))
       .map((c) => ({ name: c.name, description: c.description }));
-    // Get actual contact IDs for the "Autres" contacts
-    const autresIds = autresCat.contactNumbers.map((n) => mergedContacts[n - 1]?.id).filter(Boolean);
     try {
       const res = await fetch("/api/icp/classify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "qualify",
-          ids: autresIds,
+          ids: contactIds,
           company: list?.company || "",
           offerContext,
-          existingCategories: existingCats,
+          existingCategories: otherCats,
         }),
       });
       const json = await res.json();
@@ -441,126 +461,87 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
         }
       }
       setQualifyChoices(defaults);
-    } catch { setError("Erreur lors de l'analyse des contacts non classés"); }
+    } catch { setError("Erreur lors du sous-découpage"); }
     setQualifyLoading(false);
   };
 
-  const applyQualifyToCategories = () => {
-    const autresCat = discoveredCategories.find((c) => isAutresCat(c.name));
-    if (!autresCat?.contactNumbers) return;
+  const applySplit = () => {
+    if (!splitTarget) return;
+    const sourceIds = categoryContactMap[splitTarget] || [];
+    const newMap = { ...categoryContactMap };
+    const remainingIds: string[] = [];
+    const newCats = [...discoveredCategories];
 
-    // Deep copy all categories to avoid mutation-by-reference
-    const updatedCats: IcpCategory[] = discoveredCategories.map((c) => ({
-      ...c,
-      contactNumbers: c.contactNumbers ? [...c.contactNumbers] : [],
-    }));
-
-    const autresNums = [...autresCat.contactNumbers];
-
-    // Dedup AI groups: track which Autres contacts are already assigned
-    const assignedAutresIndices = new Set<number>();
-    const remainingAutres: number[] = [];
-    const newIcpMap = new Map<string, { name: string; description: string; contactNumbers: number[] }>();
-    const newExcluded: { name: string; reason: string; estimatedCount: number; contactNumbers: number[] }[] = [];
-
+    // Build a map from qualify group contactNumbers to actual contact IDs
+    // contactNumbers in qualify groups are 1-indexed into the sourceIds array
     for (const g of qualifyGroups) {
       const choice = qualifyChoices[g.id];
-      if (!choice) {
-        // No choice → keep in Autres (deduped)
-        for (const n of g.contactNumbers) {
-          if (!assignedAutresIndices.has(n)) {
-            const orig = autresNums[n - 1];
-            if (orig) { remainingAutres.push(orig); assignedAutresIndices.add(n); }
-          }
-        }
-        continue;
-      }
-      // Map group contactNumbers (1-indexed within Autres) to original, skip already-assigned
-      const originalNums: number[] = [];
-      for (const n of g.contactNumbers) {
-        if (assignedAutresIndices.has(n)) continue; // skip duplicate across groups
-        const orig = autresNums[n - 1];
-        if (orig) { originalNums.push(orig); assignedAutresIndices.add(n); }
-      }
-
+      const groupIds = g.contactNumbers.map((n) => sourceIds[n - 1]).filter(Boolean);
+      if (!choice) { remainingIds.push(...groupIds); continue; }
       if (choice.action === "assign" && choice.targetIcp) {
-        const target = updatedCats.find((c) => c.name === choice.targetIcp);
-        if (target) {
-          target.contactNumbers = [...(target.contactNumbers || []), ...originalNums];
-        }
+        newMap[choice.targetIcp] = [...(newMap[choice.targetIcp] || []), ...groupIds];
       } else if (choice.action === "new_icp" && choice.newIcpName) {
-        const existing = newIcpMap.get(choice.newIcpName);
-        if (existing) {
-          existing.contactNumbers.push(...originalNums);
-        } else {
+        newMap[choice.newIcpName] = [...(newMap[choice.newIcpName] || []), ...groupIds];
+        if (!newCats.find((c) => c.name === choice.newIcpName)) {
           const suggestion = g.suggestions.find((s) => s.type === "new_icp");
-          newIcpMap.set(choice.newIcpName, {
+          newCats.push({
+            id: `icp_new_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
             name: choice.newIcpName,
             description: suggestion?.description || "",
-            contactNumbers: [...originalNums],
+            criteria: suggestion?.description || "",
           });
         }
       } else if (choice.action === "exclude") {
-        newExcluded.push({
-          name: g.label,
-          reason: "Exclu lors de la qualification",
-          estimatedCount: originalNums.length,
-          contactNumbers: originalNums,
-        });
+        newMap["Hors cible"] = [...(newMap["Hors cible"] || []), ...groupIds];
       } else {
-        remainingAutres.push(...originalNums);
+        remainingIds.push(...groupIds);
       }
     }
 
-    // Update "Autres" with remaining contacts
-    const autresIdx = updatedCats.findIndex((c) => isAutresCat(c.name));
-    if (autresIdx >= 0) {
-      if (remainingAutres.length === 0) {
-        updatedCats.splice(autresIdx, 1);
-      } else {
-        updatedCats[autresIdx] = { ...updatedCats[autresIdx], contactNumbers: remainingAutres, estimatedCount: remainingAutres.length };
-      }
+    // Update or remove the original category
+    if (remainingIds.length > 0) {
+      newMap[splitTarget] = remainingIds;
+    } else {
+      delete newMap[splitTarget];
+      const idx = newCats.findIndex((c) => c.name === splitTarget);
+      if (idx >= 0) newCats.splice(idx, 1);
     }
 
-    // Add new ICPs
-    for (const [, newIcp] of newIcpMap) {
-      updatedCats.push({
-        id: `icp_new_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        name: newIcp.name,
-        description: newIcp.description,
-        criteria: "",
-        estimatedCount: newIcp.contactNumbers.length,
-        contactNumbers: newIcp.contactNumbers,
-      });
-    }
-
-    // Final dedup: ensure no contactNumber appears in multiple categories
-    const globalSeen = new Set<number>();
-    for (const cat of updatedCats) {
-      const deduped: number[] = [];
-      for (const n of cat.contactNumbers || []) {
-        if (!globalSeen.has(n)) { deduped.push(n); globalSeen.add(n); }
-      }
-      cat.contactNumbers = deduped;
-      cat.estimatedCount = deduped.length;
-    }
-
-    // Integrity check
-    const totalAfter = updatedCats.reduce((s, c) => s + (c.contactNumbers?.length || 0), 0)
-      + newExcluded.reduce((s, e) => s + e.contactNumbers.length, 0);
-    const totalBefore = discoveredCategories.reduce((s, c) => s + (c.contactNumbers?.length || 0), 0);
-    if (totalAfter !== totalBefore) {
-      console.warn(`[ICP Qualify] Total mismatch: ${totalBefore} → ${totalAfter}`);
-    }
-
-    if (newExcluded.length > 0) {
-      setExcludedSegments((prev) => [...prev, ...newExcluded]);
-    }
-    setDiscoveredCategories(updatedCats);
-    setQualifyActive(false);
+    setCategoryContactMap(newMap);
+    setDiscoveredCategories(newCats);
+    setSplitTarget(null);
     setQualifyGroups([]);
     setQualifyChoices({});
-    setActionMsg(`Contacts redistribués (${totalAfter} contacts)`);
+    setActionMsg("Catégorie sous-découpée");
+    setTimeout(() => setActionMsg(null), 4000);
+  };
+
+  // Step 3: Rebalance — merge small categories
+  const applyMerge = () => {
+    if (mergeSelection.size < 2) return;
+    const names = Array.from(mergeSelection);
+    const mergedName = names.join(" + ");
+    const newMap = { ...categoryContactMap };
+    const mergedIds: string[] = [];
+    for (const name of names) {
+      mergedIds.push(...(newMap[name] || []));
+      delete newMap[name];
+    }
+    newMap[mergedName] = mergedIds;
+
+    const newCats = discoveredCategories.filter((c) => !mergeSelection.has(c.name));
+    const firstCat = discoveredCategories.find((c) => mergeSelection.has(c.name));
+    newCats.push({
+      id: `icp_merged_${Date.now()}`,
+      name: mergedName,
+      description: names.map((n) => discoveredCategories.find((c) => c.name === n)?.description || "").join(" / "),
+      criteria: firstCat?.criteria || "",
+    });
+
+    setCategoryContactMap(newMap);
+    setDiscoveredCategories(newCats);
+    setMergeSelection(new Set());
+    setActionMsg(`${names.length} catégories fusionnées`);
     setTimeout(() => setActionMsg(null), 4000);
   };
 
@@ -598,18 +579,22 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
     return val;
   };
 
+  const contactById = useMemo(() => {
+    const map = new Map<string, IcpContact>();
+    for (const c of mergedContacts) map.set(c.id, c);
+    return map;
+  }, [mergedContacts]);
+
   const downloadZip = async () => {
-    if (discoveredCategories.length === 0) return;
+    if (!classified || Object.keys(categoryContactMap).length === 0) return;
     setDownloading(true);
     try {
-      // Generate approach messages first
       const messages = await generateApproaches();
       const zip = new JSZip();
       const csvHeader = "Prénom;Nom;Email;Téléphone;Poste;Entreprise;LinkedIn;Ville";
-      const contactSource = mergedContacts;
 
-      for (const cat of discoveredCategories) {
-        let catContacts = (cat.contactNumbers || []).map((n) => contactSource[n - 1]).filter(Boolean);
+      for (const [catName, contactIds] of Object.entries(categoryContactMap)) {
+        let catContacts = contactIds.map((id) => contactById.get(id)).filter(Boolean) as IcpContact[];
         if (emailOnly) catContacts = catContacts.filter((c) => c.email?.trim());
         if (catContacts.length === 0) continue;
         const rows = catContacts.map((c) =>
@@ -617,11 +602,10 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
             .map((v) => escapeCsvField(String(v || ""))).join(";")
         );
         const csv = "\uFEFF" + [csvHeader, ...rows].join("\n");
-        const safeName = cat.name.replace(/[\\/:*?"<>|]/g, "").slice(0, 60);
+        const safeName = catName.replace(/[\\/:*?"<>|]/g, "").slice(0, 60);
         zip.file(`${safeName}.csv`, csv);
       }
 
-      // Approach messages CSV
       if (Object.keys(messages).length > 0) {
         const approachHeader = "ICP;Titre;Message type";
         const approachRows = discoveredCategories
@@ -1329,10 +1313,10 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
               {discovering ? "Analyse en cours..." : "Analyser et proposer les ICP"}
             </button>
 
-            {/* Categories preview */}
-            {discoveredCategories.length > 0 && (
+            {/* ═══ Step 1 result: Category taxonomy ═══ */}
+            {discoveredCategories.length > 0 && !classified && (
               <div className="space-y-3">
-                <h4 className="text-xs font-semibold text-gray-700 uppercase">Catégories ICP proposées</h4>
+                <h4 className="text-xs font-semibold text-gray-700 uppercase">Étape 1 — Catégories ICP proposées ({discoveredCategories.length})</h4>
                 {discoveredCategories.map((cat, idx) => (
                   <div key={cat.id} className="border border-gray-200 rounded-lg p-3">
                     {editingCatIdx === idx ? (
@@ -1347,207 +1331,38 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
                           next[idx] = { ...next[idx], description: e.target.value };
                           setDiscoveredCategories(next);
                         }} rows={2} className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
-                        <input value={editCatReason} onChange={(e) => setEditCatReason(e.target.value)}
-                          placeholder="Pourquoi cette modification ?" className="w-full border border-gray-200 rounded px-2 py-1 text-xs" />
                         <div className="flex gap-2">
-                          <button onClick={async () => {
-                            if (editCatReason.trim()) {
-                              const list = lists.find((l) => l.id === selectedListId);
-                              await fetch("/api/icp/memory", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ company: list?.company || "", old_category: cat.name, new_category: cat.name, reason: editCatReason }),
-                              });
-                            }
-                            setEditingCatIdx(null);
-                            setEditCatReason("");
-                          }} className="flex items-center gap-1 px-2 py-1 text-xs text-green-700 bg-green-50 rounded cursor-pointer">
+                          <button onClick={() => { setEditingCatIdx(null); }}
+                            className="flex items-center gap-1 px-2 py-1 text-xs text-green-700 bg-green-50 rounded cursor-pointer">
                             <Save className="w-3 h-3" /> OK
                           </button>
-                          <button onClick={() => { setEditingCatIdx(null); setEditCatReason(""); }}
+                          <button onClick={() => { setEditingCatIdx(null); }}
                             className="px-2 py-1 text-xs text-gray-500 cursor-pointer">Annuler</button>
                         </div>
                       </div>
                     ) : (
-                      <div>
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-900">{cat.name}</p>
-                            <p className="text-xs text-gray-500">{cat.description}</p>
-                            {cat.approach_key && (
-                              <p className="text-[10px] text-emerald-700 bg-emerald-50 rounded px-1.5 py-0.5 mt-1 inline-block">Approche : {cat.approach_key}</p>
-                            )}
-                          </div>
-                          <button onClick={() => setEditingCatIdx(idx)}
-                            className="p-1 text-gray-400 hover:text-violet-600 cursor-pointer shrink-0">
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-900">{cat.name}</p>
+                          <p className="text-xs text-gray-500">{cat.description}</p>
+                          {cat.approach_key && (
+                            <p className="text-[10px] text-emerald-700 bg-emerald-50 rounded px-1.5 py-0.5 mt-1 inline-block">Approche : {cat.approach_key}</p>
+                          )}
                         </div>
-                        {cat.contactNumbers && cat.contactNumbers.length > 0 && (
-                          <div className="mt-1.5">
-                            <button onClick={() => {
-                              const next = new Set(expandedCats);
-                              next.has(cat.id) ? next.delete(cat.id) : next.add(cat.id);
-                              setExpandedCats(next);
-                            }} className="flex items-center gap-1 text-[10px] text-violet-600 font-medium cursor-pointer hover:text-violet-800">
-                              <ChevronDown className={cn("w-3 h-3 transition-transform", expandedCats.has(cat.id) && "rotate-180")} />
-                              {cat.contactNumbers.length} contacts
-                            </button>
-                            {expandedCats.has(cat.id) && (
-                              <div className="mt-1 max-h-32 overflow-y-auto bg-gray-50 rounded p-1.5 space-y-0.5">
-                                {cat.contactNumbers.map((num) => {
-                                  const c = mergedContacts[num - 1];
-                                  return c ? (
-                                    <p key={num} className="text-[10px] text-gray-600 truncate">
-                                      {c.prenom} {c.nom} — <span className="text-gray-400">{c.poste} @ {c.entreprise}</span>
-                                    </p>
-                                  ) : null;
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                        {/* Qualify button for "Autres" */}
-                        {isAutresCat(cat.name) && (cat.contactNumbers?.length || 0) > 0 && !qualifyActive && (
-                          <button onClick={startQualifyDiscovered}
-                            disabled={qualifyLoading}
-                            className="mt-2 flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-amber-700 bg-amber-100 border border-amber-300 rounded-lg hover:bg-amber-200 disabled:opacity-50 cursor-pointer">
-                            {qualifyLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <HelpCircle className="w-3.5 h-3.5" />}
-                            {qualifyLoading ? "Analyse en cours..." : "Qualifier ces contacts"}
-                          </button>
-                        )}
+                        <button onClick={() => setEditingCatIdx(idx)}
+                          className="p-1 text-gray-400 hover:text-violet-600 cursor-pointer shrink-0">
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     )}
                   </div>
                 ))}
 
-                {/* ── Inline qualify flow ── */}
-                {qualifyActive && qualifyGroups.length > 0 && (
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-3">
-                    <p className="text-[10px] font-semibold text-amber-700 uppercase">Qualification des contacts non classés</p>
-                    <p className="text-xs text-gray-600">
-                      L&apos;IA a regroupé les contacts par profil. Choisissez une action pour chaque groupe :
-                    </p>
-                    {qualifyGroups.map((g) => {
-                      const choice = qualifyChoices[g.id];
-                      return (
-                        <div key={g.id} className="border border-amber-200 rounded-lg overflow-hidden bg-white">
-                          <div className="bg-amber-50/80 px-3 py-2 border-b border-amber-100">
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <p className="text-xs font-medium text-amber-900">{g.label}</p>
-                                <p className="text-[10px] text-amber-700">{g.description}</p>
-                              </div>
-                              <span className="text-[10px] font-semibold text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded-full shrink-0 ml-2">
-                                {g.count}
-                              </span>
-                            </div>
-                            <button onClick={() => {
-                              const next = new Set(expandedQGroups);
-                              next.has(g.id) ? next.delete(g.id) : next.add(g.id);
-                              setExpandedQGroups(next);
-                            }} className="flex items-center gap-1 text-[9px] text-amber-600 mt-1 cursor-pointer hover:text-amber-800">
-                              <ChevronDown className={cn("w-2.5 h-2.5 transition-transform", expandedQGroups.has(g.id) && "rotate-180")} />
-                              Voir les contacts
-                            </button>
-                            {expandedQGroups.has(g.id) && (
-                              <div className="mt-1 max-h-24 overflow-y-auto bg-white/60 rounded p-1 space-y-0.5">
-                                {g.contactNumbers.map((num) => {
-                                  const autresCat = discoveredCategories.find((c) => isAutresCat(c.name));
-                                  const origNum = autresCat?.contactNumbers?.[num - 1];
-                                  const c = origNum ? mergedContacts[origNum - 1] : undefined;
-                                  return c ? (
-                                    <p key={num} className="text-[9px] text-gray-600 truncate">
-                                      {c.prenom} {c.nom} — <span className="text-gray-400">{c.poste} @ {c.entreprise}</span>
-                                    </p>
-                                  ) : null;
-                                })}
-                              </div>
-                            )}
-                          </div>
-                          <div className="px-3 py-1.5 space-y-1">
-                            {g.suggestions.map((s, si) => (
-                              <label key={si} className={cn(
-                                "flex items-start gap-2 p-1.5 rounded border cursor-pointer text-[11px]",
-                                choice?.action === s.type && (s.type !== "assign" || choice?.targetIcp === s.targetIcp) && (s.type !== "new_icp" || choice?.newIcpName === s.name)
-                                  ? "border-amber-400 bg-amber-50" : "border-gray-100 hover:bg-gray-50"
-                              )}>
-                                <input type="radio" name={`q_${g.id}`}
-                                  checked={choice?.action === s.type && (s.type !== "assign" || choice?.targetIcp === s.targetIcp) && (s.type !== "new_icp" || choice?.newIcpName === s.name)}
-                                  onChange={() => setQualifyChoices((prev) => ({
-                                    ...prev,
-                                    [g.id]: { groupId: g.id, action: s.type, targetIcp: s.type === "assign" ? s.targetIcp : undefined, newIcpName: s.type === "new_icp" ? s.name : undefined },
-                                  }))}
-                                  className="accent-amber-600 mt-0.5" />
-                                <div className="flex-1">
-                                  {s.type === "assign" && <p className="text-gray-800">Rattacher à <span className="font-semibold text-violet-700">{s.targetIcp}</span></p>}
-                                  {s.type === "new_icp" && <p className="text-gray-800">Nouvel ICP : <span className="font-semibold text-emerald-700">{s.name}</span></p>}
-                                  {s.type === "exclude" && <p className="text-gray-800">Exclure <span className="text-red-600">(hors cible)</span></p>}
-                                  <p className="text-[9px] text-gray-500">{s.reason}</p>
-                                </div>
-                                {s.type === g.recommended && <span className="text-[8px] font-semibold text-amber-600 bg-amber-100 px-1 py-0.5 rounded shrink-0">Reco</span>}
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
-                    <div className="flex gap-2">
-                      <button onClick={applyQualifyToCategories}
-                        disabled={Object.keys(qualifyChoices).length === 0}
-                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 cursor-pointer">
-                        <Check className="w-3 h-3" /> Valider la redistribution
-                      </button>
-                      <button onClick={() => { setQualifyActive(false); setQualifyGroups([]); setQualifyChoices({}); }}
-                        className="px-3 py-2 text-xs text-gray-500 border border-gray-200 rounded-lg cursor-pointer">Annuler</button>
-                    </div>
-                  </div>
-                )}
-
-                {qualifyActive && qualifyLoading && (
-                  <div className="flex flex-col items-center py-6 gap-2">
-                    <Loader2 className="w-5 h-5 animate-spin text-amber-500" />
-                    <p className="text-xs text-gray-500">Analyse des contacts non classés...</p>
-                  </div>
-                )}
-
                 {excludedSegments.length > 0 && (
-                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 space-y-2">
+                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 space-y-1">
                     <p className="text-[10px] font-semibold text-orange-700 uppercase">Segments exclus</p>
                     {excludedSegments.map((seg, i) => (
-                      <div key={i}>
-                        <p className="text-xs text-orange-600">
-                          {seg.name} — <span className="text-orange-500">{seg.reason}</span>
-                          {seg.estimatedCount !== undefined && (
-                            <span className="ml-1 font-medium">({seg.estimatedCount} contacts)</span>
-                          )}
-                        </p>
-                        {seg.contactNumbers && seg.contactNumbers.length > 0 && (
-                          <div className="mt-1">
-                            <button onClick={() => {
-                              const key = `excl_${i}`;
-                              const next = new Set(expandedCats);
-                              next.has(key) ? next.delete(key) : next.add(key);
-                              setExpandedCats(next);
-                            }} className="flex items-center gap-1 text-[10px] text-orange-600 cursor-pointer hover:text-orange-800">
-                              <ChevronDown className={cn("w-3 h-3 transition-transform", expandedCats.has(`excl_${i}`) && "rotate-180")} />
-                              Voir les contacts
-                            </button>
-                            {expandedCats.has(`excl_${i}`) && (
-                              <div className="mt-1 max-h-32 overflow-y-auto bg-orange-100/50 rounded p-1.5 space-y-0.5">
-                                {seg.contactNumbers.map((num) => {
-                                  const c = contacts[num - 1];
-                                  return c ? (
-                                    <p key={num} className="text-[10px] text-orange-700 truncate">
-                                      {c.prenom} {c.nom} — <span className="text-orange-500">{c.poste} @ {c.entreprise}</span>
-                                    </p>
-                                  ) : null;
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
+                      <p key={i} className="text-xs text-orange-600">{seg.name} — <span className="text-orange-500">{seg.reason}</span></p>
                     ))}
                   </div>
                 )}
@@ -1557,13 +1372,13 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
                   <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
                     <p className="text-[10px] font-semibold text-amber-700 uppercase">Modifier le cadrage</p>
                     <textarea value={refineFeedback} onChange={(e) => setRefineFeedback(e.target.value)}
-                      rows={3} placeholder="Ex: Fusionner les 2 catégories Collectivités en une seule, séparer les bailleurs sociaux par type de poste, le segment X n'est pas pertinent..."
+                      rows={3} placeholder="Ex: Séparer les bailleurs sociaux par type de poste, le segment X n'est pas pertinent..."
                       className="w-full border border-amber-300 rounded-lg px-3 py-2 text-xs resize-y" />
                     <div className="flex gap-2">
                       <button onClick={refineCategories} disabled={discovering || !refineFeedback.trim()}
                         className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 cursor-pointer">
                         {discovering ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-                        {discovering ? "Re-analyse..." : "Re-analyser les ICP"}
+                        {discovering ? "Re-analyse..." : "Re-analyser"}
                       </button>
                       <button onClick={() => { setShowRefine(false); setRefineFeedback(""); }}
                         className="px-3 py-2 text-xs text-gray-500 border border-gray-200 rounded-lg cursor-pointer">Annuler</button>
@@ -1576,8 +1391,126 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
                   </button>
                 )}
 
+                {/* Step 2 trigger: Classify */}
+                <button onClick={startClassify} disabled={classifying}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 cursor-pointer">
+                  {classifying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                  {classifying ? classifyProgress || "Classification..." : `Classer les ${mergedContacts.length} contacts`}
+                </button>
+              </div>
+            )}
+
+            {/* ═══ Step 2+3 result: Classification results + Rebalance ═══ */}
+            {classified && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-semibold text-gray-700 uppercase">Étape 2 — Répartition ({totalClassified} contacts)</h4>
+                  {mergeSelection.size >= 2 && (
+                    <button onClick={applyMerge}
+                      className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium text-blue-700 bg-blue-50 border border-blue-300 rounded cursor-pointer hover:bg-blue-100">
+                      Fusionner ({mergeSelection.size})
+                    </button>
+                  )}
+                </div>
+
+                {discoveredCategories.map((cat) => {
+                  const count = getCatCount(cat.name);
+                  const isTooLarge = count > 150;
+                  const isTooSmall = count > 0 && count < 20;
+                  return (
+                    <div key={cat.id} className={cn("border rounded-lg p-3", isTooLarge ? "border-red-200 bg-red-50/30" : isTooSmall ? "border-amber-200 bg-amber-50/30" : "border-gray-200")}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          {/* Merge checkbox for small categories */}
+                          {isTooSmall && (
+                            <input type="checkbox" checked={mergeSelection.has(cat.name)}
+                              onChange={(e) => {
+                                const next = new Set(mergeSelection);
+                                e.target.checked ? next.add(cat.name) : next.delete(cat.name);
+                                setMergeSelection(next);
+                              }}
+                              className="accent-blue-600 cursor-pointer" title="Sélectionner pour fusionner" />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900 truncate">{cat.name}</p>
+                            <p className="text-xs text-gray-500 truncate">{cat.description}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0 ml-2">
+                          <span className={cn("text-xs font-semibold px-2 py-0.5 rounded-full",
+                            isTooLarge ? "text-red-700 bg-red-100" : isTooSmall ? "text-amber-700 bg-amber-100" : "text-violet-700 bg-violet-100"
+                          )}>{count}</span>
+                          {isTooLarge && (
+                            <button onClick={() => startSplit(cat.name)} disabled={qualifyLoading && splitTarget === cat.name}
+                              className="text-[10px] font-medium text-red-600 hover:text-red-800 cursor-pointer">
+                              {qualifyLoading && splitTarget === cat.name ? <Loader2 className="w-3 h-3 animate-spin" /> : "Sous-découper"}
+                            </button>
+                          )}
+                          {isTooSmall && (
+                            <span className="text-[10px] text-amber-600">Petit</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Inline split flow */}
+                      {splitTarget === cat.name && qualifyGroups.length > 0 && (
+                        <div className="mt-3 border-t border-red-200 pt-3 space-y-2">
+                          <p className="text-[10px] font-semibold text-red-700 uppercase">Sous-découpage de &quot;{cat.name}&quot;</p>
+                          {qualifyGroups.map((g) => {
+                            const choice = qualifyChoices[g.id];
+                            return (
+                              <div key={g.id} className="bg-white border border-gray-200 rounded p-2">
+                                <div className="flex items-center justify-between mb-1">
+                                  <p className="text-xs font-medium text-gray-800">{g.label} <span className="text-gray-400">({g.count})</span></p>
+                                </div>
+                                <div className="space-y-1">
+                                  {g.suggestions.map((s, si) => (
+                                    <label key={si} className={cn("flex items-center gap-2 p-1 rounded text-[10px] cursor-pointer",
+                                      choice?.action === s.type && (s.type !== "assign" || choice?.targetIcp === s.targetIcp) && (s.type !== "new_icp" || choice?.newIcpName === s.name)
+                                        ? "bg-red-50 border border-red-200" : "hover:bg-gray-50"
+                                    )}>
+                                      <input type="radio" name={`split_${g.id}`}
+                                        checked={choice?.action === s.type && (s.type !== "assign" || choice?.targetIcp === s.targetIcp) && (s.type !== "new_icp" || choice?.newIcpName === s.name)}
+                                        onChange={() => setQualifyChoices((prev) => ({
+                                          ...prev,
+                                          [g.id]: { groupId: g.id, action: s.type, targetIcp: s.type === "assign" ? s.targetIcp : undefined, newIcpName: s.type === "new_icp" ? s.name : undefined },
+                                        }))}
+                                        className="accent-red-600" />
+                                      {s.type === "assign" && <span>→ {s.targetIcp}</span>}
+                                      {s.type === "new_icp" && <span className="text-emerald-700 font-medium">+ {s.name}</span>}
+                                      {s.type === "exclude" && <span className="text-red-600">Exclure</span>}
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                          <div className="flex gap-2">
+                            <button onClick={applySplit}
+                              className="flex-1 px-3 py-1.5 text-xs font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 cursor-pointer">
+                              Appliquer
+                            </button>
+                            <button onClick={() => { setSplitTarget(null); setQualifyGroups([]); setQualifyChoices({}); }}
+                              className="px-3 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-lg cursor-pointer">Annuler</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Also show "Autres" and "Hors cible" counts if they exist */}
+                {Object.entries(categoryContactMap).filter(([name]) => !discoveredCategories.find((c) => c.name === name)).map(([name, ids]) => (
+                  <div key={name} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium text-gray-600">{name}</p>
+                      <span className="text-xs font-semibold text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full">{ids.length}</span>
+                    </div>
+                  </div>
+                ))}
+
                 {/* Email filter + Download */}
-                <div className="space-y-2">
+                <div className="space-y-2 pt-2 border-t border-gray-100">
                   <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
                     <input type="checkbox" checked={emailOnly} onChange={(e) => setEmailOnly(e.target.checked)}
                       className="accent-green-600" />

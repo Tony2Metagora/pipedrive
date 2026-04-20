@@ -44,7 +44,7 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const { action, ids, company, offerContext, categories, existingCategories, qualifyChoices, groupContacts } = body as {
-    action: "discover" | "apply" | "qualify" | "apply-qualify" | "generate-approach";
+    action: "discover" | "apply" | "batch-classify" | "qualify" | "apply-qualify" | "generate-approach";
     ids: string[];
     company: string;
     offerContext?: string;
@@ -78,70 +78,57 @@ export async function POST(request: Request) {
     ? `\n\n--- CORRECTIONS HUMAINES PRÉCÉDENTES ---\n${memory.slice(-30).map((m) => `- "${m.poste}" chez "${m.entreprise}": ${m.old_category} → ${m.new_category}. Raison: ${m.reason}`).join("\n")}\nApplique ces corrections systématiquement.`
     : "";
 
-  // ═══ DISCOVER: propose categories ═══
+  // ═══ DISCOVER: propose category taxonomy (NO contact assignment) ═══
   if (action === "discover") {
-    const allContacts = contacts.map((c) => ({
+    const contactData = contacts.map((c) => ({
       poste: c.poste || "",
       entreprise: c.entreprise || "",
       ville: c.ville || "",
     }));
+    const contactLines = contactData.map((c, i) => `${i + 1}. ${c.poste} | ${c.entreprise}${c.ville ? ` (${c.ville})` : ""}`).join("\n");
 
-    // Format compact: "poste | entreprise (ville)" pour réduire les tokens
-    const contactLines = allContacts.map((c, i) => `${i + 1}. ${c.poste} | ${c.entreprise}${c.ville ? ` (${c.ville})` : ""}`).join("\n");
-
-    // >1000 contacts: skip contactNumbers in Discover to avoid timeout (Apply will do the real classification)
-    const withNumbers = allContacts.length <= 1000;
-    const contactNumbersInstruction = withNumbers
-      ? `- Pour chaque catégorie ET chaque segment exclu, liste les numéros des contacts correspondants dans "contactNumbers".`
-      : `- NE PAS lister les contactNumbers (trop de contacts). Fournir uniquement estimatedCount.`;
-    const contactNumbersExample = withNumbers
-      ? `, "contactNumbers": [1, 5, 12, 18, ...]`
-      : ``;
-    const excludedExample = withNumbers
-      ? `{ "name": "Agences de communication", "reason": "Pas de prospection pour l'instant", "estimatedCount": 3, "contactNumbers": [7, 44, 98] }`
-      : `{ "name": "Agences de communication", "reason": "Pas de prospection pour l'instant", "estimatedCount": 3 }`;
-    const outputTokens = withNumbers ? Math.min(16000, 4000 + allContacts.length * 20) : 4000;
+    const N = contactData.length;
+    const minCats = Math.max(5, Math.ceil(N / 80));
+    const maxCats = Math.min(25, Math.ceil(N / 20));
 
     const raw = await askAzureFast([
       {
         role: "system",
-        content: `Tu es un expert en segmentation B2B. Tu analyses une liste COMPLÈTE de contacts et un contexte d'offre pour identifier les profils de clients idéaux (ICP).
+        content: `Tu es un expert en segmentation B2B. Tu analyses une liste de contacts et un contexte d'offre pour proposer des catégories ICP (profils de clients idéaux).
 
-INSTRUCTIONS IMPORTANTES :
-- Tu reçois la TOTALITÉ des ${allContacts.length} contacts numérotés. Chaque contact DOIT être classé dans exactement une catégorie (ICP, exclu, ou "Autres / à qualifier"). La somme de TOUS les estimatedCount (catégories + excluded_segments) DOIT être égale à ${allContacts.length}.
-- Si le contexte fourni contient des segments/ICP déjà définis, EXTRAIS-LES fidèlement (noms exacts, descriptions, critères). Ne les réinvente pas.
-- Croise la **typologie de poste** (ex: DG, directeur technique, responsable patrimoine, élu...) et la **typologie d'entreprise** (ex: bailleur social, collectivité, opérateur EnR...) pour créer des ICP fins.
-- Identifie les segments explicitement exclus dans le contexte. Compte aussi les contacts qui y correspondent.
-- Pour chaque ICP, génère une "approach_key" : l'angle d'accroche principal à utiliser pour ce segment.
-${contactNumbersInstruction}
-- Ajoute une catégorie "Autres / à qualifier" pour les contacts qui ne correspondent clairement à aucun segment.
-- Propose entre 3 et 12 catégories ICP (la catégorie "Autres" incluse).
+INSTRUCTIONS :
+- Propose entre ${minCats} et ${maxCats} catégories ICP pertinentes.
+- Chaque catégorie doit cibler environ 20 à 80 contacts sur les ${N} au total. Évite les catégories fourre-tout trop larges.
+- Si le contexte contient des segments déjà définis, extrais-les fidèlement.
+- Croise la **typologie de poste** (DG, directeur technique, élu...) et la **typologie d'entreprise** (bailleur social, collectivité...) pour des ICP fins.
+- Pour chaque ICP, génère une "approach_key" : l'angle d'accroche principal.
+- Identifie les segments à exclure.
+- Ajoute une catégorie "Autres / à qualifier" pour les profils flous.
+- NE LISTE PAS les contacts individuels. Propose UNIQUEMENT la taxonomie.
 ${memoryBlock}
 
-Réponds UNIQUEMENT en JSON valide, sans markdown.`,
+Réponds UNIQUEMENT en JSON valide, sans markdown :
+{
+  "categories": [
+    { "id": "icp_1", "name": "Nom", "description": "Description du profil", "criteria": "Critères d'appartenance (poste ET type d'entreprise)", "approach_key": "Angle d'accroche" },
+    ...
+  ],
+  "excluded_segments": [
+    { "name": "Nom du segment exclu", "reason": "Pourquoi" }
+  ]
+}`,
       },
       {
         role: "user",
         content: `Contexte offre de ${company || "l'entreprise"}:
 ${offerContext || "Non spécifié"}
 
-Voici la liste COMPLÈTE des ${allContacts.length} contacts à segmenter:
+Voici les ${N} contacts à segmenter (pour comprendre la répartition des profils) :
 ${contactLines}
 
-Classe CHAQUE contact dans une catégorie. La somme des estimatedCount doit faire ${allContacts.length}.
-
-Format JSON:
-{
-  "categories": [
-    { "id": "icp_1", "name": "Directeur Patrimoine - Bailleur social", "description": "...", "criteria": "...", "approach_key": "...", "estimatedCount": 25${contactNumbersExample} },
-    ...
-  ],
-  "excluded_segments": [
-    ${excludedExample}
-  ]
-}`,
+Propose une taxonomie ICP adaptée. Entre ${minCats} et ${maxCats} catégories, chacune ciblant 20-80 contacts.`,
       },
-    ], outputTokens);
+    ], 4000);
 
     try {
       const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
@@ -150,6 +137,102 @@ Format JSON:
     } catch {
       return new Response(JSON.stringify({ data: { categories: [] }, raw }), { headers: { "Content-Type": "application/json" } });
     }
+  }
+
+  // ═══ BATCH-CLASSIFY: assign each contact to a category (SSE) ═══
+  if (action === "batch-classify" && categories?.length) {
+    const categoryList = categories.map((c) => `- "${c.name}": ${c.criteria}`).join("\n");
+
+    const stream = new ReadableStream({
+      async start(controller) {
+        const send = (event: string, data: unknown) => {
+          try { controller.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)); } catch { /* closed */ }
+        };
+
+        const BATCH_SIZE = 20;
+        const PARALLEL = 2;
+        const batches: { idx: number; data: IcpContact[] }[] = [];
+        for (let i = 0; i < contacts.length; i += BATCH_SIZE) {
+          batches.push({ idx: batches.length + 1, data: contacts.slice(i, i + BATCH_SIZE) });
+        }
+
+        let done = 0;
+        let errors = 0;
+        const results: { id: string; icp_category: string }[] = [];
+
+        const processBatch = async (batch: typeof batches[0]) => {
+          const batchData = batch.data.map((c) => ({
+            id: c.id,
+            poste: c.poste || "",
+            entreprise: c.entreprise || "",
+            ville: c.ville || "",
+          }));
+
+          try {
+            const offerBlock = offerContext ? `\n\n--- CONTEXTE OFFRE ---\n${offerContext}` : "";
+            const raw = await askAzureFast([
+              {
+                role: "system",
+                content: `Tu classes des contacts B2B dans EXACTEMENT UNE des catégories ICP suivantes :
+${categoryList}
+${offerBlock}
+${memoryBlock}
+
+Pour chaque contact, détermine la catégorie ICP la plus pertinente en croisant le poste et le type d'entreprise.
+Si aucune catégorie ne correspond, utilise "Autres / à qualifier".
+Chaque contact doit être dans UNE SEULE catégorie.
+Réponds en JSON : [{"id":"xxx","icp_category":"nom exact de la catégorie"}]
+Pas de markdown.`,
+              },
+              { role: "user", content: JSON.stringify(batchData) },
+            ], 2000);
+
+            const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")
+              .replace(/,\s*([\]}])/g, "$1")
+              .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":');
+            let parsed: unknown;
+            try { parsed = JSON.parse(cleaned); } catch {
+              parsed = JSON.parse(raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim());
+            }
+            if (Array.isArray(parsed)) {
+              for (const item of parsed) {
+                results.push({ id: String(item.id), icp_category: String(item.icp_category || "Autres / à qualifier") });
+              }
+            }
+          } catch (err) {
+            console.error(`[ICP] Batch ${batch.idx} failed:`, err);
+            errors++;
+            // Fallback: assign all batch contacts to "Autres"
+            for (const c of batch.data) {
+              results.push({ id: c.id, icp_category: "Autres / à qualifier" });
+            }
+          }
+          done++;
+          send("progress", { current: done, total: batches.length, message: `Classification ${done}/${batches.length}${errors > 0 ? ` (${errors} erreurs)` : ""}` });
+        };
+
+        send("progress", { current: 0, total: batches.length, message: "Classification en cours..." });
+
+        for (let i = 0; i < batches.length; i += PARALLEL) {
+          await Promise.all(batches.slice(i, i + PARALLEL).map(processBatch));
+        }
+
+        // Dedup: each contact ID appears once (first result wins)
+        const seen = new Set<string>();
+        const dedupedResults = results.filter((r) => {
+          if (seen.has(r.id)) return false;
+          seen.add(r.id);
+          return true;
+        });
+
+        send("done", { results: dedupedResults, classified: dedupedResults.length, errors, total: contacts.length });
+        controller.close();
+      },
+    });
+
+    return new Response(stream, {
+      headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" },
+    });
   }
 
   // ═══ APPLY: classify each contact (SSE) ═══
