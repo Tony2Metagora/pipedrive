@@ -130,6 +130,10 @@ export default function IcpCleanerPage() {
   const [splitTarget, setSplitTarget] = useState<string | null>(null); // category being split
   const [mergeSelection, setMergeSelection] = useState<Set<string>>(new Set()); // categories to merge
 
+  // Results expand/collapse
+  const [expandedDescs, setExpandedDescs] = useState<Set<string>>(new Set());
+  const [expandedContacts, setExpandedContacts] = useState<Set<string>>(new Set());
+
   // Download from ICP Finder
   const [emailOnly, setEmailOnly] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -1383,37 +1387,87 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
                   if (count === 0) return null;
                   const isTooLarge = count > 100;
                   const isTooSmall = count < 25;
+                  const isDescExpanded = expandedDescs.has(cat.id);
+                  const isContactsExpanded = expandedContacts.has(cat.id);
+                  const catContactIds = categoryContactMap[cat.name] || [];
                   return (
-                    <div key={cat.id} className={cn("border rounded-lg p-3",
+                    <div key={cat.id} className={cn("border rounded-lg overflow-hidden",
                       isTooLarge ? "border-red-200 bg-red-50/30" : isTooSmall ? "border-amber-200 bg-amber-50/30" : "border-gray-200"
                     )}>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
-                          {isTooSmall && (
-                            <input type="checkbox" checked={mergeSelection.has(cat.name)}
-                              onChange={(e) => {
-                                const next = new Set(mergeSelection);
-                                e.target.checked ? next.add(cat.name) : next.delete(cat.name);
-                                setMergeSelection(next);
-                              }}
-                              className="accent-blue-600 cursor-pointer" title="Fusionner" />
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-900 truncate">{cat.name}</p>
-                            <p className="text-xs text-gray-500 truncate">{cat.description}</p>
+                      <div className="p-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            {isTooSmall && (
+                              <input type="checkbox" checked={mergeSelection.has(cat.name)}
+                                onChange={(e) => {
+                                  const next = new Set(mergeSelection);
+                                  e.target.checked ? next.add(cat.name) : next.delete(cat.name);
+                                  setMergeSelection(next);
+                                }}
+                                className="accent-blue-600 cursor-pointer" title="Fusionner" />
+                            )}
+                            <button onClick={() => {
+                              const next = new Set(expandedDescs);
+                              isDescExpanded ? next.delete(cat.id) : next.add(cat.id);
+                              setExpandedDescs(next);
+                            }} className="flex-1 min-w-0 text-left cursor-pointer group">
+                              <p className={cn("text-sm font-medium text-gray-900", !isDescExpanded && "truncate")}>{cat.name}</p>
+                              <p className={cn("text-xs text-gray-500", !isDescExpanded && "truncate")}>{cat.description}</p>
+                              {cat.approach_key && isDescExpanded && (
+                                <p className="text-[10px] text-emerald-700 bg-emerald-50 rounded px-1.5 py-0.5 mt-1 inline-block">Approche : {cat.approach_key}</p>
+                              )}
+                              {cat.criteria && isDescExpanded && (
+                                <p className="text-[10px] text-gray-400 mt-1">Critères : {cat.criteria}</p>
+                              )}
+                            </button>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0 ml-2">
+                            <button onClick={() => {
+                              const next = new Set(expandedContacts);
+                              isContactsExpanded ? next.delete(cat.id) : next.add(cat.id);
+                              setExpandedContacts(next);
+                            }} className={cn("text-xs font-semibold px-2 py-0.5 rounded-full cursor-pointer hover:ring-2 hover:ring-offset-1",
+                              isTooLarge ? "text-red-700 bg-red-100 hover:ring-red-300" : isTooSmall ? "text-amber-700 bg-amber-100 hover:ring-amber-300" : "text-violet-700 bg-violet-100 hover:ring-violet-300"
+                            )} title="Voir les contacts">{count}</button>
+                            {isTooLarge && (
+                              <button onClick={() => startSplit(cat.name)} disabled={qualifyLoading && splitTarget === cat.name}
+                                className="text-[10px] font-medium text-red-600 hover:text-red-800 cursor-pointer">
+                                {qualifyLoading && splitTarget === cat.name ? <Loader2 className="w-3 h-3 animate-spin" /> : "Découper"}
+                              </button>
+                            )}
                           </div>
                         </div>
-                        <div className="flex items-center gap-2 shrink-0 ml-2">
-                          <span className={cn("text-xs font-semibold px-2 py-0.5 rounded-full",
-                            isTooLarge ? "text-red-700 bg-red-100" : isTooSmall ? "text-amber-700 bg-amber-100" : "text-violet-700 bg-violet-100"
-                          )}>{count}</span>
-                          {isTooLarge && (
-                            <button onClick={() => startSplit(cat.name)} disabled={qualifyLoading && splitTarget === cat.name}
-                              className="text-[10px] font-medium text-red-600 hover:text-red-800 cursor-pointer">
-                              {qualifyLoading && splitTarget === cat.name ? <Loader2 className="w-3 h-3 animate-spin" /> : "Découper"}
-                            </button>
-                          )}
-                        </div>
+                        {/* Expanded contacts list */}
+                        {isContactsExpanded && catContactIds.length > 0 && (
+                          <div className="mt-2 max-h-48 overflow-y-auto bg-gray-50 rounded-lg border border-gray-100">
+                            <table className="w-full text-[10px]">
+                              <thead className="bg-gray-100 sticky top-0">
+                                <tr>
+                                  <th className="px-2 py-1 text-left text-gray-500 font-medium">Prénom</th>
+                                  <th className="px-2 py-1 text-left text-gray-500 font-medium">Nom</th>
+                                  <th className="px-2 py-1 text-left text-gray-500 font-medium">Poste</th>
+                                  <th className="px-2 py-1 text-left text-gray-500 font-medium">Entreprise</th>
+                                  <th className="px-2 py-1 text-left text-gray-500 font-medium">Email</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {catContactIds.map((id) => {
+                                  const c = contactById.get(id);
+                                  if (!c) return null;
+                                  return (
+                                    <tr key={id} className="border-t border-gray-50 hover:bg-white">
+                                      <td className="px-2 py-0.5 text-gray-800">{c.prenom}</td>
+                                      <td className="px-2 py-0.5 text-gray-800">{c.nom}</td>
+                                      <td className="px-2 py-0.5 text-gray-600 truncate max-w-[120px]">{c.poste}</td>
+                                      <td className="px-2 py-0.5 text-gray-600 truncate max-w-[120px]">{c.entreprise}</td>
+                                      <td className="px-2 py-0.5 text-gray-500 truncate max-w-[140px]">{c.email}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
                       </div>
                       {/* Inline split */}
                       {splitTarget === cat.name && qualifyGroups.length > 0 && (
