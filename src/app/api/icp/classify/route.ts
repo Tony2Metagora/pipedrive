@@ -88,22 +88,23 @@ export async function POST(request: Request) {
     const contactLines = contactData.map((c, i) => `${i + 1}. ${c.poste} | ${c.entreprise}${c.ville ? ` (${c.ville})` : ""}`).join("\n");
 
     const N = contactData.length;
-    const minCats = Math.max(5, Math.ceil(N / 80));
-    const maxCats = Math.min(25, Math.ceil(N / 20));
+    const targetCats = Math.min(10, Math.max(5, Math.round(N / 40)));
+    const maxPerCat = Math.round(N * 0.20);
+    const maxAutres = Math.round(N * 0.05);
 
     const raw = await askAzureFast([
       {
         role: "system",
-        content: `Tu es un expert en segmentation B2B. Tu analyses une liste de contacts et un contexte d'offre pour proposer des catégories ICP (profils de clients idéaux).
+        content: `Tu es un expert en segmentation B2B. Tu analyses une liste de contacts et un contexte d'offre pour proposer des catégories ICP.
 
-INSTRUCTIONS :
-- Propose entre ${minCats} et ${maxCats} catégories ICP pertinentes.
-- Chaque catégorie doit cibler environ 20 à 80 contacts sur les ${N} au total. Évite les catégories fourre-tout trop larges.
+INSTRUCTIONS STRICTES :
+- Propose exactement ${targetCats} catégories ICP (ni plus, ni moins).
+- Aucune catégorie ne doit dépasser ${maxPerCat} contacts (20% du total de ${N}).
+- La catégorie "Autres / à qualifier" ne doit PAS dépasser ${maxAutres} contacts (5%). Si tu hésites sur un contact, crée une catégorie spécifique plutôt que de le mettre dans Autres.
 - Si le contexte contient des segments déjà définis, extrais-les fidèlement.
-- Croise la **typologie de poste** (DG, directeur technique, élu...) et la **typologie d'entreprise** (bailleur social, collectivité...) pour des ICP fins.
+- Croise la **typologie de poste** (DG, directeur technique, élu...) ET la **typologie d'entreprise** (bailleur social, collectivité...) pour des ICP fins et distincts.
 - Pour chaque ICP, génère une "approach_key" : l'angle d'accroche principal.
 - Identifie les segments à exclure.
-- Ajoute une catégorie "Autres / à qualifier" pour les profils flous.
 - NE LISTE PAS les contacts individuels. Propose UNIQUEMENT la taxonomie.
 ${memoryBlock}
 
@@ -123,10 +124,10 @@ Réponds UNIQUEMENT en JSON valide, sans markdown :
         content: `Contexte offre de ${company || "l'entreprise"}:
 ${offerContext || "Non spécifié"}
 
-Voici les ${N} contacts à segmenter (pour comprendre la répartition des profils) :
+Voici les ${N} contacts à segmenter :
 ${contactLines}
 
-Propose une taxonomie ICP adaptée. Entre ${minCats} et ${maxCats} catégories, chacune ciblant 20-80 contacts.`,
+Propose exactement ${targetCats} catégories ICP. Maximum ${maxPerCat} contacts par ICP. Maximum ${maxAutres} dans Autres.`,
       },
     ], 4000);
 

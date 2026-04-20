@@ -373,11 +373,72 @@ export default function IcpCleanerPage() {
       }
       setClassifying(false);
 
+      // ── Step 2b: Auto-refine if "Autres" > 5% ──
+      const autresThreshold = Math.round(contactIds.length * 0.05);
+      const autresKeys = Object.keys(map).filter((k) => isAutresCat(k));
+      const autresIds = autresKeys.flatMap((k) => map[k] || []);
+      let updatedCats = [...categories];
+
+      if (autresIds.length > autresThreshold && autresIds.length > 10) {
+        setClassifyProgress("Affinage — Trop de contacts dans Autres, création de nouvelles catégories...");
+        // Discover new categories from Autres contacts
+        try {
+          const refineRes = await fetch("/api/icp/classify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "discover", ids: autresIds, company: list?.company || "",
+              offerContext: `${ctx}\n\n--- CATÉGORIES DÉJÀ EXISTANTES (ne pas les recréer) ---\n${updatedCats.filter((c) => !isAutresCat(c.name)).map((c) => `- ${c.name}: ${c.criteria}`).join("\n")}\n\nCrée de NOUVELLES catégories pour ces contacts qui n'ont pas pu être classés dans les catégories existantes. NE reproduis PAS les catégories ci-dessus.`,
+            }),
+          });
+          const refineJson = await refineRes.json();
+          const newCats: IcpCategory[] = (refineJson.data?.categories || []).filter(
+            (c: IcpCategory) => !isAutresCat(c.name) && !updatedCats.find((uc) => uc.name === c.name)
+          );
+          if (newCats.length > 0) {
+            // Merge new categories into the list
+            const allCatsForReclassify = [...updatedCats.filter((c) => !isAutresCat(c.name)), ...newCats];
+            updatedCats = allCatsForReclassify;
+            // Re-classify Autres contacts into ALL categories (existing + new)
+            setClassifyProgress(`Affinage — Reclassification de ${autresIds.length} contacts...`);
+            for (const k of autresKeys) delete map[k];
+            const reRes = await fetch("/api/icp/classify", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "batch-classify", ids: autresIds, company: list?.company || "", categories: allCatsForReclassify, offerContext: ctx }),
+            });
+            if (reRes.body) {
+              const rr = reRes.body.getReader();
+              const rd = new TextDecoder();
+              let rb = "", re = "";
+              while (true) {
+                const { done: rdone, value: rval } = await rr.read();
+                if (rdone) break;
+                rb += rd.decode(rval, { stream: true });
+                const rlines = rb.split("\n"); rb = rlines.pop() || "";
+                for (const rl of rlines) {
+                  if (rl.startsWith("event: ")) { re = rl.slice(7).trim(); continue; }
+                  if (rl.startsWith("data: ") && re === "done") {
+                    try {
+                      const rd2 = JSON.parse(rl.slice(6));
+                      for (const r of (rd2.results || []) as { id: string; icp_category: string }[]) {
+                        if (!map[r.icp_category]) map[r.icp_category] = [];
+                        map[r.icp_category].push(r.id);
+                      }
+                    } catch { /* partial */ }
+                    re = "";
+                  }
+                }
+              }
+            }
+          }
+        } catch { /* keep Autres as-is if refine fails */ }
+      }
+
       // ── Step 3: Auto-rebalance ──
       setClassifyProgress("Étape 3/3 — Équilibrage...");
       const MIN_SIZE = 25;
       const MAX_SIZE = 100;
-      let updatedCats = [...categories];
       let rebalanced = false;
 
       // 3a. Collect contacts from small categories and re-classify them into large ones
@@ -1074,7 +1135,8 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
           )}
         </div>
 
-        {/* ── Center: Table ── */}
+        {/* ── Center: Table or ICP Finder ── */}
+        {showIcpFinder ? null : (
         <div className="flex-1 min-w-0">
           {!selectedListId ? (
             <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
@@ -1279,7 +1341,7 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
             </>
           )}
         </div>
-      </div>
+        )}
 
       {/* ═══ Upload Modal ═══ */}
       {showUpload && (
@@ -1342,16 +1404,18 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
         </div>
       )}
 
-      {/* ═══ ICP Finder — Inline flow ═══ */}
+      {/* ═══ ICP Finder — Inline in center panel ═══ */}
       {showIcpFinder && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl mx-4 p-5 max-h-[85vh] overflow-y-auto">
+        <div className="flex-1 min-w-0">
+          <div className="bg-white rounded-xl border border-gray-200 p-5 max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-violet-600" /> ICP Finder — {selectedList?.company || ""}
               </h3>
               <button onClick={() => { setShowIcpFinder(false); setClassified(false); setDiscoveredCategories([]); }}
-                className="cursor-pointer"><X className="w-4 h-4 text-gray-400" /></button>
+                className="text-xs text-gray-500 hover:text-gray-700 cursor-pointer flex items-center gap-1">
+                <X className="w-3.5 h-3.5" /> Retour aux contacts
+              </button>
             </div>
 
             {/* ── Setup: context + lists (visible when not yet analyzed) ── */}
@@ -1488,11 +1552,10 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
                             <table className="w-full text-[10px]">
                               <thead className="bg-gray-100 sticky top-0">
                                 <tr>
-                                  <th className="px-2 py-1 text-left text-gray-500 font-medium">Prénom</th>
-                                  <th className="px-2 py-1 text-left text-gray-500 font-medium">Nom</th>
-                                  <th className="px-2 py-1 text-left text-gray-500 font-medium">Poste</th>
-                                  <th className="px-2 py-1 text-left text-gray-500 font-medium">Entreprise</th>
-                                  <th className="px-2 py-1 text-left text-gray-500 font-medium">Email</th>
+                                  <th className="px-2 py-1 text-left text-gray-500 font-medium w-[15%]">Prénom</th>
+                                  <th className="px-2 py-1 text-left text-gray-500 font-medium w-[15%]">Nom</th>
+                                  <th className="px-2 py-1 text-left text-gray-500 font-medium w-[35%]">Poste</th>
+                                  <th className="px-2 py-1 text-left text-gray-500 font-medium w-[35%]">Entreprise</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -1503,9 +1566,8 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
                                     <tr key={id} className="border-t border-gray-50 hover:bg-white">
                                       <td className="px-2 py-0.5 text-gray-800">{c.prenom}</td>
                                       <td className="px-2 py-0.5 text-gray-800">{c.nom}</td>
-                                      <td className="px-2 py-0.5 text-gray-600 truncate max-w-[120px]">{c.poste}</td>
-                                      <td className="px-2 py-0.5 text-gray-600 truncate max-w-[120px]">{c.entreprise}</td>
-                                      <td className="px-2 py-0.5 text-gray-500 truncate max-w-[140px]">{c.email}</td>
+                                      <td className="px-2 py-0.5 text-gray-600 truncate max-w-[250px]">{c.poste}</td>
+                                      <td className="px-2 py-0.5 text-gray-600 truncate max-w-[250px]">{c.entreprise}</td>
                                     </tr>
                                   );
                                 })}
@@ -1620,6 +1682,7 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
           </div>
         </div>
       )}
+      </div>
 
       {/* ═══ Memory correction modal ═══ */}
       {showMemory && memoryContact && (
