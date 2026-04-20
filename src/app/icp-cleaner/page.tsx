@@ -383,13 +383,13 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let eventType = "";
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
-        let eventType = "";
         for (const line of lines) {
           if (line.startsWith("event: ")) { eventType = line.slice(7).trim(); continue; }
           if (line.startsWith("data: ")) {
@@ -397,7 +397,6 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
               const data = JSON.parse(line.slice(6));
               if (eventType === "progress") setClassifyProgress(data.message || "");
               if (eventType === "done") {
-                // Build categoryContactMap from results
                 const map: Record<string, string[]> = {};
                 for (const r of (data.results || []) as { id: string; icp_category: string }[]) {
                   if (!map[r.icp_category]) map[r.icp_category] = [];
@@ -409,7 +408,8 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster la taxonomie ICP.`;
                 setActionMsg(`${data.classified}/${data.total} contacts classifiés`);
                 setTimeout(() => setActionMsg(null), 5000);
               }
-            } catch { /* ignore */ }
+              eventType = "";
+            } catch { /* partial data, will be completed in next read */ }
           }
         }
       }
