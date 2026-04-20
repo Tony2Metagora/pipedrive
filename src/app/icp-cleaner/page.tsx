@@ -380,28 +380,67 @@ export default function IcpCleanerPage() {
       let updatedCats = [...categories];
       let rebalanced = false;
 
-      // Merge small categories into nearest large one
-      const smallCats = Object.entries(map).filter(([, ids]) => ids.length > 0 && ids.length < MIN_SIZE);
-      if (smallCats.length > 1) {
-        // Merge all small categories together into one "Divers" category
-        const mergedIds: string[] = [];
-        const mergedNames: string[] = [];
-        for (const [name, ids] of smallCats) {
-          mergedIds.push(...ids);
-          mergedNames.push(name);
+      // 3a. Collect contacts from small categories and re-classify them into large ones
+      const smallCatNames = Object.entries(map)
+        .filter(([, ids]) => ids.length > 0 && ids.length < MIN_SIZE)
+        .map(([name]) => name);
+      const largeCatNames = Object.entries(map)
+        .filter(([, ids]) => ids.length >= MIN_SIZE)
+        .map(([name]) => name);
+
+      if (smallCatNames.length > 0 && largeCatNames.length > 0) {
+        setClassifyProgress("Étape 3/3 — Redistribution des petits groupes...");
+        const smallContactIds: string[] = [];
+        for (const name of smallCatNames) {
+          smallContactIds.push(...(map[name] || []));
           delete map[name];
           updatedCats = updatedCats.filter((c) => c.name !== name);
         }
-        const mergedName = mergedNames.length <= 3 ? mergedNames.join(" + ") : `${mergedNames[0]} + ${mergedNames.length - 1} autres`;
-        map[mergedName] = mergedIds;
-        updatedCats.push({ id: `icp_merged_${Date.now()}`, name: mergedName, description: "Catégories regroupées (volume insuffisant individuellement)", criteria: "" });
-        rebalanced = true;
+        // Re-classify these contacts into the large categories only
+        const largeCats = updatedCats.filter((c) => largeCatNames.includes(c.name));
+        try {
+          const rebalRes = await fetch("/api/icp/classify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "batch-classify", ids: smallContactIds, company: list?.company || "", categories: largeCats, offerContext: ctx }),
+          });
+          if (rebalRes.body) {
+            const rr = rebalRes.body.getReader();
+            const rd = new TextDecoder();
+            let rb = "";
+            let re = "";
+            while (true) {
+              const { done: rdone, value: rval } = await rr.read();
+              if (rdone) break;
+              rb += rd.decode(rval, { stream: true });
+              const rlines = rb.split("\n");
+              rb = rlines.pop() || "";
+              for (const rl of rlines) {
+                if (rl.startsWith("event: ")) { re = rl.slice(7).trim(); continue; }
+                if (rl.startsWith("data: ") && re === "done") {
+                  try {
+                    const rd2 = JSON.parse(rl.slice(6));
+                    for (const r of (rd2.results || []) as { id: string; icp_category: string }[]) {
+                      const target = map[r.icp_category];
+                      if (target) target.push(r.id);
+                      else map[r.icp_category] = [r.id];
+                    }
+                  } catch { /* partial */ }
+                  re = "";
+                }
+              }
+            }
+          }
+          rebalanced = true;
+        } catch { /* if re-classify fails, contacts are lost — add them to first large cat */
+          if (largeCatNames[0]) map[largeCatNames[0]].push(...smallContactIds);
+        }
       }
 
-      // Split large categories via re-classification with sub-categories
-      for (const [catName, ids] of Object.entries(map)) {
-        if (ids.length <= MAX_SIZE) continue;
-        // Ask AI for sub-categories of this large group
+      // 3b. Split large categories via sub-classification
+      const toSplit = Object.entries(map).filter(([, ids]) => ids.length > MAX_SIZE);
+      for (const [catName, ids] of toSplit) {
+        setClassifyProgress(`Étape 3/3 — Découpage de "${catName}" (${ids.length})...`);
         try {
           const subRes = await fetch("/api/icp/classify", {
             method: "POST",
@@ -417,7 +456,6 @@ export default function IcpCleanerPage() {
           const subJson = await subRes.json();
           const groups = subJson.data?.groups || [];
           if (groups.length >= 2) {
-            // Split into sub-categories
             delete map[catName];
             updatedCats = updatedCats.filter((c) => c.name !== catName);
             for (const g of groups) {
@@ -432,7 +470,14 @@ export default function IcpCleanerPage() {
             }
             rebalanced = true;
           }
-        } catch { /* keep original category if split fails */ }
+        } catch { /* keep original */ }
+      }
+
+      // 3c. Sync updatedCats with map (add any categories the AI created that aren't in updatedCats)
+      for (const name of Object.keys(map)) {
+        if (!updatedCats.find((c) => c.name === name)) {
+          updatedCats.push({ id: `icp_auto_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, name, description: "", criteria: "" });
+        }
       }
 
       setCategoryContactMap(map);
