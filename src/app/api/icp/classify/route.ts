@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     groupContacts?: Record<string, string[]>;
   };
 
-  if (!ids?.length) {
+  if (!ids?.length && action !== "generate-approach") {
     return new Response(JSON.stringify({ error: "ids requis" }), { status: 400, headers: { "Content-Type": "application/json" } });
   }
 
