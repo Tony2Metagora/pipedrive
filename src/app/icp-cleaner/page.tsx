@@ -173,12 +173,17 @@ export default function IcpCleanerPage() {
   // Merged contacts = current list + extra lists, deduplicated by email (or nom+prenom+entreprise)
   const mergedContacts = useMemo(() => {
     const all = [...contacts, ...extraContacts];
-    const seen = new Set<string>();
+    const seenEmails = new Set<string>();
+    const seenNames = new Set<string>();
     return all.filter((c) => {
-      const key = c.email?.trim().toLowerCase()
-        || `${(c.prenom || "").toLowerCase()}|${(c.nom || "").toLowerCase()}|${(c.entreprise || "").toLowerCase()}`;
-      if (!key || seen.has(key)) return false;
-      seen.add(key);
+      const emailKey = c.email?.trim().toLowerCase() || "";
+      const nameKey = [c.prenom, c.nom, c.entreprise].some(Boolean)
+        ? `${(c.prenom || "").toLowerCase()}|${(c.nom || "").toLowerCase()}|${(c.entreprise || "").toLowerCase()}`
+        : "";
+      if (emailKey && seenEmails.has(emailKey)) return false;
+      if (nameKey && seenNames.has(nameKey)) return false;
+      if (emailKey) seenEmails.add(emailKey);
+      if (nameKey) seenNames.add(nameKey);
       return true;
     });
   }, [contacts, extraContacts]);
