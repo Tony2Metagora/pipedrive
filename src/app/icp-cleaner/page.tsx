@@ -400,26 +400,47 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
   };
 
   const applyQualifyToCategories = () => {
-    // Redistribute contacts from "Autres" into discovered categories (local state only, no DB)
     const autresCat = discoveredCategories.find((c) => isAutresCat(c.name));
     if (!autresCat?.contactNumbers) return;
 
-    const updatedCats = [...discoveredCategories];
+    // Deep copy all categories to avoid mutation-by-reference
+    const updatedCats: IcpCategory[] = discoveredCategories.map((c) => ({
+      ...c,
+      contactNumbers: c.contactNumbers ? [...c.contactNumbers] : [],
+    }));
+
     const autresNums = [...autresCat.contactNumbers];
+
+    // Dedup AI groups: track which Autres contacts are already assigned
+    const assignedAutresIndices = new Set<number>();
     const remainingAutres: number[] = [];
     const newIcpMap = new Map<string, { name: string; description: string; contactNumbers: number[] }>();
+    const newExcluded: { name: string; reason: string; estimatedCount: number; contactNumbers: number[] }[] = [];
 
     for (const g of qualifyGroups) {
       const choice = qualifyChoices[g.id];
-      if (!choice) { remainingAutres.push(...g.contactNumbers); continue; }
-      // Map group contactNumbers (1-indexed within "Autres") to original contactNumbers
-      const originalNums = g.contactNumbers.map((n) => autresNums[n - 1]).filter(Boolean);
+      if (!choice) {
+        // No choice → keep in Autres (deduped)
+        for (const n of g.contactNumbers) {
+          if (!assignedAutresIndices.has(n)) {
+            const orig = autresNums[n - 1];
+            if (orig) { remainingAutres.push(orig); assignedAutresIndices.add(n); }
+          }
+        }
+        continue;
+      }
+      // Map group contactNumbers (1-indexed within Autres) to original, skip already-assigned
+      const originalNums: number[] = [];
+      for (const n of g.contactNumbers) {
+        if (assignedAutresIndices.has(n)) continue; // skip duplicate across groups
+        const orig = autresNums[n - 1];
+        if (orig) { originalNums.push(orig); assignedAutresIndices.add(n); }
+      }
 
       if (choice.action === "assign" && choice.targetIcp) {
         const target = updatedCats.find((c) => c.name === choice.targetIcp);
         if (target) {
           target.contactNumbers = [...(target.contactNumbers || []), ...originalNums];
-          target.estimatedCount = (target.estimatedCount || 0) + originalNums.length;
         }
       } else if (choice.action === "new_icp" && choice.newIcpName) {
         const existing = newIcpMap.get(choice.newIcpName);
@@ -434,13 +455,12 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
           });
         }
       } else if (choice.action === "exclude") {
-        // Add to excluded segments
-        setExcludedSegments((prev) => [...prev, {
+        newExcluded.push({
           name: g.label,
           reason: "Exclu lors de la qualification",
           estimatedCount: originalNums.length,
           contactNumbers: originalNums,
-        }]);
+        });
       } else {
         remainingAutres.push(...originalNums);
       }
@@ -448,10 +468,12 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
 
     // Update "Autres" with remaining contacts
     const autresIdx = updatedCats.findIndex((c) => isAutresCat(c.name));
-    if (remainingAutres.length === 0) {
-      updatedCats.splice(autresIdx, 1);
-    } else {
-      updatedCats[autresIdx] = { ...updatedCats[autresIdx], contactNumbers: remainingAutres, estimatedCount: remainingAutres.length };
+    if (autresIdx >= 0) {
+      if (remainingAutres.length === 0) {
+        updatedCats.splice(autresIdx, 1);
+      } else {
+        updatedCats[autresIdx] = { ...updatedCats[autresIdx], contactNumbers: remainingAutres, estimatedCount: remainingAutres.length };
+      }
     }
 
     // Add new ICPs
@@ -466,11 +488,33 @@ IMPORTANT : Tiens compte du feedback ci-dessus pour ajuster les catégories ICP.
       });
     }
 
+    // Final dedup: ensure no contactNumber appears in multiple categories
+    const globalSeen = new Set<number>();
+    for (const cat of updatedCats) {
+      const deduped: number[] = [];
+      for (const n of cat.contactNumbers || []) {
+        if (!globalSeen.has(n)) { deduped.push(n); globalSeen.add(n); }
+      }
+      cat.contactNumbers = deduped;
+      cat.estimatedCount = deduped.length;
+    }
+
+    // Integrity check
+    const totalAfter = updatedCats.reduce((s, c) => s + (c.contactNumbers?.length || 0), 0)
+      + newExcluded.reduce((s, e) => s + e.contactNumbers.length, 0);
+    const totalBefore = discoveredCategories.reduce((s, c) => s + (c.contactNumbers?.length || 0), 0);
+    if (totalAfter !== totalBefore) {
+      console.warn(`[ICP Qualify] Total mismatch: ${totalBefore} → ${totalAfter}`);
+    }
+
+    if (newExcluded.length > 0) {
+      setExcludedSegments((prev) => [...prev, ...newExcluded]);
+    }
     setDiscoveredCategories(updatedCats);
     setQualifyActive(false);
     setQualifyGroups([]);
     setQualifyChoices({});
-    setActionMsg("Contacts redistribués avec succès");
+    setActionMsg(`Contacts redistribués (${totalAfter} contacts)`);
     setTimeout(() => setActionMsg(null), 4000);
   };
 
