@@ -62,7 +62,7 @@ export async function POST(request: Request) {
   const idSet = new Set(ids);
   const contacts = allContacts.filter((c) => idSet.has(c.id));
 
-  if (contacts.length === 0) {
+  if (contacts.length === 0 && action !== "generate-approach") {
     return new Response(JSON.stringify({ error: "Aucun contact trouvé" }), { status: 404, headers: { "Content-Type": "application/json" } });
   }
 
