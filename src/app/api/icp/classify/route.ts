@@ -78,6 +78,20 @@ export async function POST(request: Request) {
   // ═══ BATCH-CLASSIFY: assign each contact to a category (SSE) ═══
   if (action === "batch-classify" && categories?.length) {
     const categoryList = categories.map((c) => `- "${c.name}": ${c.criteria}`).join("\n");
+    const categoryNames = categories.map((c) => c.name);
+    // Normalize AI response to exact user-defined category names
+    const normalizeCatName = (aiName: string): string => {
+      const lower = aiName.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      for (const name of categoryNames) {
+        if (name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === lower) return name;
+      }
+      // Fuzzy: check if AI name contains or is contained by a category name
+      for (const name of categoryNames) {
+        const normName = name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        if (lower.includes(normName) || normName.includes(lower)) return name;
+      }
+      return aiName.trim();
+    };
 
     const stream = new ReadableStream({
       async start(controller) {
@@ -132,7 +146,7 @@ Pas de markdown.`,
             }
             if (Array.isArray(parsed)) {
               for (const item of parsed) {
-                results.push({ id: String(item.id), icp_category: String(item.icp_category || "Autres / à qualifier") });
+                results.push({ id: String(item.id), icp_category: normalizeCatName(String(item.icp_category || "Autres / à qualifier")) });
               }
             }
           } catch (err) {
