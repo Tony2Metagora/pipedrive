@@ -980,6 +980,12 @@ export default function SequencesPage() {
             )}
           </>
         )}
+        <ImportProspectsWizard
+          open={showBulkImport}
+          onClose={() => setShowBulkImport(false)}
+          onComplete={() => { setShowBulkImport(false); fetchCampaigns(); }}
+          allAccounts={allAccounts}
+        />
       </>
     );
   }
