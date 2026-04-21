@@ -31,6 +31,7 @@ import {
   List,
   Filter,
   ArrowDownWideNarrow,
+  Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDate, isOverdue, isWithinDays, detectActivityType } from "@/lib/utils";
@@ -308,6 +309,19 @@ function DashboardContent() {
       setBatchEnriching(false);
       setBatchProgress("");
     }
+  };
+
+  const exportSelectedCsv = () => {
+    const ids = [...selectedDeals];
+    if (ids.length === 0) return;
+    const targetStatus = dealView === "archives" ? "lost" : "open";
+    const url = `/api/deals/export-csv?ids=${ids.join(",")}&status=${targetStatus}`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "leads-selection.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
   const openDetail = (activity: Activity) => {
@@ -670,20 +684,31 @@ function DashboardContent() {
                 </span>
               )}
             </div>
-            {dealView !== "archives" && selectedDeals.size > 0 && (
-              <button
-                onClick={batchEnrich}
-                disabled={batchEnriching}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
-              >
-                {batchEnriching ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Search className="w-4 h-4" />
-                )}
-                {batchEnriching ? batchProgress : `Enrichir ${selectedDeals.size} contact${selectedDeals.size > 1 ? "s" : ""} (Dropcontact)`}
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {selectedDeals.size > 0 && (
+                <button
+                  onClick={exportSelectedCsv}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors cursor-pointer shadow-sm"
+                >
+                  <Download className="w-4 h-4" />
+                  Exporter CSV ({selectedDeals.size})
+                </button>
+              )}
+              {dealView !== "archives" && selectedDeals.size > 0 && (
+                <button
+                  onClick={batchEnrich}
+                  disabled={batchEnriching}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
+                >
+                  {batchEnriching ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Search className="w-4 h-4" />
+                  )}
+                  {batchEnriching ? batchProgress : `Enrichir ${selectedDeals.size} contact${selectedDeals.size > 1 ? "s" : ""} (Dropcontact)`}
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Bannière résultats batch */}
